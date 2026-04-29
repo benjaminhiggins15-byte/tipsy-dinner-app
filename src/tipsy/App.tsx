@@ -41,7 +41,7 @@ export default function App() {
     <div style={S.page}>
       <div style={S.phone}>
         {current.name === "home" && <Home push={push} />}
-        {current.name === "categories" && <Categories push={push} />}
+        {current.name === "categories" && <Categories push={push} back={back} />}
         {current.name === "recipes" && (
           <Recipes
             categoryKey={current.categoryKey}
@@ -116,12 +116,21 @@ function Home({ push }: { push: (s: Screen) => void }) {
 }
 
 /* ---------------- Categories ---------------- */
-function Categories({ push }: { push: (s: Screen) => void }) {
+function Categories({ push, back }: { push: (s: Screen) => void; back: () => void }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div style={{ padding: "32px 24px 16px", flexShrink: 0 }}>
-        <div style={{ fontSize: 11, letterSpacing: "0.18em", color: "#185FA5", textTransform: "uppercase", marginBottom: 6 }}>
-          your library
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+          <button
+            onClick={back}
+            aria-label="Back"
+            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "#185FA5", display: "flex", alignItems: "center" }}
+          >
+            <BackArrow />
+          </button>
+          <div style={{ fontSize: 11, letterSpacing: "0.18em", color: "#185FA5", textTransform: "uppercase" }}>
+            your library
+          </div>
         </div>
         <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 400, color: "#042C53" }}>
           Browse
