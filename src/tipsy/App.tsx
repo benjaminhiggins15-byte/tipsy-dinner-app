@@ -6,6 +6,7 @@ type Screen =
   | { name: "categories" }
   | { name: "recipes"; categoryKey: string; categoryLabel: string }
   | { name: "recipe"; recipe: Recipe; categoryLabel: string }
+  | { name: "cook" }
   | { name: "placeholder"; title: string };
 
 const S: Record<string, CSSProperties> = {
@@ -40,6 +41,7 @@ function screenKey(s: Screen): string {
     case "categories": return "categories";
     case "recipes": return `recipes:${s.categoryKey}`;
     case "recipe": return `recipe:${s.categoryLabel}:${s.recipe.title}`;
+    case "cook": return "cook";
     case "placeholder": return `placeholder:${s.title}`;
   }
 }
@@ -61,6 +63,7 @@ function renderScreen(
       />
     );
     case "recipe": return <RecipeCard recipe={s.recipe} back={back} />;
+    case "cook": return <Cook back={back} />;
     case "placeholder": return <Placeholder title={s.title} back={back} />;
   }
 }
@@ -205,7 +208,7 @@ function ScreenStage({
 /* ---------------- Home ---------------- */
 function Home({ push }: { push: (s: Screen) => void }) {
   const buttons = [
-    { label: "cook", sub: "your next dish", action: () => push({ name: "placeholder", title: "Cook" }) },
+    { label: "cook", sub: "your next dish", action: () => push({ name: "cook" }) },
     { label: "browse", sub: "your recipes", action: () => push({ name: "categories" }) },
     { label: "build", sub: "your menus", action: () => push({ name: "placeholder", title: "Build" }) },
     { label: "share", sub: "your palette", action: () => push({ name: "placeholder", title: "Share" }) },
