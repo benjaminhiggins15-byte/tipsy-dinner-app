@@ -118,31 +118,39 @@ function ScreenStage({
   push: (s: Screen) => void;
   back: () => void;
 }) {
-  // Trigger animation on mount of incoming layer
-  const [animPhase, setAnimPhase] = useState<"start" | "end">("end");
+  // Trigger animation on mount of incoming layer.
+  // Phase is derived: if the current transition key hasn't been "armed" yet,
+  // we render at "start" positions (no transition). After first paint, we
+  // flip to "end" so the CSS transition runs.
   const transKey = transition
     ? `${screenKey(transition.from)}->${screenKey(transition.to)}:${transition.direction}`
     : null;
-  const lastKeyRef = useRef<string | null>(null);
+  const armedKeyRef = useRef<string | null>(null);
+  const [, forceRender] = useState(0);
+  const animPhase: "start" | "end" =
+    transKey && armedKeyRef.current !== transKey ? "start" : "end";
 
   useEffect(() => {
-    if (transKey && transKey !== lastKeyRef.current) {
-      lastKeyRef.current = transKey;
-      setAnimPhase("start");
-      // next frame -> end
-      const r = requestAnimationFrame(() => {
-        requestAnimationFrame(() => setAnimPhase("end"));
+    if (transKey && armedKeyRef.current !== transKey) {
+      // Two RAFs to guarantee the browser paints the "start" frame first.
+      const r1 = requestAnimationFrame(() => {
+        const r2 = requestAnimationFrame(() => {
+          armedKeyRef.current = transKey;
+          forceRender((n) => n + 1);
+        });
+        (r1 as unknown as { _r2?: number })._r2 = r2;
       });
-      return () => cancelAnimationFrame(r);
+      return () => cancelAnimationFrame(r1);
     }
     if (!transKey) {
-      lastKeyRef.current = null;
+      armedKeyRef.current = null;
     }
   }, [transKey]);
 
   const layerBase: CSSProperties = {
     position: "absolute",
     inset: 0,
+    height: "100%",
     display: "flex",
     flexDirection: "column",
     background: "#EEF4F8",
@@ -151,7 +159,7 @@ function ScreenStage({
 
   if (!transition) {
     return (
-      <div style={{ ...layerBase, position: "relative" }}>
+      <div style={{ ...layerBase, position: "relative", height: "100%" }}>
         {renderScreen(current, push, back)}
       </div>
     );
@@ -173,7 +181,9 @@ function ScreenStage({
     toTransform = animPhase === "start" ? "translateX(-25%)" : "translateX(0)";
   }
 
-  const transitionStyle = `transform ${DURATION}ms ${EASE}`;
+  // No transition on the "start" frame — only after we've armed.
+  const transitionStyle =
+    animPhase === "start" ? "none" : `transform ${DURATION}ms ${EASE}`;
 
   // Stacking: forward -> incoming on top; back -> outgoing on top
   const fromZ = direction === "forward" ? 1 : 2;
