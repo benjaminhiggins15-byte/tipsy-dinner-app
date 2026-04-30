@@ -6,6 +6,7 @@ type Screen =
   | { name: "categories" }
   | { name: "recipes"; categoryKey: string; categoryLabel: string }
   | { name: "recipe"; recipe: Recipe; categoryLabel: string }
+  | { name: "cook" }
   | { name: "placeholder"; title: string };
 
 const S: Record<string, CSSProperties> = {
@@ -40,6 +41,7 @@ function screenKey(s: Screen): string {
     case "categories": return "categories";
     case "recipes": return `recipes:${s.categoryKey}`;
     case "recipe": return `recipe:${s.categoryLabel}:${s.recipe.title}`;
+    case "cook": return "cook";
     case "placeholder": return `placeholder:${s.title}`;
   }
 }
@@ -61,6 +63,7 @@ function renderScreen(
       />
     );
     case "recipe": return <RecipeCard recipe={s.recipe} back={back} />;
+    case "cook": return <Cook back={back} />;
     case "placeholder": return <Placeholder title={s.title} back={back} />;
   }
 }
@@ -205,7 +208,7 @@ function ScreenStage({
 /* ---------------- Home ---------------- */
 function Home({ push }: { push: (s: Screen) => void }) {
   const buttons = [
-    { label: "cook", sub: "your next dish", action: () => push({ name: "placeholder", title: "Cook" }) },
+    { label: "cook", sub: "your next dish", action: () => push({ name: "cook" }) },
     { label: "browse", sub: "your recipes", action: () => push({ name: "categories" }) },
     { label: "build", sub: "your menus", action: () => push({ name: "placeholder", title: "Build" }) },
     { label: "share", sub: "your palette", action: () => push({ name: "placeholder", title: "Share" }) },
@@ -511,5 +514,105 @@ function BackArrow() {
       <path d="M19 12H5" />
       <path d="M12 19l-7-7 7-7" />
     </svg>
+  );
+}
+
+/* ---------------- Cook ---------------- */
+function Cook({ back }: { back: () => void }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {/* Header */}
+      <div style={{ padding: "32px 24px 16px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            onClick={back}
+            aria-label="Back"
+            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "#185FA5", display: "flex", alignItems: "center" }}
+          >
+            <BackArrow />
+          </button>
+          <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, letterSpacing: "0.18em", color: "#185FA5", textTransform: "uppercase" }}>
+            cook
+          </div>
+        </div>
+        <button
+          disabled
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 6,
+            padding: "6px 12px",
+            background: "#E6F1FB",
+            border: "0.5px solid #85B7EB",
+            borderRadius: 999,
+            color: "#185FA5",
+            fontFamily: "'DM Sans', sans-serif",
+            fontSize: 11,
+            letterSpacing: "0.08em",
+            cursor: "not-allowed",
+          }}
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+          </svg>
+          Add your own
+        </button>
+      </div>
+
+      {/* Empty state */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 32px", textAlign: "center", gap: 16 }}>
+        <div style={{
+          width: 48, height: 48, borderRadius: "50%",
+          background: "#E6F1FB", border: "0.5px solid #85B7EB",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          color: "#185FA5",
+        }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 5v14" />
+            <path d="M5 12h14" />
+          </svg>
+        </div>
+        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#042C53", fontWeight: 400 }}>
+          What are we making?
+        </div>
+        <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: "#185FA5", lineHeight: 1.5, maxWidth: 240 }}>
+          Tell me what you're in the mood for, what's in your fridge, or what the occasion is.
+        </div>
+      </div>
+
+      {/* Input bar */}
+      <div style={{ padding: "12px 16px 20px", flexShrink: 0 }}>
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8,
+          background: "#E6F1FB",
+          border: "0.5px solid #85B7EB",
+          borderRadius: 999,
+          padding: "6px 6px 6px 16px",
+        }}>
+          <input
+            type="text"
+            placeholder="What are we making tonight?"
+            style={{
+              flex: 1, border: "none", outline: "none", background: "transparent",
+              fontFamily: "'DM Sans', sans-serif", fontSize: 13,
+              color: "#042C53",
+            }}
+          />
+          <button
+            aria-label="Send"
+            style={{
+              width: 32, height: 32, borderRadius: "50%",
+              background: "#0C447C", border: "none", cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "#E6F1FB", flexShrink: 0,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 12h14" />
+              <path d="M13 5l7 7-7 7" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
