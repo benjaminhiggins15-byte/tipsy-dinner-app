@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useState, useRef, useEffect, type CSSProperties } from "react";
 import { categories, getRecipesForCategory, type Recipe } from "./data";
 
 type Screen =
@@ -27,37 +27,168 @@ const S: Record<string, CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     boxShadow: "0 20px 60px rgba(4,44,83,0.12)",
+    position: "relative",
   },
 };
+
+const DURATION = 300;
+const EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
+
+function screenKey(s: Screen): string {
+  switch (s.name) {
+    case "home": return "home";
+    case "categories": return "categories";
+    case "recipes": return `recipes:${s.categoryKey}`;
+    case "recipe": return `recipe:${s.categoryLabel}:${s.recipe.title}`;
+    case "placeholder": return `placeholder:${s.title}`;
+  }
+}
+
+function renderScreen(
+  s: Screen,
+  push: (s: Screen) => void,
+  back: () => void,
+) {
+  switch (s.name) {
+    case "home": return <Home push={push} />;
+    case "categories": return <Categories push={push} back={back} />;
+    case "recipes": return (
+      <Recipes
+        categoryKey={s.categoryKey}
+        categoryLabel={s.categoryLabel}
+        push={push}
+        back={back}
+      />
+    );
+    case "recipe": return <RecipeCard recipe={s.recipe} back={back} />;
+    case "placeholder": return <Placeholder title={s.title} back={back} />;
+  }
+}
 
 export default function App() {
   const [stack, setStack] = useState<Screen[]>([{ name: "home" }]);
   const current = stack[stack.length - 1];
+  const [transition, setTransition] = useState<{
+    from: Screen;
+    to: Screen;
+    direction: "forward" | "back";
+  } | null>(null);
 
-  const push = (s: Screen) => setStack((st) => [...st, s]);
-  const back = () => setStack((st) => (st.length > 1 ? st.slice(0, -1) : st));
+  const push = (s: Screen) => {
+    if (transition) return;
+    setTransition({ from: current, to: s, direction: "forward" });
+    setStack((st) => [...st, s]);
+  };
+  const back = () => {
+    if (transition) return;
+    if (stack.length <= 1) return;
+    const prev = stack[stack.length - 2];
+    setTransition({ from: current, to: prev, direction: "back" });
+    setStack((st) => st.slice(0, -1));
+  };
+
+  useEffect(() => {
+    if (!transition) return;
+    const t = setTimeout(() => setTransition(null), DURATION);
+    return () => clearTimeout(t);
+  }, [transition]);
 
   return (
     <div style={S.page}>
       <div style={S.phone}>
-        {current.name === "home" && <Home push={push} />}
-        {current.name === "categories" && <Categories push={push} back={back} />}
-        {current.name === "recipes" && (
-          <Recipes
-            categoryKey={current.categoryKey}
-            categoryLabel={current.categoryLabel}
-            push={push}
-            back={back}
-          />
-        )}
-        {current.name === "recipe" && (
-          <RecipeCard recipe={current.recipe} back={back} />
-        )}
-        {current.name === "placeholder" && (
-          <Placeholder title={current.title} back={back} />
-        )}
+        <ScreenStage
+          current={current}
+          transition={transition}
+          push={push}
+          back={back}
+        />
       </div>
     </div>
+  );
+}
+
+function ScreenStage({
+  current,
+  transition,
+  push,
+  back,
+}: {
+  current: Screen;
+  transition: { from: Screen; to: Screen; direction: "forward" | "back" } | null;
+  push: (s: Screen) => void;
+  back: () => void;
+}) {
+  // Trigger animation on mount of incoming layer
+  const [animPhase, setAnimPhase] = useState<"start" | "end">("end");
+  const transKey = transition
+    ? `${screenKey(transition.from)}->${screenKey(transition.to)}:${transition.direction}`
+    : null;
+  const lastKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (transKey && transKey !== lastKeyRef.current) {
+      lastKeyRef.current = transKey;
+      setAnimPhase("start");
+      // next frame -> end
+      const r = requestAnimationFrame(() => {
+        requestAnimationFrame(() => setAnimPhase("end"));
+      });
+      return () => cancelAnimationFrame(r);
+    }
+    if (!transKey) {
+      lastKeyRef.current = null;
+    }
+  }, [transKey]);
+
+  const layerBase: CSSProperties = {
+    position: "absolute",
+    inset: 0,
+    display: "flex",
+    flexDirection: "column",
+    background: "#EEF4F8",
+    willChange: "transform",
+  };
+
+  if (!transition) {
+    return (
+      <div style={{ ...layerBase, position: "relative" }}>
+        {renderScreen(current, push, back)}
+      </div>
+    );
+  }
+
+  // During transition: render two layers
+  const { from, to, direction } = transition;
+
+  // Forward: incoming (to) slides from right (100%) -> 0; outgoing (from) stays at 0 (or shifts slightly left)
+  // Back: outgoing (from) slides 0 -> right (100%); incoming (to) sits underneath at 0
+  let fromTransform = "translateX(0)";
+  let toTransform = "translateX(0)";
+
+  if (direction === "forward") {
+    fromTransform = animPhase === "start" ? "translateX(0)" : "translateX(-25%)";
+    toTransform = animPhase === "start" ? "translateX(100%)" : "translateX(0)";
+  } else {
+    fromTransform = animPhase === "start" ? "translateX(0)" : "translateX(100%)";
+    toTransform = animPhase === "start" ? "translateX(-25%)" : "translateX(0)";
+  }
+
+  const transitionStyle = `transform ${DURATION}ms ${EASE}`;
+
+  // Stacking: forward -> incoming on top; back -> outgoing on top
+  const fromZ = direction === "forward" ? 1 : 2;
+  const toZ = direction === "forward" ? 2 : 1;
+
+  // Outgoing layer should not capture clicks during animation
+  return (
+    <>
+      <div style={{ ...layerBase, transform: fromTransform, transition: transitionStyle, zIndex: fromZ, pointerEvents: "none" }}>
+        {renderScreen(from, push, back)}
+      </div>
+      <div style={{ ...layerBase, transform: toTransform, transition: transitionStyle, zIndex: toZ, pointerEvents: "none" }}>
+        {renderScreen(to, push, back)}
+      </div>
+    </>
   );
 }
 
