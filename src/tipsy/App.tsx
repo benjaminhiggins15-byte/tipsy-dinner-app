@@ -188,6 +188,25 @@ export default function App() {
     setStack((st) => st.slice(0, idx + 1));
   };
 
+  // Pop the addown (edit) screen and the recipe screen, animating back to
+  // the recipes list (which sits below the recipe screen in the stack).
+  const finishDeleteRecipe = () => {
+    if (transition) return;
+    const idx = (() => {
+      for (let i = stack.length - 2; i >= 0; i--) {
+        if (stack[i].name === "recipes") return i;
+      }
+      return -1;
+    })();
+    if (idx === -1) {
+      back();
+      return;
+    }
+    const target = stack[idx];
+    setTransition({ from: current, to: target, direction: "back" });
+    setStack((st) => st.slice(0, idx + 1));
+  };
+
   useEffect(() => {
     if (!transition) return;
     const t = setTimeout(() => setTransition(null), DURATION);
@@ -205,6 +224,7 @@ export default function App() {
           replaceRecipe={replaceRecipeAndBack}
           finishEditCategory={finishEditCategory}
           finishDeleteCategory={finishDeleteCategory}
+          finishDeleteRecipe={finishDeleteRecipe}
         />
       </div>
     </div>
