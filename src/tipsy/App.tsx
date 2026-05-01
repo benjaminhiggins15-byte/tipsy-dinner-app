@@ -8,7 +8,7 @@ type Screen =
   | { name: "recipes"; categoryKey: string; categoryLabel: string }
   | { name: "recipe"; recipe: Recipe; categoryLabel: string }
   | { name: "cook" }
-  | { name: "addown" }
+  | { name: "addown"; editRecipe?: Recipe; editCategoryLabel?: string }
   | { name: "placeholder"; title: string };
 
 const S: Record<string, CSSProperties> = {
@@ -44,7 +44,7 @@ function screenKey(s: Screen): string {
     case "recipes": return `recipes:${s.categoryKey}`;
     case "recipe": return `recipe:${s.categoryLabel}:${s.recipe.title}`;
     case "cook": return "cook";
-    case "addown": return "addown";
+    case "addown": return s.editRecipe?.savedId ? `addown:edit:${s.editRecipe.savedId}` : "addown";
     case "placeholder": return `placeholder:${s.title}`;
   }
 }
@@ -53,6 +53,7 @@ function renderScreen(
   s: Screen,
   push: (s: Screen) => void,
   back: () => void,
+  replaceRecipe?: (r: Recipe, label: string) => void,
 ) {
   switch (s.name) {
     case "home": return <Home push={push} />;
@@ -65,13 +66,23 @@ function renderScreen(
         back={back}
       />
     );
-    case "recipe": return <RecipeCard recipe={s.recipe} back={back} />;
+    case "recipe": return (
+      <RecipeCard
+        recipe={s.recipe}
+        categoryLabel={s.categoryLabel}
+        back={back}
+        push={push}
+      />
+    );
     case "cook": return <Cook back={back} push={push} />;
     case "addown": return (
       <AddYourOwn
         back={back}
         goCategories={() => push({ name: "categories" })}
         goRecipe={(recipe, categoryLabel) => push({ name: "recipe", recipe, categoryLabel })}
+        editRecipe={s.editRecipe}
+        editCategoryLabel={s.editCategoryLabel}
+        onSaveEdit={(updated, label) => replaceRecipe?.(updated, label)}
       />
     );
     case "placeholder": return <Placeholder title={s.title} back={back} />;
@@ -99,6 +110,25 @@ export default function App() {
     setTransition({ from: current, to: prev, direction: "back" });
     setStack((st) => st.slice(0, -1));
   };
+  // Pop the current addown screen AND replace the recipe screen below
+  // with the updated recipe data, then animate back to it.
+  const replaceRecipeAndBack = (updated: Recipe, categoryLabel: string) => {
+    if (transition) return;
+    if (stack.length < 2) return;
+    const prevIdx = stack.length - 2;
+    const prev = stack[prevIdx];
+    if (prev.name !== "recipe") {
+      back();
+      return;
+    }
+    const newPrev: Screen = { name: "recipe", recipe: updated, categoryLabel };
+    setTransition({ from: current, to: newPrev, direction: "back" });
+    setStack((st) => {
+      const next = st.slice(0, -1);
+      next[next.length - 1] = newPrev;
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!transition) return;
@@ -114,6 +144,7 @@ export default function App() {
           transition={transition}
           push={push}
           back={back}
+          replaceRecipe={replaceRecipeAndBack}
         />
       </div>
     </div>
@@ -125,11 +156,13 @@ function ScreenStage({
   transition,
   push,
   back,
+  replaceRecipe,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back" } | null;
   push: (s: Screen) => void;
   back: () => void;
+  replaceRecipe: (r: Recipe, label: string) => void;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
@@ -178,7 +211,7 @@ function ScreenStage({
   if (!transition) {
     return (
       <div style={{ ...layerBase, position: "relative", height: "100%" }}>
-        {renderScreen(current, push, back)}
+        {renderScreen(current, push, back, replaceRecipe)}
       </div>
     );
   }
@@ -211,10 +244,10 @@ function ScreenStage({
   return (
     <>
       <div style={{ ...layerBase, transform: fromTransform, transition: transitionStyle, zIndex: fromZ, pointerEvents: "none" }}>
-        {renderScreen(from, push, back)}
+        {renderScreen(from, push, back, replaceRecipe)}
       </div>
       <div style={{ ...layerBase, transform: toTransform, transition: transitionStyle, zIndex: toZ, pointerEvents: "none" }}>
-        {renderScreen(to, push, back)}
+        {renderScreen(to, push, back, replaceRecipe)}
       </div>
     </>
   );
@@ -390,10 +423,21 @@ function Recipes({
 }
 
 /* ---------------- Recipe Card ---------------- */
-function RecipeCard({ recipe, back }: { recipe: Recipe; back: () => void }) {
+function RecipeCard({
+  recipe,
+  categoryLabel,
+  back,
+  push,
+}: {
+  recipe: Recipe;
+  categoryLabel: string;
+  back: () => void;
+  push: (s: Screen) => void;
+}) {
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
   const ingredients = recipe.ingredients ?? [];
   const steps = recipe.steps ?? [];
+  const editable = typeof recipe.savedId === "number";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -415,6 +459,23 @@ function RecipeCard({ recipe, back }: { recipe: Recipe; back: () => void }) {
         >
           <BackArrow />
         </button>
+        {editable && (
+          <button
+            onClick={() => push({ name: "addown", editRecipe: recipe, editCategoryLabel: categoryLabel })}
+            aria-label="Edit"
+            style={{
+              position: "absolute", top: 16, right: 16, width: 32, height: 32,
+              background: "rgba(238,244,248,0.85)", borderRadius: "50%",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer", border: "none", color: "#042C53",
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+            </svg>
+          </button>
+        )}
         <p style={{ fontSize: 11, letterSpacing: "0.12em", color: "#185FA5", textTransform: "uppercase", opacity: 0.7, margin: 0 }}>
           photo coming soon
         </p>

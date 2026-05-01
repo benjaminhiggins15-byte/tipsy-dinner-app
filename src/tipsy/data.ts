@@ -6,6 +6,8 @@ export type Recipe = {
   yield?: string;
   ingredients?: { name: string; qty: string }[];
   steps?: string[];
+  savedId?: number;
+  categoryKey?: string;
 };
 
 export const houseTomatoSauce: Recipe = {
@@ -97,6 +99,20 @@ export function saveRecipe(r: SavedRecipe) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
 }
 
+export function updateSavedRecipe(
+  id: number,
+  patch: Partial<Pick<SavedRecipe, "title" | "description" | "ingredients" | "steps">>,
+): SavedRecipe | null {
+  if (typeof window === "undefined") return null;
+  const list = loadSavedRecipes();
+  const idx = list.findIndex((r) => r.id === id);
+  if (idx === -1) return null;
+  const updated: SavedRecipe = { ...list[idx], ...patch };
+  list[idx] = updated;
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+  return updated;
+}
+
 const categoryGradient: Record<string, string> = Object.fromEntries(
   categories.map((c) => [c.key, c.gradient]),
 );
@@ -111,5 +127,7 @@ export function getSavedRecipesForCategory(key: string, label: string): Recipe[]
       category: label.toLowerCase(),
       ingredients: s.ingredients,
       steps: s.steps,
+      savedId: s.id,
+      categoryKey: key,
     }));
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type CSSProperties, type KeyboardEvent } from "react";
-import { categories, saveRecipe, type Recipe } from "./data";
+import { categories, saveRecipe, updateSavedRecipe, type Recipe } from "./data";
 
 type Step = 1 | 2 | 3 | 4 | 6;
 
@@ -7,6 +7,9 @@ type Props = {
   back: () => void;
   goCategories: () => void;
   goRecipe: (recipe: Recipe, categoryLabel: string) => void;
+  editRecipe?: Recipe;
+  editCategoryLabel?: string;
+  onSaveEdit?: (updated: Recipe, categoryLabel: string) => void;
 };
 
 const C = {
@@ -42,21 +45,22 @@ const trayEmoji: Record<string, string> = {
   soups: "🍲", salads: "🥗", sandwiches: "🥪", breakfast: "🍳",
 };
 
-export default function AddYourOwn({ back, goCategories, goRecipe }: Props) {
+export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, editCategoryLabel, onSaveEdit }: Props) {
+  const isEdit = typeof editRecipe?.savedId === "number";
   const [step, setStep] = useState<Step>(1);
-  const [title, setTitle] = useState("");
-  const [desc, setDesc] = useState("");
+  const [title, setTitle] = useState(editRecipe?.title ?? "");
+  const [desc, setDesc] = useState(editRecipe?.description ?? "");
   const [titleErr, setTitleErr] = useState(false);
   const [descErr, setDescErr] = useState(false);
 
   const [ingName, setIngName] = useState("");
   const [ingQty, setIngQty] = useState("");
   const [ingErr, setIngErr] = useState(false);
-  const [ingredients, setIngredients] = useState<{ name: string; qty: string }[]>([]);
+  const [ingredients, setIngredients] = useState<{ name: string; qty: string }[]>(editRecipe?.ingredients ?? []);
 
   const [stepInput, setStepInput] = useState("");
   const [stepErr, setStepErr] = useState(false);
-  const [steps, setSteps] = useState<string[]>([]);
+  const [steps, setSteps] = useState<string[]>(editRecipe?.steps ?? []);
 
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
   const [trayOpen, setTrayOpen] = useState(false);
@@ -112,7 +116,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe }: Props) {
     };
   }, [editing]);
 
-  const headerLabel = step === 1 ? "Cook" : "Back";
+  const headerLabel = step === 1 ? (isEdit ? "Back" : "Cook") : "Back";
   const onHeaderBack = () => {
     if (step === 1) back();
     else if (step === 2) setStep(1);
@@ -175,6 +179,24 @@ export default function AddYourOwn({ back, goCategories, goRecipe }: Props) {
     setSavedCategory({ key, label });
     setTrayOpen(false);
     setStep(6);
+  };
+
+  const saveEdit = () => {
+    if (!isEdit || !editRecipe || typeof editRecipe.savedId !== "number") return;
+    updateSavedRecipe(editRecipe.savedId, {
+      title: title.trim(),
+      description: desc.trim(),
+      ingredients,
+      steps,
+    });
+    const updated: Recipe = {
+      ...editRecipe,
+      title: title.trim(),
+      description: desc.trim(),
+      ingredients,
+      steps,
+    };
+    onSaveEdit?.(updated, editCategoryLabel ?? editRecipe.category);
   };
 
   const previewRecipe: Recipe = {
@@ -396,7 +418,11 @@ export default function AddYourOwn({ back, goCategories, goRecipe }: Props) {
               <Title>Here's your recipe</Title>
               <Sub>This is exactly how it will appear in Browse.</Sub>
               <PreviewCard recipe={previewRecipe} tab={tab} setTab={setTab} />
-              <PrimaryBtn onClick={() => setTrayOpen(true)}>Save to Browse</PrimaryBtn>
+              {isEdit ? (
+                <PrimaryBtn onClick={saveEdit}>Save changes</PrimaryBtn>
+              ) : (
+                <PrimaryBtn onClick={() => setTrayOpen(true)}>Save to Browse</PrimaryBtn>
+              )}
               <GhostBtn onClick={() => setStep(3)}>← Edit recipe</GhostBtn>
             </>
           )}
