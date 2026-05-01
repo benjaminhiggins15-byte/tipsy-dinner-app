@@ -66,7 +66,7 @@ function renderScreen(
       />
     );
     case "recipe": return <RecipeCard recipe={s.recipe} back={back} />;
-    case "cook": return <Cook back={back} />;
+    case "cook": return <Cook back={back} push={push} />;
     case "addown": return (
       <AddYourOwn
         back={back}
@@ -145,15 +145,18 @@ function ScreenStage({
 
   useEffect(() => {
     if (transKey && armedKeyRef.current !== transKey) {
+      let r2 = 0;
       // Two RAFs to guarantee the browser paints the "start" frame first.
       const r1 = requestAnimationFrame(() => {
-        const r2 = requestAnimationFrame(() => {
+        r2 = requestAnimationFrame(() => {
           armedKeyRef.current = transKey;
           forceRender((n) => n + 1);
         });
-        (r1 as unknown as { _r2?: number })._r2 = r2;
       });
-      return () => cancelAnimationFrame(r1);
+      return () => {
+        cancelAnimationFrame(r1);
+        if (r2) cancelAnimationFrame(r2);
+      };
     }
     if (!transKey) {
       armedKeyRef.current = null;
