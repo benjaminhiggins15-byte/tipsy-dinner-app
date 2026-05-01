@@ -116,7 +116,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
     };
   }, [editing]);
 
-  const headerLabel = step === 1 ? "Cook" : "Back";
+  const headerLabel = step === 1 ? (isEdit ? "Back" : "Cook") : "Back";
   const onHeaderBack = () => {
     if (step === 1) back();
     else if (step === 2) setStep(1);
