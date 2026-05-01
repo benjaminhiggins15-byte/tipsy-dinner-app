@@ -303,6 +303,7 @@ export default function App() {
           finishDeleteCategory={finishDeleteCategory}
           finishDeleteRecipe={finishDeleteRecipe}
           finishCreateCategoryForRecipe={finishCreateCategoryForRecipe}
+          finishSaveRecipe={finishSaveRecipe}
         />
       </div>
     </div>
@@ -319,6 +320,7 @@ function ScreenStage({
   finishDeleteCategory,
   finishDeleteRecipe,
   finishCreateCategoryForRecipe,
+  finishSaveRecipe,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back" } | null;
@@ -329,6 +331,7 @@ function ScreenStage({
   finishDeleteCategory: () => void;
   finishDeleteRecipe: () => void;
   finishCreateCategoryForRecipe: (catKey: string, catLabel: string, draft: RecipeDraft) => void;
+  finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
