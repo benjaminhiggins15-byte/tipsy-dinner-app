@@ -147,6 +147,45 @@ export default function App() {
     });
   };
 
+  // Pop the editcategory screen and replace the recipes screen below with the
+  // new label, animating back to it.
+  const finishEditCategory = (newLabel: string) => {
+    if (transition) return;
+    if (stack.length < 2) return;
+    const prev = stack[stack.length - 2];
+    if (prev.name !== "recipes") {
+      back();
+      return;
+    }
+    const newPrev: Screen = { name: "recipes", categoryKey: prev.categoryKey, categoryLabel: newLabel };
+    setTransition({ from: current, to: newPrev, direction: "back" });
+    setStack((st) => {
+      const next = st.slice(0, -1);
+      next[next.length - 1] = newPrev;
+      return next;
+    });
+  };
+
+  // Pop both the editcategory and the recipes screens, animating back to
+  // categories (which sits below recipes in the stack).
+  const finishDeleteCategory = () => {
+    if (transition) return;
+    // Find the nearest "categories" screen below current; fall back to back().
+    const idx = (() => {
+      for (let i = stack.length - 2; i >= 0; i--) {
+        if (stack[i].name === "categories") return i;
+      }
+      return -1;
+    })();
+    if (idx === -1) {
+      back();
+      return;
+    }
+    const target = stack[idx];
+    setTransition({ from: current, to: target, direction: "back" });
+    setStack((st) => st.slice(0, idx + 1));
+  };
+
   useEffect(() => {
     if (!transition) return;
     const t = setTimeout(() => setTransition(null), DURATION);
@@ -162,6 +201,8 @@ export default function App() {
           push={push}
           back={back}
           replaceRecipe={replaceRecipeAndBack}
+          finishEditCategory={finishEditCategory}
+          finishDeleteCategory={finishDeleteCategory}
         />
       </div>
     </div>
@@ -174,12 +215,16 @@ function ScreenStage({
   push,
   back,
   replaceRecipe,
+  finishEditCategory,
+  finishDeleteCategory,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back" } | null;
   push: (s: Screen) => void;
   back: () => void;
   replaceRecipe: (r: Recipe, label: string) => void;
+  finishEditCategory: (newLabel: string) => void;
+  finishDeleteCategory: () => void;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
