@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, type CSSProperties } from "react";
 import { categories, getRecipesForCategory, type Recipe } from "./data";
+import AddYourOwn from "./AddYourOwn";
 
 type Screen =
   | { name: "home" }
@@ -7,6 +8,7 @@ type Screen =
   | { name: "recipes"; categoryKey: string; categoryLabel: string }
   | { name: "recipe"; recipe: Recipe; categoryLabel: string }
   | { name: "cook" }
+  | { name: "addown" }
   | { name: "placeholder"; title: string };
 
 const S: Record<string, CSSProperties> = {
@@ -42,6 +44,7 @@ function screenKey(s: Screen): string {
     case "recipes": return `recipes:${s.categoryKey}`;
     case "recipe": return `recipe:${s.categoryLabel}:${s.recipe.title}`;
     case "cook": return "cook";
+    case "addown": return "addown";
     case "placeholder": return `placeholder:${s.title}`;
   }
 }
@@ -63,7 +66,14 @@ function renderScreen(
       />
     );
     case "recipe": return <RecipeCard recipe={s.recipe} back={back} />;
-    case "cook": return <Cook back={back} />;
+    case "cook": return <Cook back={back} push={push} />;
+    case "addown": return (
+      <AddYourOwn
+        back={back}
+        goCategories={() => push({ name: "categories" })}
+        goRecipe={(recipe, categoryLabel) => push({ name: "recipe", recipe, categoryLabel })}
+      />
+    );
     case "placeholder": return <Placeholder title={s.title} back={back} />;
   }
 }
@@ -135,15 +145,18 @@ function ScreenStage({
 
   useEffect(() => {
     if (transKey && armedKeyRef.current !== transKey) {
+      let r2 = 0;
       // Two RAFs to guarantee the browser paints the "start" frame first.
       const r1 = requestAnimationFrame(() => {
-        const r2 = requestAnimationFrame(() => {
+        r2 = requestAnimationFrame(() => {
           armedKeyRef.current = transKey;
           forceRender((n) => n + 1);
         });
-        (r1 as unknown as { _r2?: number })._r2 = r2;
       });
-      return () => cancelAnimationFrame(r1);
+      return () => {
+        cancelAnimationFrame(r1);
+        if (r2) cancelAnimationFrame(r2);
+      };
     }
     if (!transKey) {
       armedKeyRef.current = null;
@@ -518,7 +531,7 @@ function BackArrow() {
 }
 
 /* ---------------- Cook ---------------- */
-function Cook({ back }: { back: () => void }) {
+function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* Header */}
@@ -536,7 +549,7 @@ function Cook({ back }: { back: () => void }) {
           </div>
         </div>
         <button
-          disabled
+          onClick={() => push({ name: "addown" })}
           style={{
             display: "inline-flex", alignItems: "center", gap: 6,
             padding: "6px 12px",
@@ -547,7 +560,7 @@ function Cook({ back }: { back: () => void }) {
             fontFamily: "'DM Sans', sans-serif",
             fontSize: 11,
             letterSpacing: "0.08em",
-            cursor: "not-allowed",
+            cursor: "pointer",
           }}
         >
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

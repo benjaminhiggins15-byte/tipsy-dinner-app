@@ -59,7 +59,57 @@ export const recipesByCategory: Record<string, Recipe[]> = {
 };
 
 export function getRecipesForCategory(key: string, label: string): Recipe[] {
-  if (recipesByCategory[key]) return recipesByCategory[key];
-  // generate a small subset of placeholders for other categories
-  return italianRecipes.slice(0, 4).map((r) => ({ ...r, category: label.toLowerCase() }));
+  const base = recipesByCategory[key]
+    ? recipesByCategory[key]
+    : italianRecipes.slice(0, 4).map((r) => ({ ...r, category: label.toLowerCase() }));
+  const saved = getSavedRecipesForCategory(key, label);
+  return [...saved, ...base];
+}
+
+const STORAGE_KEY = "tipsyDinnerRecipes";
+
+export type SavedRecipe = {
+  id: number;
+  title: string;
+  description: string;
+  category: string; // category key
+  ingredients: { name: string; qty: string }[];
+  steps: string[];
+  createdAt: string;
+};
+
+export function loadSavedRecipes(): SavedRecipe[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveRecipe(r: SavedRecipe) {
+  if (typeof window === "undefined") return;
+  const list = loadSavedRecipes();
+  list.push(r);
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+}
+
+const categoryGradient: Record<string, string> = Object.fromEntries(
+  categories.map((c) => [c.key, c.gradient]),
+);
+
+export function getSavedRecipesForCategory(key: string, label: string): Recipe[] {
+  return loadSavedRecipes()
+    .filter((s) => s.category === key)
+    .map((s) => ({
+      title: s.title,
+      description: s.description,
+      color: categoryGradient[key] ?? "linear-gradient(135deg, #C5DCF4 0%, #85B7EB 100%)",
+      category: label.toLowerCase(),
+      ingredients: s.ingredients,
+      steps: s.steps,
+    }));
 }
