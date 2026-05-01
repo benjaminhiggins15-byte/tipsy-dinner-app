@@ -658,60 +658,6 @@ function RecipeCard({
           <p style={{ fontSize: 13, color: "#185FA5" }}>No steps yet.</p>
         )}
       </div>
-      {showDelete && (
-        <div
-          onClick={() => setShowDelete(false)}
-          style={{
-            position: "absolute", inset: 0, background: "rgba(4,44,83,0.55)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            zIndex: 10, padding: 24,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: "#EEF4F8", borderRadius: 16, padding: "24px 20px",
-              width: "100%", maxWidth: 280, display: "flex", flexDirection: "column",
-              gap: 8, border: "0.5px solid #85B7EB",
-            }}
-          >
-            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 20, color: "#042C53", fontWeight: 400, textAlign: "center" }}>
-              Delete this recipe?
-            </div>
-            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: "#185FA5", textAlign: "center", marginBottom: 12 }}>
-              This can't be undone.
-            </div>
-            <button
-              onClick={() => setShowDelete(false)}
-              style={{
-                width: "100%", padding: "12px", borderRadius: 10,
-                background: "transparent", border: "0.5px solid #85B7EB",
-                color: "#185FA5", fontFamily: "'DM Sans', sans-serif",
-                fontSize: 13, fontWeight: 500, cursor: "pointer",
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => {
-                if (typeof recipe.savedId === "number") {
-                  deleteSavedRecipe(recipe.savedId);
-                }
-                setShowDelete(false);
-                back();
-              }}
-              style={{
-                width: "100%", padding: "12px", borderRadius: 10,
-                background: "#B85C5C", border: "none",
-                color: "#fff", fontFamily: "'DM Sans', sans-serif",
-                fontSize: 13, fontWeight: 500, cursor: "pointer",
-              }}
-            >
-              Delete
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
