@@ -98,10 +98,7 @@ function renderScreen(
       <AddYourOwn
         back={back}
         goCategories={() => push({ name: "categories" })}
-        goRecipe={(recipe, categoryLabel) => {
-          const key = recipe.categoryKey ?? "";
-          finishSaveRecipe?.(recipe, key, categoryLabel);
-        }}
+        goRecipe={(recipe, categoryKey, categoryLabel) => finishSaveRecipe?.(recipe, categoryKey, categoryLabel)}
         editRecipe={s.editRecipe}
         editCategoryLabel={s.editCategoryLabel}
         onSaveEdit={(updated, label) => replaceRecipe?.(updated, label)}
