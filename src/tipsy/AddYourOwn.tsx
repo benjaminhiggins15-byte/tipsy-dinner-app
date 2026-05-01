@@ -6,7 +6,7 @@ type Step = 1 | 2 | 3 | 4 | 6;
 type Props = {
   back: () => void;
   goCategories: () => void;
-  goRecipe: (recipe: Recipe, categoryLabel: string) => void;
+  goRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
   editRecipe?: Recipe;
   editCategoryLabel?: string;
   onSaveEdit?: (updated: Recipe, categoryLabel: string) => void;
@@ -465,7 +465,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
               <Eyebrow>Your recipe</Eyebrow>
               <Title>{title}</Title>
               <Sub>Tap the card to view it in Browse.</Sub>
-              <div onClick={() => goRecipe(previewRecipe, savedCategory.label)} style={{ cursor: "pointer" }}>
+              <div onClick={() => goRecipe({ ...previewRecipe, categoryKey: savedCategory.key }, savedCategory.key, savedCategory.label)} style={{ cursor: "pointer" }}>
                 <PreviewCard recipe={previewRecipe} tab={tab} setTab={setTab} />
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
