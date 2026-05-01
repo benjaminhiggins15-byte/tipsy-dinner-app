@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, deleteSavedRecipe, deleteCustomCategory, type Recipe } from "./data";
+import { getAllCategories, getRecipesForCategory, deleteSavedRecipe, type Recipe } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 
@@ -11,6 +11,7 @@ type Screen =
   | { name: "cook" }
   | { name: "addown"; editRecipe?: Recipe; editCategoryLabel?: string }
   | { name: "newcategory" }
+  | { name: "editcategory"; categoryKey: string }
   | { name: "placeholder"; title: string };
 
 const S: Record<string, CSSProperties> = {
@@ -48,6 +49,7 @@ function screenKey(s: Screen): string {
     case "cook": return "cook";
     case "addown": return s.editRecipe?.savedId ? `addown:edit:${s.editRecipe.savedId}` : "addown";
     case "newcategory": return "newcategory";
+    case "editcategory": return `editcategory:${s.categoryKey}`;
     case "placeholder": return `placeholder:${s.title}`;
   }
 }
@@ -57,6 +59,8 @@ function renderScreen(
   push: (s: Screen) => void,
   back: () => void,
   replaceRecipe?: (r: Recipe, label: string) => void,
+  finishEditCategory?: (newLabel: string) => void,
+  finishDeleteCategory?: () => void,
 ) {
   switch (s.name) {
     case "home": return <Home push={push} />;
@@ -89,6 +93,15 @@ function renderScreen(
       />
     );
     case "newcategory": return <NewCategory back={back} onSaved={back} />;
+    case "editcategory": return (
+      <NewCategory
+        back={back}
+        onSaved={back}
+        editKey={s.categoryKey}
+        onEditSaved={(newLabel) => finishEditCategory?.(newLabel)}
+        onDeleted={() => finishDeleteCategory?.()}
+      />
+    );
     case "placeholder": return <Placeholder title={s.title} back={back} />;
   }
 }
