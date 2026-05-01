@@ -265,20 +265,23 @@ export default function App() {
       steps: draft.steps,
       categoryKey: catKey,
     };
-    const target: Screen = { name: "recipe", recipe, categoryLabel: catLabel };
+    finishSaveRecipe(recipe, catKey, catLabel);
+  };
+
+  // After a recipe is saved (existing or new category), rebuild the back
+  // stack to follow the Browse hierarchy: home → categories → recipes → recipe.
+  // The Cook and Add Your Own screens are removed entirely.
+  const finishSaveRecipe = (recipe: Recipe, categoryKey: string, categoryLabel: string) => {
+    if (transition) return;
+    const target: Screen = { name: "recipe", recipe, categoryLabel };
+    const newStack: Screen[] = [
+      { name: "home" },
+      { name: "categories" },
+      { name: "recipes", categoryKey, categoryLabel },
+      target,
+    ];
     setTransition({ from: current, to: target, direction: "forward" });
-    setStack((st) => {
-      // Drop the trailing newcategoryforrecipe + addown screens, insert
-      // recipes list + recipe card so back goes to the recipes list.
-      const next: Screen[] = [];
-      for (const sc of st) {
-        if (sc.name === "addown" || sc.name === "newcategoryforrecipe") break;
-        next.push(sc);
-      }
-      next.push({ name: "recipes", categoryKey: catKey, categoryLabel: catLabel });
-      next.push(target);
-      return next;
-    });
+    setStack(newStack);
   };
 
   useEffect(() => {
