@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, deleteSavedRecipe, type Recipe } from "./data";
+import { getAllCategories, getRecipesForCategory, type Recipe } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 
@@ -61,6 +61,7 @@ function renderScreen(
   replaceRecipe?: (r: Recipe, label: string) => void,
   finishEditCategory?: (newLabel: string) => void,
   finishDeleteCategory?: () => void,
+  finishDeleteRecipe?: () => void,
 ) {
   switch (s.name) {
     case "home": return <Home push={push} />;
@@ -90,6 +91,7 @@ function renderScreen(
         editRecipe={s.editRecipe}
         editCategoryLabel={s.editCategoryLabel}
         onSaveEdit={(updated, label) => replaceRecipe?.(updated, label)}
+        onDeleted={() => finishDeleteRecipe?.()}
       />
     );
     case "newcategory": return <NewCategory back={back} onSaved={back} />;
@@ -186,6 +188,25 @@ export default function App() {
     setStack((st) => st.slice(0, idx + 1));
   };
 
+  // Pop the addown (edit) screen and the recipe screen, animating back to
+  // the recipes list (which sits below the recipe screen in the stack).
+  const finishDeleteRecipe = () => {
+    if (transition) return;
+    const idx = (() => {
+      for (let i = stack.length - 2; i >= 0; i--) {
+        if (stack[i].name === "recipes") return i;
+      }
+      return -1;
+    })();
+    if (idx === -1) {
+      back();
+      return;
+    }
+    const target = stack[idx];
+    setTransition({ from: current, to: target, direction: "back" });
+    setStack((st) => st.slice(0, idx + 1));
+  };
+
   useEffect(() => {
     if (!transition) return;
     const t = setTimeout(() => setTransition(null), DURATION);
@@ -203,6 +224,7 @@ export default function App() {
           replaceRecipe={replaceRecipeAndBack}
           finishEditCategory={finishEditCategory}
           finishDeleteCategory={finishDeleteCategory}
+          finishDeleteRecipe={finishDeleteRecipe}
         />
       </div>
     </div>
@@ -217,6 +239,7 @@ function ScreenStage({
   replaceRecipe,
   finishEditCategory,
   finishDeleteCategory,
+  finishDeleteRecipe,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back" } | null;
@@ -225,6 +248,7 @@ function ScreenStage({
   replaceRecipe: (r: Recipe, label: string) => void;
   finishEditCategory: (newLabel: string) => void;
   finishDeleteCategory: () => void;
+  finishDeleteRecipe: () => void;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
@@ -273,7 +297,7 @@ function ScreenStage({
   if (!transition) {
     return (
       <div style={{ ...layerBase, position: "relative", height: "100%" }}>
-        {renderScreen(current, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory)}
+        {renderScreen(current, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe)}
       </div>
     );
   }
@@ -306,10 +330,10 @@ function ScreenStage({
   return (
     <>
       <div style={{ ...layerBase, transform: fromTransform, transition: transitionStyle, zIndex: fromZ, pointerEvents: "none" }}>
-        {renderScreen(from, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory)}
+        {renderScreen(from, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe)}
       </div>
       <div style={{ ...layerBase, transform: toTransform, transition: transitionStyle, zIndex: toZ, pointerEvents: "none" }}>
-        {renderScreen(to, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory)}
+        {renderScreen(to, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe)}
       </div>
     </>
   );
@@ -540,7 +564,6 @@ function RecipeCard({
   const ingredients = recipe.ingredients ?? [];
   const steps = recipe.steps ?? [];
   const editable = typeof recipe.savedId === "number";
-  const [showDelete, setShowDelete] = useState(false);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -562,24 +585,6 @@ function RecipeCard({
         >
           <BackArrow />
         </button>
-        {editable && (
-          <button
-            onClick={() => setShowDelete(true)}
-            aria-label="Delete"
-            style={{
-              position: "absolute", top: 16, right: 56, width: 32, height: 32,
-              background: "rgba(238,244,248,0.85)", borderRadius: "50%",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              cursor: "pointer", border: "none", color: "#042C53",
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 6h18" />
-              <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-            </svg>
-          </button>
-        )}
         {editable && (
           <button
             onClick={() => push({ name: "addown", editRecipe: recipe, editCategoryLabel: categoryLabel })}
@@ -653,60 +658,6 @@ function RecipeCard({
           <p style={{ fontSize: 13, color: "#185FA5" }}>No steps yet.</p>
         )}
       </div>
-      {showDelete && (
-        <div
-          onClick={() => setShowDelete(false)}
-          style={{
-            position: "absolute", inset: 0, background: "rgba(4,44,83,0.55)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            zIndex: 10, padding: 24,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: "#EEF4F8", borderRadius: 16, padding: "24px 20px",
-              width: "100%", maxWidth: 280, display: "flex", flexDirection: "column",
-              gap: 8, border: "0.5px solid #85B7EB",
-            }}
-          >
-            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 20, color: "#042C53", fontWeight: 400, textAlign: "center" }}>
-              Delete this recipe?
-            </div>
-            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: "#185FA5", textAlign: "center", marginBottom: 12 }}>
-              This can't be undone.
-            </div>
-            <button
-              onClick={() => setShowDelete(false)}
-              style={{
-                width: "100%", padding: "12px", borderRadius: 10,
-                background: "transparent", border: "0.5px solid #85B7EB",
-                color: "#185FA5", fontFamily: "'DM Sans', sans-serif",
-                fontSize: 13, fontWeight: 500, cursor: "pointer",
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => {
-                if (typeof recipe.savedId === "number") {
-                  deleteSavedRecipe(recipe.savedId);
-                }
-                setShowDelete(false);
-                back();
-              }}
-              style={{
-                width: "100%", padding: "12px", borderRadius: 10,
-                background: "#B85C5C", border: "none",
-                color: "#fff", fontFamily: "'DM Sans', sans-serif",
-                fontSize: 13, fontWeight: 500, cursor: "pointer",
-              }}
-            >
-              Delete
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
