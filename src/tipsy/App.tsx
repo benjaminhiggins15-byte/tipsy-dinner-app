@@ -72,6 +72,7 @@ function renderScreen(
   finishDeleteCategory?: () => void,
   finishDeleteRecipe?: () => void,
   finishCreateCategoryForRecipe?: (catKey: string, catLabel: string, draft: RecipeDraft) => void,
+  finishSaveRecipe?: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void,
 ) {
   switch (s.name) {
     case "home": return <Home push={push} />;
@@ -97,7 +98,10 @@ function renderScreen(
       <AddYourOwn
         back={back}
         goCategories={() => push({ name: "categories" })}
-        goRecipe={(recipe, categoryLabel) => push({ name: "recipe", recipe, categoryLabel })}
+        goRecipe={(recipe, categoryLabel) => {
+          const key = recipe.categoryKey ?? "";
+          finishSaveRecipe?.(recipe, key, categoryLabel);
+        }}
         editRecipe={s.editRecipe}
         editCategoryLabel={s.editCategoryLabel}
         onSaveEdit={(updated, label) => replaceRecipe?.(updated, label)}
