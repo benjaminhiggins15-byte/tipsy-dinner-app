@@ -486,38 +486,52 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
               <div style={{ fontFamily: fontSerif, fontSize: 17, color: C.navy, marginBottom: 2 }}>Where does it live?</div>
               <div style={{ fontFamily: fontSans, fontSize: 12, color: C.muted }}>Swipe to find the right category.</div>
             </div>
-            <div style={{
-              overflowX: "auto", padding: "14px 18px 4px", display: "flex", gap: 10,
-              scrollbarWidth: "none",
-            }}>
-              {categories.map((c) => (
-                <button
-                  key={c.key}
-                  onClick={() => onPickCategory(c.key, c.label)}
-                  style={{
-                    flexShrink: 0, width: 96, cursor: "pointer",
-                    borderRadius: 12, overflow: "hidden",
-                    border: "2px solid transparent", background: "none", padding: 0, textAlign: "left",
-                  }}
-                >
+            {(() => {
+              const savedCats = loadCustomCategories();
+              if (savedCats.length === 0) {
+                return (
                   <div style={{
-                    width: 96, height: 70, position: "relative",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    background: trayGradients[c.key],
+                    padding: "20px 18px 4px", textAlign: "center",
+                    fontFamily: fontSans, fontSize: 13, color: C.midBlue,
                   }}>
-                    <span style={{ fontSize: 26, filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.15))" }}>{trayEmoji[c.key]}</span>
-                    <div style={{ position: "absolute", inset: 0, background: "rgba(4, 44, 83, 0.22)" }} />
-                    <div style={{
-                      position: "absolute", bottom: 6, left: 0, right: 0, textAlign: "center",
-                      fontFamily: fontSans, fontSize: 9, fontWeight: 700, letterSpacing: "0.12em",
-                      textTransform: "uppercase", color: "rgba(255,255,255,0.95)",
-                      textShadow: "0 1px 3px rgba(0,0,0,0.3)",
-                    }}>{c.label}</div>
+                    No categories yet. Create one in Browse first.
                   </div>
-                  <div style={{ fontFamily: fontSans, fontSize: 11, fontWeight: 500, color: C.navy, padding: "6px 4px 2px" }}>{c.label}</div>
-                </button>
-              ))}
-            </div>
+                );
+              }
+              return (
+                <div style={{
+                  overflowX: "auto", padding: "14px 18px 4px", display: "flex", gap: 10,
+                  scrollbarWidth: "none",
+                }}>
+                  {savedCats.map((c) => (
+                    <button
+                      key={c.key}
+                      onClick={() => onPickCategory(c.key, c.label)}
+                      style={{
+                        flexShrink: 0, width: 96, cursor: "pointer",
+                        borderRadius: 12, overflow: "hidden",
+                        border: "2px solid transparent", background: "none", padding: 0, textAlign: "left",
+                      }}
+                    >
+                      <div style={{
+                        width: 96, height: 70, position: "relative",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        background: c.gradient,
+                      }}>
+                        <div style={{ position: "absolute", inset: 0, background: "rgba(4, 44, 83, 0.22)" }} />
+                        <div style={{
+                          position: "absolute", bottom: 6, left: 0, right: 0, textAlign: "center",
+                          fontFamily: fontSans, fontSize: 9, fontWeight: 700, letterSpacing: "0.12em",
+                          textTransform: "uppercase", color: "rgba(255,255,255,0.95)",
+                          textShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                        }}>{c.label}</div>
+                      </div>
+                      <div style={{ fontFamily: fontSans, fontSize: 11, fontWeight: 500, color: C.navy, padding: "6px 4px 2px" }}>{c.label}</div>
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
