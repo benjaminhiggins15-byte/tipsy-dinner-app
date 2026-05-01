@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, type CSSProperties } from "react";
 import { categories, getRecipesForCategory, type Recipe } from "./data";
+import AddYourOwn from "./AddYourOwn";
 
 type Screen =
   | { name: "home" }
@@ -7,6 +8,7 @@ type Screen =
   | { name: "recipes"; categoryKey: string; categoryLabel: string }
   | { name: "recipe"; recipe: Recipe; categoryLabel: string }
   | { name: "cook" }
+  | { name: "addown" }
   | { name: "placeholder"; title: string };
 
 const S: Record<string, CSSProperties> = {
@@ -42,6 +44,7 @@ function screenKey(s: Screen): string {
     case "recipes": return `recipes:${s.categoryKey}`;
     case "recipe": return `recipe:${s.categoryLabel}:${s.recipe.title}`;
     case "cook": return "cook";
+    case "addown": return "addown";
     case "placeholder": return `placeholder:${s.title}`;
   }
 }
@@ -64,6 +67,13 @@ function renderScreen(
     );
     case "recipe": return <RecipeCard recipe={s.recipe} back={back} />;
     case "cook": return <Cook back={back} />;
+    case "addown": return (
+      <AddYourOwn
+        back={back}
+        goCategories={() => push({ name: "categories" })}
+        goRecipe={(recipe, categoryLabel) => push({ name: "recipe", recipe, categoryLabel })}
+      />
+    );
     case "placeholder": return <Placeholder title={s.title} back={back} />;
   }
 }
