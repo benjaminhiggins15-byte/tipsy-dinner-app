@@ -273,6 +273,15 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                 {descErr && <ValMsg>Please add a short description.</ValMsg>}
               </Field>
               <PrimaryBtn onClick={tryAdvance1}>Continue to Ingredients →</PrimaryBtn>
+              {isEdit && (
+                <button onClick={() => setShowDelete(true)} style={{
+                  width: "100%", background: "transparent", color: "#B85C5C",
+                  border: "none", padding: "12px",
+                  fontFamily: fontSans, fontSize: 12, fontWeight: 600,
+                  letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer",
+                  marginTop: 4,
+                }}>Delete recipe</button>
+              )}
             </>
           )}
 
@@ -424,15 +433,6 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                 <PrimaryBtn onClick={() => setTrayOpen(true)}>Save to Browse</PrimaryBtn>
               )}
               <GhostBtn onClick={() => setStep(3)}>← Edit recipe</GhostBtn>
-              {isEdit && (
-                <button onClick={() => setShowDelete(true)} style={{
-                  width: "100%", background: "transparent", color: "#B85C5C",
-                  border: "none", padding: "12px",
-                  fontFamily: fontSans, fontSize: 12, fontWeight: 600,
-                  letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer",
-                  marginTop: 4,
-                }}>Delete recipe</button>
-              )}
             </>
           )}
 
