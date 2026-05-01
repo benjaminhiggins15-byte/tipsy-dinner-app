@@ -297,7 +297,7 @@ function ScreenStage({
   if (!transition) {
     return (
       <div style={{ ...layerBase, position: "relative", height: "100%" }}>
-        {renderScreen(current, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory)}
+        {renderScreen(current, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe)}
       </div>
     );
   }
@@ -330,10 +330,10 @@ function ScreenStage({
   return (
     <>
       <div style={{ ...layerBase, transform: fromTransform, transition: transitionStyle, zIndex: fromZ, pointerEvents: "none" }}>
-        {renderScreen(from, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory)}
+        {renderScreen(from, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe)}
       </div>
       <div style={{ ...layerBase, transform: toTransform, transition: transitionStyle, zIndex: toZ, pointerEvents: "none" }}>
-        {renderScreen(to, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory)}
+        {renderScreen(to, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe)}
       </div>
     </>
   );
