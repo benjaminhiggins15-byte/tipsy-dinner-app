@@ -72,6 +72,7 @@ function renderScreen(
   finishDeleteCategory?: () => void,
   finishDeleteRecipe?: () => void,
   finishCreateCategoryForRecipe?: (catKey: string, catLabel: string, draft: RecipeDraft) => void,
+  finishSaveRecipe?: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void,
 ) {
   switch (s.name) {
     case "home": return <Home push={push} />;
@@ -97,7 +98,7 @@ function renderScreen(
       <AddYourOwn
         back={back}
         goCategories={() => push({ name: "categories" })}
-        goRecipe={(recipe, categoryLabel) => push({ name: "recipe", recipe, categoryLabel })}
+        goRecipe={(recipe, categoryKey, categoryLabel) => finishSaveRecipe?.(recipe, categoryKey, categoryLabel)}
         editRecipe={s.editRecipe}
         editCategoryLabel={s.editCategoryLabel}
         onSaveEdit={(updated, label) => replaceRecipe?.(updated, label)}
@@ -264,20 +265,23 @@ export default function App() {
       steps: draft.steps,
       categoryKey: catKey,
     };
-    const target: Screen = { name: "recipe", recipe, categoryLabel: catLabel };
+    finishSaveRecipe(recipe, catKey, catLabel);
+  };
+
+  // After a recipe is saved (existing or new category), rebuild the back
+  // stack to follow the Browse hierarchy: home → categories → recipes → recipe.
+  // The Cook and Add Your Own screens are removed entirely.
+  const finishSaveRecipe = (recipe: Recipe, categoryKey: string, categoryLabel: string) => {
+    if (transition) return;
+    const target: Screen = { name: "recipe", recipe, categoryLabel };
+    const newStack: Screen[] = [
+      { name: "home" },
+      { name: "categories" },
+      { name: "recipes", categoryKey, categoryLabel },
+      target,
+    ];
     setTransition({ from: current, to: target, direction: "forward" });
-    setStack((st) => {
-      // Drop the trailing newcategoryforrecipe + addown screens, insert
-      // recipes list + recipe card so back goes to the recipes list.
-      const next: Screen[] = [];
-      for (const sc of st) {
-        if (sc.name === "addown" || sc.name === "newcategoryforrecipe") break;
-        next.push(sc);
-      }
-      next.push({ name: "recipes", categoryKey: catKey, categoryLabel: catLabel });
-      next.push(target);
-      return next;
-    });
+    setStack(newStack);
   };
 
   useEffect(() => {
@@ -299,6 +303,7 @@ export default function App() {
           finishDeleteCategory={finishDeleteCategory}
           finishDeleteRecipe={finishDeleteRecipe}
           finishCreateCategoryForRecipe={finishCreateCategoryForRecipe}
+          finishSaveRecipe={finishSaveRecipe}
         />
       </div>
     </div>
@@ -315,6 +320,7 @@ function ScreenStage({
   finishDeleteCategory,
   finishDeleteRecipe,
   finishCreateCategoryForRecipe,
+  finishSaveRecipe,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back" } | null;
@@ -325,6 +331,7 @@ function ScreenStage({
   finishDeleteCategory: () => void;
   finishDeleteRecipe: () => void;
   finishCreateCategoryForRecipe: (catKey: string, catLabel: string, draft: RecipeDraft) => void;
+  finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
@@ -373,7 +380,7 @@ function ScreenStage({
   if (!transition) {
     return (
       <div style={{ ...layerBase, position: "relative", height: "100%" }}>
-        {renderScreen(current, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe)}
+        {renderScreen(current, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe)}
       </div>
     );
   }
@@ -406,10 +413,10 @@ function ScreenStage({
   return (
     <>
       <div style={{ ...layerBase, transform: fromTransform, transition: transitionStyle, zIndex: fromZ, pointerEvents: "none" }}>
-        {renderScreen(from, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe)}
+        {renderScreen(from, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe)}
       </div>
       <div style={{ ...layerBase, transform: toTransform, transition: transitionStyle, zIndex: toZ, pointerEvents: "none" }}>
-        {renderScreen(to, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe)}
+        {renderScreen(to, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe)}
       </div>
     </>
   );
