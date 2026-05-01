@@ -113,6 +113,12 @@ export function updateSavedRecipe(
   return updated;
 }
 
+export function deleteSavedRecipe(id: number) {
+  if (typeof window === "undefined") return;
+  const list = loadSavedRecipes().filter((r) => r.id !== id);
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+}
+
 const categoryGradient: Record<string, string> = Object.fromEntries(
   categories.map((c) => [c.key, c.gradient]),
 );
