@@ -139,6 +139,20 @@ export default function App() {
 
   const push = (s: Screen) => {
     if (transition) return;
+    // Special-case: when leaving addown to create a new category for the
+    // in-progress recipe, persist the draft + tray state on the addown screen
+    // beneath so back navigation restores it.
+    if (s.name === "newcategoryforrecipe" && current.name === "addown") {
+      const updatedAddown: Screen = { ...current, draft: { ...s.draft, trayOpen: true } };
+      setTransition({ from: current, to: s, direction: "forward" });
+      setStack((st) => {
+        const next = st.slice();
+        next[next.length - 1] = updatedAddown;
+        next.push(s);
+        return next;
+      });
+      return;
+    }
     setTransition({ from: current, to: s, direction: "forward" });
     setStack((st) => [...st, s]);
   };
@@ -227,6 +241,45 @@ export default function App() {
     setStack((st) => st.slice(0, idx + 1));
   };
 
+  // Save the in-progress recipe under the freshly created category and
+  // navigate directly to the recipe card. Replace both the newcategoryforrecipe
+  // screen and the addown screen beneath with: recipes list + recipe card.
+  const finishCreateCategoryForRecipe = (catKey: string, catLabel: string, draft: RecipeDraft) => {
+    if (transition) return;
+    saveRecipe({
+      id: Date.now(),
+      title: draft.title,
+      description: draft.description,
+      category: catKey,
+      ingredients: draft.ingredients,
+      steps: draft.steps,
+      createdAt: new Date().toISOString(),
+    });
+    const recipe: Recipe = {
+      title: draft.title,
+      description: draft.description,
+      color: "linear-gradient(135deg, #C5DCF4 0%, #85B7EB 100%)",
+      category: catLabel.toLowerCase(),
+      ingredients: draft.ingredients,
+      steps: draft.steps,
+      categoryKey: catKey,
+    };
+    const target: Screen = { name: "recipe", recipe, categoryLabel: catLabel };
+    setTransition({ from: current, to: target, direction: "forward" });
+    setStack((st) => {
+      // Drop the trailing newcategoryforrecipe + addown screens, insert
+      // recipes list + recipe card so back goes to the recipes list.
+      const next: Screen[] = [];
+      for (const sc of st) {
+        if (sc.name === "addown" || sc.name === "newcategoryforrecipe") break;
+        next.push(sc);
+      }
+      next.push({ name: "recipes", categoryKey: catKey, categoryLabel: catLabel });
+      next.push(target);
+      return next;
+    });
+  };
+
   useEffect(() => {
     if (!transition) return;
     const t = setTimeout(() => setTransition(null), DURATION);
@@ -245,6 +298,7 @@ export default function App() {
           finishEditCategory={finishEditCategory}
           finishDeleteCategory={finishDeleteCategory}
           finishDeleteRecipe={finishDeleteRecipe}
+          finishCreateCategoryForRecipe={finishCreateCategoryForRecipe}
         />
       </div>
     </div>
