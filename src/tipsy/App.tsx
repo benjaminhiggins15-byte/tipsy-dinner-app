@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, type CSSProperties } from "react";
-import { categories, getRecipesForCategory, deleteSavedRecipe, type Recipe } from "./data";
+import { getAllCategories, getRecipesForCategory, deleteSavedRecipe, type Recipe } from "./data";
 import AddYourOwn from "./AddYourOwn";
+import NewCategory from "./NewCategory";
 
 type Screen =
   | { name: "home" }
@@ -9,6 +10,7 @@ type Screen =
   | { name: "recipe"; recipe: Recipe; categoryLabel: string }
   | { name: "cook" }
   | { name: "addown"; editRecipe?: Recipe; editCategoryLabel?: string }
+  | { name: "newcategory" }
   | { name: "placeholder"; title: string };
 
 const S: Record<string, CSSProperties> = {
@@ -45,6 +47,7 @@ function screenKey(s: Screen): string {
     case "recipe": return `recipe:${s.categoryLabel}:${s.recipe.title}`;
     case "cook": return "cook";
     case "addown": return s.editRecipe?.savedId ? `addown:edit:${s.editRecipe.savedId}` : "addown";
+    case "newcategory": return "newcategory";
     case "placeholder": return `placeholder:${s.title}`;
   }
 }
@@ -85,6 +88,7 @@ function renderScreen(
         onSaveEdit={(updated, label) => replaceRecipe?.(updated, label)}
       />
     );
+    case "newcategory": return <NewCategory back={back} onSaved={back} />;
     case "placeholder": return <Placeholder title={s.title} back={back} />;
   }
 }
