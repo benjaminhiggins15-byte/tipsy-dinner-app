@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, deleteSavedRecipe, deleteCustomCategory, type Recipe } from "./data";
+import { getAllCategories, getRecipesForCategory, deleteSavedRecipe, type Recipe } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 
@@ -11,6 +11,7 @@ type Screen =
   | { name: "cook" }
   | { name: "addown"; editRecipe?: Recipe; editCategoryLabel?: string }
   | { name: "newcategory" }
+  | { name: "editcategory"; categoryKey: string }
   | { name: "placeholder"; title: string };
 
 const S: Record<string, CSSProperties> = {
@@ -48,6 +49,7 @@ function screenKey(s: Screen): string {
     case "cook": return "cook";
     case "addown": return s.editRecipe?.savedId ? `addown:edit:${s.editRecipe.savedId}` : "addown";
     case "newcategory": return "newcategory";
+    case "editcategory": return `editcategory:${s.categoryKey}`;
     case "placeholder": return `placeholder:${s.title}`;
   }
 }
@@ -57,6 +59,8 @@ function renderScreen(
   push: (s: Screen) => void,
   back: () => void,
   replaceRecipe?: (r: Recipe, label: string) => void,
+  finishEditCategory?: (newLabel: string) => void,
+  finishDeleteCategory?: () => void,
 ) {
   switch (s.name) {
     case "home": return <Home push={push} />;
@@ -89,6 +93,15 @@ function renderScreen(
       />
     );
     case "newcategory": return <NewCategory back={back} onSaved={back} />;
+    case "editcategory": return (
+      <NewCategory
+        back={back}
+        onSaved={back}
+        editKey={s.categoryKey}
+        onEditSaved={(newLabel) => finishEditCategory?.(newLabel)}
+        onDeleted={() => finishDeleteCategory?.()}
+      />
+    );
     case "placeholder": return <Placeholder title={s.title} back={back} />;
   }
 }
@@ -134,6 +147,45 @@ export default function App() {
     });
   };
 
+  // Pop the editcategory screen and replace the recipes screen below with the
+  // new label, animating back to it.
+  const finishEditCategory = (newLabel: string) => {
+    if (transition) return;
+    if (stack.length < 2) return;
+    const prev = stack[stack.length - 2];
+    if (prev.name !== "recipes") {
+      back();
+      return;
+    }
+    const newPrev: Screen = { name: "recipes", categoryKey: prev.categoryKey, categoryLabel: newLabel };
+    setTransition({ from: current, to: newPrev, direction: "back" });
+    setStack((st) => {
+      const next = st.slice(0, -1);
+      next[next.length - 1] = newPrev;
+      return next;
+    });
+  };
+
+  // Pop both the editcategory and the recipes screens, animating back to
+  // categories (which sits below recipes in the stack).
+  const finishDeleteCategory = () => {
+    if (transition) return;
+    // Find the nearest "categories" screen below current; fall back to back().
+    const idx = (() => {
+      for (let i = stack.length - 2; i >= 0; i--) {
+        if (stack[i].name === "categories") return i;
+      }
+      return -1;
+    })();
+    if (idx === -1) {
+      back();
+      return;
+    }
+    const target = stack[idx];
+    setTransition({ from: current, to: target, direction: "back" });
+    setStack((st) => st.slice(0, idx + 1));
+  };
+
   useEffect(() => {
     if (!transition) return;
     const t = setTimeout(() => setTransition(null), DURATION);
@@ -149,6 +201,8 @@ export default function App() {
           push={push}
           back={back}
           replaceRecipe={replaceRecipeAndBack}
+          finishEditCategory={finishEditCategory}
+          finishDeleteCategory={finishDeleteCategory}
         />
       </div>
     </div>
@@ -161,12 +215,16 @@ function ScreenStage({
   push,
   back,
   replaceRecipe,
+  finishEditCategory,
+  finishDeleteCategory,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back" } | null;
   push: (s: Screen) => void;
   back: () => void;
   replaceRecipe: (r: Recipe, label: string) => void;
+  finishEditCategory: (newLabel: string) => void;
+  finishDeleteCategory: () => void;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
@@ -215,7 +273,7 @@ function ScreenStage({
   if (!transition) {
     return (
       <div style={{ ...layerBase, position: "relative", height: "100%" }}>
-        {renderScreen(current, push, back, replaceRecipe)}
+        {renderScreen(current, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory)}
       </div>
     );
   }
@@ -248,10 +306,10 @@ function ScreenStage({
   return (
     <>
       <div style={{ ...layerBase, transform: fromTransform, transition: transitionStyle, zIndex: fromZ, pointerEvents: "none" }}>
-        {renderScreen(from, push, back, replaceRecipe)}
+        {renderScreen(from, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory)}
       </div>
       <div style={{ ...layerBase, transform: toTransform, transition: transitionStyle, zIndex: toZ, pointerEvents: "none" }}>
-        {renderScreen(to, push, back, replaceRecipe)}
+        {renderScreen(to, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory)}
       </div>
     </>
   );
@@ -313,10 +371,7 @@ function Home({ push }: { push: (s: Screen) => void }) {
 
 /* ---------------- Categories ---------------- */
 function Categories({ push, back }: { push: (s: Screen) => void; back: () => void }) {
-  const [version, setVersion] = useState(0);
   const cats = getAllCategories();
-  void version;
-  const [pendingDelete, setPendingDelete] = useState<{ key: string; label: string } | null>(null);
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div style={{ padding: "32px 24px 16px", flexShrink: 0, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
@@ -376,83 +431,10 @@ function Categories({ push, back }: { push: (s: Screen) => void; back: () => voi
               <p style={{ position: "absolute", bottom: 14, left: 14, fontFamily: "'Playfair Display', serif", fontSize: 17, color: "#fff", margin: 0 }}>
                 {c.label}
               </p>
-              {c.key.startsWith("custom-") && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPendingDelete({ key: c.key, label: c.label });
-                  }}
-                  aria-label="Delete category"
-                  style={{
-                    position: "absolute", top: 8, right: 8, width: 26, height: 26,
-                    background: "rgba(255,255,255,0.75)", borderRadius: "50%",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    cursor: "pointer", border: "none", color: "#042C53", padding: 0,
-                  }}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3 6h18" />
-                    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                  </svg>
-                </button>
-              )}
             </div>
           ))}
         </div>
       </div>
-      {pendingDelete && (
-        <div
-          onClick={() => setPendingDelete(null)}
-          style={{
-            position: "absolute", inset: 0, background: "rgba(4,44,83,0.55)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            zIndex: 10, padding: 24,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: "#EEF4F8", borderRadius: 16, padding: "24px 20px",
-              width: "100%", maxWidth: 280, display: "flex", flexDirection: "column",
-              gap: 8, border: "0.5px solid #85B7EB",
-            }}
-          >
-            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 20, color: "#042C53", fontWeight: 400, textAlign: "center" }}>
-              Delete this category?
-            </div>
-            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: "#185FA5", textAlign: "center", marginBottom: 12 }}>
-              This can't be undone.
-            </div>
-            <button
-              onClick={() => setPendingDelete(null)}
-              style={{
-                width: "100%", padding: "12px", borderRadius: 10,
-                background: "transparent", border: "0.5px solid #85B7EB",
-                color: "#185FA5", fontFamily: "'DM Sans', sans-serif",
-                fontSize: 13, fontWeight: 500, cursor: "pointer",
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => {
-                deleteCustomCategory(pendingDelete.key);
-                setPendingDelete(null);
-                setVersion((v) => v + 1);
-              }}
-              style={{
-                width: "100%", padding: "12px", borderRadius: 10,
-                background: "#B85C5C", border: "none",
-                color: "#fff", fontFamily: "'DM Sans', sans-serif",
-                fontSize: 13, fontWeight: 500, cursor: "pointer",
-              }}
-            >
-              Delete
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -470,21 +452,42 @@ function Recipes({
   back: () => void;
 }) {
   const recipes = getRecipesForCategory(categoryKey, categoryLabel);
+  const isCustom = categoryKey.startsWith("custom-");
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ padding: "32px 24px 14px", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+      <div style={{ padding: "32px 24px 14px", flexShrink: 0, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+            <button
+              onClick={back}
+              aria-label="Back"
+              style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "#185FA5", display: "flex", alignItems: "center" }}
+            >
+              <BackArrow />
+            </button>
+          </div>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 400, color: "#042C53" }}>
+            {categoryLabel}
+          </div>
+        </div>
+        {isCustom && (
           <button
-            onClick={back}
-            aria-label="Back"
-            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "#185FA5", display: "flex", alignItems: "center" }}
+            onClick={() => push({ name: "editcategory", categoryKey })}
+            aria-label="Edit category"
+            style={{
+              width: 32, height: 32,
+              background: "rgba(238,244,248,0.85)", borderRadius: "50%",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer", border: "none", color: "#042C53",
+              marginTop: 4, flexShrink: 0,
+            }}
           >
-            <BackArrow />
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+            </svg>
           </button>
-        </div>
-        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 400, color: "#042C53" }}>
-          {categoryLabel}
-        </div>
+        )}
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "0 24px 24px", display: "flex", flexDirection: "column", gap: 8 }}>
         {recipes.map((r, i) => (
