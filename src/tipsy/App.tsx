@@ -703,9 +703,6 @@ function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
           >
             <BackArrow />
           </button>
-          <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, letterSpacing: "0.18em", color: "#185FA5", textTransform: "uppercase" }}>
-            cook
-          </div>
         </div>
         <button
           onClick={() => push({ name: "addown" })}
