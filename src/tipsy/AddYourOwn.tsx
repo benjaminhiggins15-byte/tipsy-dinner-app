@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type CSSProperties, type KeyboardEvent } from "react";
-import { categories, saveRecipe, updateSavedRecipe, deleteSavedRecipe, type Recipe } from "./data";
+import { saveRecipe, updateSavedRecipe, deleteSavedRecipe, loadCustomCategories, type Recipe } from "./data";
 
 type Step = 1 | 2 | 3 | 4 | 6;
 
