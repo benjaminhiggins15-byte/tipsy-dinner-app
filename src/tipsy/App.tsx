@@ -437,6 +437,19 @@ function Categories({ push, back }: { push: (s: Screen) => void; back: () => voi
         </button>
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "0 24px 24px" }}>
+        {cats.length === 0 ? (
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: "48px 16px",
+          }}>
+            <p style={{
+              fontFamily: "'DM Sans', sans-serif", fontSize: 13,
+              color: "#185FA5", margin: 0, textAlign: "center",
+            }}>
+              Add your first category to get started.
+            </p>
+          </div>
+        ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
           {cats.map((c) => (
             <div
@@ -458,6 +471,7 @@ function Categories({ push, back }: { push: (s: Screen) => void; back: () => voi
             </div>
           ))}
         </div>
+        )}
       </div>
     </div>
   );
