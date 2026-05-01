@@ -89,6 +89,18 @@ export function deleteCustomCategory(key: string) {
   window.localStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(list));
 }
 
+export function updateCustomCategory(key: string, name: string, gradient: string) {
+  if (typeof window === "undefined") return;
+  const list = loadCustomCategories().map((c) =>
+    c.key === key ? { ...c, label: name, gradient } : c,
+  );
+  window.localStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(list));
+}
+
+export function findCustomCategory(key: string): CustomCategory | null {
+  return loadCustomCategories().find((c) => c.key === key) ?? null;
+}
+
 export function getAllCategories(): { key: string; label: string; gradient: string }[] {
   return [...categories, ...loadCustomCategories()];
 }
