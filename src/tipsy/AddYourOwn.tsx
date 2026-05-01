@@ -217,16 +217,14 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
         display: "flex", alignItems: "center", justifyContent: "space-between",
         position: "relative", flexShrink: 0,
       }}>
-        <button onClick={onHeaderBack} style={{
+        <button onClick={onHeaderBack} aria-label="Back" style={{
           background: "none", border: "none", cursor: "pointer",
-          fontFamily: fontSans, fontSize: 10, fontWeight: 500,
-          letterSpacing: "0.1em", textTransform: "uppercase", color: C.midBlue,
-          display: "flex", alignItems: "center", gap: 4, padding: 0,
+          color: C.midBlue,
+          display: "flex", alignItems: "center", padding: 0,
         }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M19 12H5" /><path d="M12 19l-7-7 7-7" />
           </svg>
-          {headerLabel}
         </button>
         <div style={{
           fontFamily: fontSerif, fontSize: 16, color: C.navy,
