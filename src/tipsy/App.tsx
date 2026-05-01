@@ -531,7 +531,7 @@ function BackArrow() {
 }
 
 /* ---------------- Cook ---------------- */
-function Cook({ back }: { back: () => void }) {
+function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* Header */}
@@ -549,7 +549,7 @@ function Cook({ back }: { back: () => void }) {
           </div>
         </div>
         <button
-          disabled
+          onClick={() => push({ name: "addown" })}
           style={{
             display: "inline-flex", alignItems: "center", gap: 6,
             padding: "6px 12px",
@@ -560,7 +560,7 @@ function Cook({ back }: { back: () => void }) {
             fontFamily: "'DM Sans', sans-serif",
             fontSize: 11,
             letterSpacing: "0.08em",
-            cursor: "not-allowed",
+            cursor: "pointer",
           }}
         >
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
