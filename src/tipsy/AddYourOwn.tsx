@@ -11,6 +11,20 @@ type Props = {
   editCategoryLabel?: string;
   onSaveEdit?: (updated: Recipe, categoryLabel: string) => void;
   onDeleted?: () => void;
+  onCreateCategoryForRecipe?: (payload: {
+    title: string;
+    description: string;
+    ingredients: { name: string; qty: string }[];
+    steps: string[];
+  }) => void;
+  initialDraft?: {
+    title: string;
+    description: string;
+    ingredients: { name: string; qty: string }[];
+    steps: string[];
+    step?: Step;
+    trayOpen?: boolean;
+  };
 };
 
 const C = {
@@ -46,26 +60,26 @@ const trayEmoji: Record<string, string> = {
   soups: "🍲", salads: "🥗", sandwiches: "🥪", breakfast: "🍳",
 };
 
-export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, editCategoryLabel, onSaveEdit, onDeleted }: Props) {
+export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, editCategoryLabel, onSaveEdit, onDeleted, onCreateCategoryForRecipe, initialDraft }: Props) {
   const isEdit = typeof editRecipe?.savedId === "number";
   const [showDelete, setShowDelete] = useState(false);
-  const [step, setStep] = useState<Step>(1);
-  const [title, setTitle] = useState(editRecipe?.title ?? "");
-  const [desc, setDesc] = useState(editRecipe?.description ?? "");
+  const [step, setStep] = useState<Step>(initialDraft?.step ?? 1);
+  const [title, setTitle] = useState(initialDraft?.title ?? editRecipe?.title ?? "");
+  const [desc, setDesc] = useState(initialDraft?.description ?? editRecipe?.description ?? "");
   const [titleErr, setTitleErr] = useState(false);
   const [descErr, setDescErr] = useState(false);
 
   const [ingName, setIngName] = useState("");
   const [ingQty, setIngQty] = useState("");
   const [ingErr, setIngErr] = useState(false);
-  const [ingredients, setIngredients] = useState<{ name: string; qty: string }[]>(editRecipe?.ingredients ?? []);
+  const [ingredients, setIngredients] = useState<{ name: string; qty: string }[]>(initialDraft?.ingredients ?? editRecipe?.ingredients ?? []);
 
   const [stepInput, setStepInput] = useState("");
   const [stepErr, setStepErr] = useState(false);
-  const [steps, setSteps] = useState<string[]>(editRecipe?.steps ?? []);
+  const [steps, setSteps] = useState<string[]>(initialDraft?.steps ?? editRecipe?.steps ?? []);
 
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
-  const [trayOpen, setTrayOpen] = useState(false);
+  const [trayOpen, setTrayOpen] = useState(!!initialDraft?.trayOpen);
   const [savedCategory, setSavedCategory] = useState<{ key: string; label: string } | null>(null);
 
   // Inline edit state
