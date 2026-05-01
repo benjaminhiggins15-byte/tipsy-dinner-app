@@ -527,6 +527,61 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
         @keyframes tipsy-slideup { from { transform: translateY(100%); } to { transform: translateY(0); } }
         @keyframes tipsy-fadeup { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
+
+      {isEdit && showDelete && (
+        <div
+          onClick={() => setShowDelete(false)}
+          style={{
+            position: "absolute", inset: 0, background: "rgba(4,44,83,0.55)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            zIndex: 30, padding: 24,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: C.bg, borderRadius: 16, padding: "24px 20px",
+              width: "100%", maxWidth: 280, display: "flex", flexDirection: "column",
+              gap: 8, border: `0.5px solid ${C.border}`,
+            }}
+          >
+            <div style={{ fontFamily: fontSerif, fontSize: 20, color: C.navy, fontWeight: 400, textAlign: "center" }}>
+              Delete this recipe?
+            </div>
+            <div style={{ fontFamily: fontSans, fontSize: 13, color: C.midBlue, textAlign: "center", marginBottom: 12 }}>
+              This can't be undone.
+            </div>
+            <button
+              onClick={() => setShowDelete(false)}
+              style={{
+                width: "100%", padding: "12px", borderRadius: 10,
+                background: "transparent", border: `0.5px solid ${C.border}`,
+                color: C.midBlue, fontFamily: fontSans,
+                fontSize: 13, fontWeight: 500, cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                if (editRecipe && typeof editRecipe.savedId === "number") {
+                  deleteSavedRecipe(editRecipe.savedId);
+                }
+                setShowDelete(false);
+                onDeleted?.();
+              }}
+              style={{
+                width: "100%", padding: "12px", borderRadius: 10,
+                background: "#B85C5C", border: "none",
+                color: "#fff", fontFamily: fontSans,
+                fontSize: 13, fontWeight: 500, cursor: "pointer",
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
