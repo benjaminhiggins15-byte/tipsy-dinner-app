@@ -423,10 +423,21 @@ function Recipes({
 }
 
 /* ---------------- Recipe Card ---------------- */
-function RecipeCard({ recipe, back }: { recipe: Recipe; back: () => void }) {
+function RecipeCard({
+  recipe,
+  categoryLabel,
+  back,
+  push,
+}: {
+  recipe: Recipe;
+  categoryLabel: string;
+  back: () => void;
+  push: (s: Screen) => void;
+}) {
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
   const ingredients = recipe.ingredients ?? [];
   const steps = recipe.steps ?? [];
+  const editable = typeof recipe.savedId === "number";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -448,6 +459,23 @@ function RecipeCard({ recipe, back }: { recipe: Recipe; back: () => void }) {
         >
           <BackArrow />
         </button>
+        {editable && (
+          <button
+            onClick={() => push({ name: "addown", editRecipe: recipe, editCategoryLabel: categoryLabel })}
+            aria-label="Edit"
+            style={{
+              position: "absolute", top: 16, right: 16, width: 32, height: 32,
+              background: "rgba(238,244,248,0.85)", borderRadius: "50%",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer", border: "none", color: "#042C53",
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+            </svg>
+          </button>
+        )}
         <p style={{ fontSize: 11, letterSpacing: "0.12em", color: "#185FA5", textTransform: "uppercase", opacity: 0.7, margin: 0 }}>
           photo coming soon
         </p>
