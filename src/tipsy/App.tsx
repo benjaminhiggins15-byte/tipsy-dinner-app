@@ -452,21 +452,42 @@ function Recipes({
   back: () => void;
 }) {
   const recipes = getRecipesForCategory(categoryKey, categoryLabel);
+  const isCustom = categoryKey.startsWith("custom-");
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ padding: "32px 24px 14px", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+      <div style={{ padding: "32px 24px 14px", flexShrink: 0, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+            <button
+              onClick={back}
+              aria-label="Back"
+              style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "#185FA5", display: "flex", alignItems: "center" }}
+            >
+              <BackArrow />
+            </button>
+          </div>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 400, color: "#042C53" }}>
+            {categoryLabel}
+          </div>
+        </div>
+        {isCustom && (
           <button
-            onClick={back}
-            aria-label="Back"
-            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "#185FA5", display: "flex", alignItems: "center" }}
+            onClick={() => push({ name: "editcategory", categoryKey })}
+            aria-label="Edit category"
+            style={{
+              width: 32, height: 32,
+              background: "rgba(238,244,248,0.85)", borderRadius: "50%",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer", border: "none", color: "#042C53",
+              marginTop: 4, flexShrink: 0,
+            }}
           >
-            <BackArrow />
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+            </svg>
           </button>
-        </div>
-        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 400, color: "#042C53" }}>
-          {categoryLabel}
-        </div>
+        )}
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "0 24px 24px", display: "flex", flexDirection: "column", gap: 8 }}>
         {recipes.map((r, i) => (
