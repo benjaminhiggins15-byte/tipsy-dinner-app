@@ -181,6 +181,24 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
     setStep(6);
   };
 
+  const saveEdit = () => {
+    if (!isEdit || !editRecipe || typeof editRecipe.savedId !== "number") return;
+    updateSavedRecipe(editRecipe.savedId, {
+      title: title.trim(),
+      description: desc.trim(),
+      ingredients,
+      steps,
+    });
+    const updated: Recipe = {
+      ...editRecipe,
+      title: title.trim(),
+      description: desc.trim(),
+      ingredients,
+      steps,
+    };
+    onSaveEdit?.(updated, editCategoryLabel ?? editRecipe.category);
+  };
+
   const previewRecipe: Recipe = {
     title: title || "—",
     description: desc || "—",
