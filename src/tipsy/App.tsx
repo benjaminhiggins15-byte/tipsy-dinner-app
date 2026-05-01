@@ -405,9 +405,6 @@ function Recipes({
           >
             <BackArrow />
           </button>
-          <div style={{ fontSize: 11, letterSpacing: "0.18em", color: "#185FA5", textTransform: "uppercase" }}>
-            your library
-          </div>
         </div>
         <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 400, color: "#042C53" }}>
           {categoryLabel}
