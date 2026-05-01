@@ -1,7 +1,14 @@
 import { useState, useRef, useEffect, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, type Recipe } from "./data";
+import { getAllCategories, getRecipesForCategory, saveRecipe, type Recipe } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
+
+type RecipeDraft = {
+  title: string;
+  description: string;
+  ingredients: { name: string; qty: string }[];
+  steps: string[];
+};
 
 type Screen =
   | { name: "home" }
@@ -9,8 +16,9 @@ type Screen =
   | { name: "recipes"; categoryKey: string; categoryLabel: string }
   | { name: "recipe"; recipe: Recipe; categoryLabel: string }
   | { name: "cook" }
-  | { name: "addown"; editRecipe?: Recipe; editCategoryLabel?: string }
+  | { name: "addown"; editRecipe?: Recipe; editCategoryLabel?: string; draft?: RecipeDraft & { trayOpen?: boolean } }
   | { name: "newcategory" }
+  | { name: "newcategoryforrecipe"; draft: RecipeDraft }
   | { name: "editcategory"; categoryKey: string }
   | { name: "placeholder"; title: string };
 
@@ -49,6 +57,7 @@ function screenKey(s: Screen): string {
     case "cook": return "cook";
     case "addown": return s.editRecipe?.savedId ? `addown:edit:${s.editRecipe.savedId}` : "addown";
     case "newcategory": return "newcategory";
+    case "newcategoryforrecipe": return "newcategoryforrecipe";
     case "editcategory": return `editcategory:${s.categoryKey}`;
     case "placeholder": return `placeholder:${s.title}`;
   }
@@ -62,6 +71,7 @@ function renderScreen(
   finishEditCategory?: (newLabel: string) => void,
   finishDeleteCategory?: () => void,
   finishDeleteRecipe?: () => void,
+  finishCreateCategoryForRecipe?: (catKey: string, catLabel: string, draft: RecipeDraft) => void,
 ) {
   switch (s.name) {
     case "home": return <Home push={push} />;
@@ -92,9 +102,19 @@ function renderScreen(
         editCategoryLabel={s.editCategoryLabel}
         onSaveEdit={(updated, label) => replaceRecipe?.(updated, label)}
         onDeleted={() => finishDeleteRecipe?.()}
+        initialDraft={s.draft ? { ...s.draft, step: 4, trayOpen: s.draft.trayOpen } : undefined}
+        onCreateCategoryForRecipe={(payload) => push({ name: "newcategoryforrecipe", draft: payload })}
       />
     );
     case "newcategory": return <NewCategory back={back} onSaved={back} />;
+    case "newcategoryforrecipe": return (
+      <NewCategory
+        back={back}
+        onSaved={(cat) => {
+          if (cat) finishCreateCategoryForRecipe?.(cat.key, cat.label, s.draft);
+        }}
+      />
+    );
     case "editcategory": return (
       <NewCategory
         back={back}
