@@ -11,6 +11,20 @@ type Props = {
   editCategoryLabel?: string;
   onSaveEdit?: (updated: Recipe, categoryLabel: string) => void;
   onDeleted?: () => void;
+  onCreateCategoryForRecipe?: (payload: {
+    title: string;
+    description: string;
+    ingredients: { name: string; qty: string }[];
+    steps: string[];
+  }) => void;
+  initialDraft?: {
+    title: string;
+    description: string;
+    ingredients: { name: string; qty: string }[];
+    steps: string[];
+    step?: Step;
+    trayOpen?: boolean;
+  };
 };
 
 const C = {
@@ -46,26 +60,26 @@ const trayEmoji: Record<string, string> = {
   soups: "🍲", salads: "🥗", sandwiches: "🥪", breakfast: "🍳",
 };
 
-export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, editCategoryLabel, onSaveEdit, onDeleted }: Props) {
+export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, editCategoryLabel, onSaveEdit, onDeleted, onCreateCategoryForRecipe, initialDraft }: Props) {
   const isEdit = typeof editRecipe?.savedId === "number";
   const [showDelete, setShowDelete] = useState(false);
-  const [step, setStep] = useState<Step>(1);
-  const [title, setTitle] = useState(editRecipe?.title ?? "");
-  const [desc, setDesc] = useState(editRecipe?.description ?? "");
+  const [step, setStep] = useState<Step>(initialDraft?.step ?? 1);
+  const [title, setTitle] = useState(initialDraft?.title ?? editRecipe?.title ?? "");
+  const [desc, setDesc] = useState(initialDraft?.description ?? editRecipe?.description ?? "");
   const [titleErr, setTitleErr] = useState(false);
   const [descErr, setDescErr] = useState(false);
 
   const [ingName, setIngName] = useState("");
   const [ingQty, setIngQty] = useState("");
   const [ingErr, setIngErr] = useState(false);
-  const [ingredients, setIngredients] = useState<{ name: string; qty: string }[]>(editRecipe?.ingredients ?? []);
+  const [ingredients, setIngredients] = useState<{ name: string; qty: string }[]>(initialDraft?.ingredients ?? editRecipe?.ingredients ?? []);
 
   const [stepInput, setStepInput] = useState("");
   const [stepErr, setStepErr] = useState(false);
-  const [steps, setSteps] = useState<string[]>(editRecipe?.steps ?? []);
+  const [steps, setSteps] = useState<string[]>(initialDraft?.steps ?? editRecipe?.steps ?? []);
 
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
-  const [trayOpen, setTrayOpen] = useState(false);
+  const [trayOpen, setTrayOpen] = useState(!!initialDraft?.trayOpen);
   const [savedCategory, setSavedCategory] = useState<{ key: string; label: string } | null>(null);
 
   // Inline edit state
@@ -488,21 +502,39 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
             </div>
             {(() => {
               const savedCats = loadCustomCategories();
-              if (savedCats.length === 0) {
-                return (
+              const newCard = (
+                <button
+                  key="__new__"
+                  onClick={() => {
+                    setTrayOpen(false);
+                    onCreateCategoryForRecipe?.({
+                      title: title.trim(),
+                      description: desc.trim(),
+                      ingredients,
+                      steps,
+                    });
+                  }}
+                  style={{
+                    flexShrink: 0, width: 96, cursor: "pointer",
+                    background: "none", padding: 0, textAlign: "left", border: "none",
+                  }}
+                >
                   <div style={{
-                    padding: "20px 18px 4px", textAlign: "center",
-                    fontFamily: fontSans, fontSize: 13, color: C.midBlue,
-                  }}>
-                    No categories yet. Create one in Browse first.
-                  </div>
-                );
-              }
+                    width: 96, height: 70, borderRadius: 12,
+                    background: C.accent, border: `1px solid ${C.border}`,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    color: C.midBlue, fontSize: 32, fontWeight: 300, lineHeight: 1,
+                    boxSizing: "border-box",
+                  }}>+</div>
+                  <div style={{ fontFamily: fontSans, fontSize: 11, fontWeight: 500, color: C.navy, padding: "6px 4px 2px" }}>New category</div>
+                </button>
+              );
               return (
                 <div style={{
                   overflowX: "auto", padding: "14px 18px 4px", display: "flex", gap: 10,
                   scrollbarWidth: "none",
                 }}>
+                  {newCard}
                   {savedCats.map((c) => (
                     <button
                       key={c.key}

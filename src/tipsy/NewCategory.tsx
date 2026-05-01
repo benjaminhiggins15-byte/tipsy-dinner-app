@@ -1,5 +1,5 @@
 import { useState, type CSSProperties, type KeyboardEvent } from "react";
-import { categories, saveCustomCategory, updateCustomCategory, deleteCustomCategory, findCustomCategory } from "./data";
+import { categories, saveCustomCategory, updateCustomCategory, deleteCustomCategory, findCustomCategory, type CustomCategory } from "./data";
 
 const C = {
   bg: "#EEF4F8",
@@ -17,7 +17,7 @@ const fontSans = "'DM Sans', sans-serif";
 
 type Props = {
   back: () => void;
-  onSaved: () => void;
+  onSaved: (cat?: CustomCategory) => void;
   editKey?: string;
   onEditSaved?: (newLabel: string) => void;
   onDeleted?: () => void;
@@ -45,8 +45,8 @@ export default function NewCategory({ back, onSaved, editKey, onEditSaved, onDel
       updateCustomCategory(editKey, trimmed, gradient);
       onEditSaved?.(trimmed);
     } else {
-      saveCustomCategory(trimmed, gradient);
-      onSaved();
+      const cat = saveCustomCategory(trimmed, gradient);
+      onSaved(cat);
     }
   };
 

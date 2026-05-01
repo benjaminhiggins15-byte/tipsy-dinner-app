@@ -1,7 +1,14 @@
 import { useState, useRef, useEffect, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, type Recipe } from "./data";
+import { getAllCategories, getRecipesForCategory, saveRecipe, type Recipe } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
+
+type RecipeDraft = {
+  title: string;
+  description: string;
+  ingredients: { name: string; qty: string }[];
+  steps: string[];
+};
 
 type Screen =
   | { name: "home" }
@@ -9,8 +16,9 @@ type Screen =
   | { name: "recipes"; categoryKey: string; categoryLabel: string }
   | { name: "recipe"; recipe: Recipe; categoryLabel: string }
   | { name: "cook" }
-  | { name: "addown"; editRecipe?: Recipe; editCategoryLabel?: string }
+  | { name: "addown"; editRecipe?: Recipe; editCategoryLabel?: string; draft?: RecipeDraft & { trayOpen?: boolean } }
   | { name: "newcategory" }
+  | { name: "newcategoryforrecipe"; draft: RecipeDraft }
   | { name: "editcategory"; categoryKey: string }
   | { name: "placeholder"; title: string };
 
@@ -49,6 +57,7 @@ function screenKey(s: Screen): string {
     case "cook": return "cook";
     case "addown": return s.editRecipe?.savedId ? `addown:edit:${s.editRecipe.savedId}` : "addown";
     case "newcategory": return "newcategory";
+    case "newcategoryforrecipe": return "newcategoryforrecipe";
     case "editcategory": return `editcategory:${s.categoryKey}`;
     case "placeholder": return `placeholder:${s.title}`;
   }
@@ -62,6 +71,7 @@ function renderScreen(
   finishEditCategory?: (newLabel: string) => void,
   finishDeleteCategory?: () => void,
   finishDeleteRecipe?: () => void,
+  finishCreateCategoryForRecipe?: (catKey: string, catLabel: string, draft: RecipeDraft) => void,
 ) {
   switch (s.name) {
     case "home": return <Home push={push} />;
@@ -92,9 +102,19 @@ function renderScreen(
         editCategoryLabel={s.editCategoryLabel}
         onSaveEdit={(updated, label) => replaceRecipe?.(updated, label)}
         onDeleted={() => finishDeleteRecipe?.()}
+        initialDraft={s.draft ? { ...s.draft, step: 4, trayOpen: s.draft.trayOpen } : undefined}
+        onCreateCategoryForRecipe={(payload) => push({ name: "newcategoryforrecipe", draft: payload })}
       />
     );
     case "newcategory": return <NewCategory back={back} onSaved={back} />;
+    case "newcategoryforrecipe": return (
+      <NewCategory
+        back={back}
+        onSaved={(cat) => {
+          if (cat) finishCreateCategoryForRecipe?.(cat.key, cat.label, s.draft);
+        }}
+      />
+    );
     case "editcategory": return (
       <NewCategory
         back={back}
@@ -119,6 +139,20 @@ export default function App() {
 
   const push = (s: Screen) => {
     if (transition) return;
+    // Special-case: when leaving addown to create a new category for the
+    // in-progress recipe, persist the draft + tray state on the addown screen
+    // beneath so back navigation restores it.
+    if (s.name === "newcategoryforrecipe" && current.name === "addown") {
+      const updatedAddown: Screen = { ...current, draft: { ...s.draft, trayOpen: true } };
+      setTransition({ from: current, to: s, direction: "forward" });
+      setStack((st) => {
+        const next = st.slice();
+        next[next.length - 1] = updatedAddown;
+        next.push(s);
+        return next;
+      });
+      return;
+    }
     setTransition({ from: current, to: s, direction: "forward" });
     setStack((st) => [...st, s]);
   };
@@ -207,6 +241,45 @@ export default function App() {
     setStack((st) => st.slice(0, idx + 1));
   };
 
+  // Save the in-progress recipe under the freshly created category and
+  // navigate directly to the recipe card. Replace both the newcategoryforrecipe
+  // screen and the addown screen beneath with: recipes list + recipe card.
+  const finishCreateCategoryForRecipe = (catKey: string, catLabel: string, draft: RecipeDraft) => {
+    if (transition) return;
+    saveRecipe({
+      id: Date.now(),
+      title: draft.title,
+      description: draft.description,
+      category: catKey,
+      ingredients: draft.ingredients,
+      steps: draft.steps,
+      createdAt: new Date().toISOString(),
+    });
+    const recipe: Recipe = {
+      title: draft.title,
+      description: draft.description,
+      color: "linear-gradient(135deg, #C5DCF4 0%, #85B7EB 100%)",
+      category: catLabel.toLowerCase(),
+      ingredients: draft.ingredients,
+      steps: draft.steps,
+      categoryKey: catKey,
+    };
+    const target: Screen = { name: "recipe", recipe, categoryLabel: catLabel };
+    setTransition({ from: current, to: target, direction: "forward" });
+    setStack((st) => {
+      // Drop the trailing newcategoryforrecipe + addown screens, insert
+      // recipes list + recipe card so back goes to the recipes list.
+      const next: Screen[] = [];
+      for (const sc of st) {
+        if (sc.name === "addown" || sc.name === "newcategoryforrecipe") break;
+        next.push(sc);
+      }
+      next.push({ name: "recipes", categoryKey: catKey, categoryLabel: catLabel });
+      next.push(target);
+      return next;
+    });
+  };
+
   useEffect(() => {
     if (!transition) return;
     const t = setTimeout(() => setTransition(null), DURATION);
@@ -225,6 +298,7 @@ export default function App() {
           finishEditCategory={finishEditCategory}
           finishDeleteCategory={finishDeleteCategory}
           finishDeleteRecipe={finishDeleteRecipe}
+          finishCreateCategoryForRecipe={finishCreateCategoryForRecipe}
         />
       </div>
     </div>
@@ -240,6 +314,7 @@ function ScreenStage({
   finishEditCategory,
   finishDeleteCategory,
   finishDeleteRecipe,
+  finishCreateCategoryForRecipe,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back" } | null;
@@ -249,6 +324,7 @@ function ScreenStage({
   finishEditCategory: (newLabel: string) => void;
   finishDeleteCategory: () => void;
   finishDeleteRecipe: () => void;
+  finishCreateCategoryForRecipe: (catKey: string, catLabel: string, draft: RecipeDraft) => void;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
@@ -297,7 +373,7 @@ function ScreenStage({
   if (!transition) {
     return (
       <div style={{ ...layerBase, position: "relative", height: "100%" }}>
-        {renderScreen(current, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe)}
+        {renderScreen(current, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe)}
       </div>
     );
   }
@@ -330,10 +406,10 @@ function ScreenStage({
   return (
     <>
       <div style={{ ...layerBase, transform: fromTransform, transition: transitionStyle, zIndex: fromZ, pointerEvents: "none" }}>
-        {renderScreen(from, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe)}
+        {renderScreen(from, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe)}
       </div>
       <div style={{ ...layerBase, transform: toTransform, transition: transitionStyle, zIndex: toZ, pointerEvents: "none" }}>
-        {renderScreen(to, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe)}
+        {renderScreen(to, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe)}
       </div>
     </>
   );
