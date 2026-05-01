@@ -313,28 +313,53 @@ function Home({ push }: { push: (s: Screen) => void }) {
 
 /* ---------------- Categories ---------------- */
 function Categories({ push, back }: { push: (s: Screen) => void; back: () => void }) {
+  const cats = getAllCategories();
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ padding: "32px 24px 16px", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-          <button
-            onClick={back}
-            aria-label="Back"
-            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "#185FA5", display: "flex", alignItems: "center" }}
-          >
-            <BackArrow />
-          </button>
-          <div style={{ fontSize: 11, letterSpacing: "0.18em", color: "#185FA5", textTransform: "uppercase" }}>
-            your library
+      <div style={{ padding: "32px 24px 16px", flexShrink: 0, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+            <button
+              onClick={back}
+              aria-label="Back"
+              style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "#185FA5", display: "flex", alignItems: "center" }}
+            >
+              <BackArrow />
+            </button>
+            <div style={{ fontSize: 11, letterSpacing: "0.18em", color: "#185FA5", textTransform: "uppercase" }}>
+              your library
+            </div>
+          </div>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 400, color: "#042C53" }}>
+            Browse
           </div>
         </div>
-        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 400, color: "#042C53" }}>
-          Browse
-        </div>
+        <button
+          onClick={() => push({ name: "newcategory" })}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 6,
+            padding: "6px 12px",
+            background: "#E6F1FB",
+            border: "0.5px solid #85B7EB",
+            borderRadius: 999,
+            color: "#185FA5",
+            fontFamily: "'DM Sans', sans-serif",
+            fontSize: 11,
+            letterSpacing: "0.08em",
+            cursor: "pointer",
+            marginTop: 4,
+          }}
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 5v14" />
+            <path d="M5 12h14" />
+          </svg>
+          New category
+        </button>
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "0 24px 24px" }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
-          {categories.map((c) => (
+          {cats.map((c) => (
             <div
               key={c.key}
               onClick={() => push({ name: "recipes", categoryKey: c.key, categoryLabel: c.label })}
