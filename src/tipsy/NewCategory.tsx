@@ -1,5 +1,5 @@
 import { useState, type CSSProperties, type KeyboardEvent } from "react";
-import { categories, saveCustomCategory } from "./data";
+import { categories, saveCustomCategory, updateCustomCategory, deleteCustomCategory, findCustomCategory } from "./data";
 
 const C = {
   bg: "#EEF4F8",
@@ -18,20 +18,36 @@ const fontSans = "'DM Sans', sans-serif";
 type Props = {
   back: () => void;
   onSaved: () => void;
+  editKey?: string;
+  onEditSaved?: (newLabel: string) => void;
+  onDeleted?: () => void;
 };
 
-export default function NewCategory({ back, onSaved }: Props) {
-  const [name, setName] = useState("");
+export default function NewCategory({ back, onSaved, editKey, onEditSaved, onDeleted }: Props) {
+  const isEdit = !!editKey;
+  const existing = isEdit ? findCustomCategory(editKey!) : null;
+  const initialGradientIdx = existing
+    ? Math.max(0, categories.findIndex((c) => c.gradient === existing.gradient))
+    : 0;
+  const [name, setName] = useState(existing?.label ?? "");
   const [nameErr, setNameErr] = useState(false);
-  const [gradientIdx, setGradientIdx] = useState(0);
+  const [gradientIdx, setGradientIdx] = useState(initialGradientIdx);
+  const [showDelete, setShowDelete] = useState(false);
 
   const trySave = () => {
     if (!name.trim()) {
       setNameErr(true);
       return;
     }
-    saveCustomCategory(name.trim(), categories[gradientIdx].gradient);
-    onSaved();
+    const trimmed = name.trim();
+    const gradient = categories[gradientIdx].gradient;
+    if (isEdit && editKey) {
+      updateCustomCategory(editKey, trimmed, gradient);
+      onEditSaved?.(trimmed);
+    } else {
+      saveCustomCategory(trimmed, gradient);
+      onSaved();
+    }
   };
 
   return (
@@ -61,9 +77,9 @@ export default function NewCategory({ back, onSaved }: Props) {
 
       {/* Body */}
       <div style={{ flex: 1, overflowY: "auto", padding: "20px 16px 28px", display: "flex", flexDirection: "column" }}>
-        <Eyebrow>New category</Eyebrow>
-        <Title>Create a category</Title>
-        <Sub>Give it a name and pick a style.</Sub>
+        <Eyebrow>{isEdit ? "Edit category" : "New category"}</Eyebrow>
+        <Title>{isEdit ? "Edit your category" : "Create a category"}</Title>
+        <Sub>{isEdit ? "Update the name or style." : "Give it a name and pick a style."}</Sub>
 
         <div style={{ marginBottom: 18 }}>
           <Label>Category name</Label>
@@ -102,8 +118,71 @@ export default function NewCategory({ back, onSaved }: Props) {
           fontFamily: fontSans, fontSize: 12, fontWeight: 600,
           letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer",
           marginTop: 8,
-        }}>Save category</button>
+        }}>{isEdit ? "Save changes" : "Save category"}</button>
+
+        {isEdit && (
+          <button onClick={() => setShowDelete(true)} style={{
+            width: "100%", background: "transparent", color: "#B85C5C",
+            border: "none", padding: "12px",
+            fontFamily: fontSans, fontSize: 12, fontWeight: 600,
+            letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer",
+            marginTop: 4,
+          }}>Delete category</button>
+        )}
       </div>
+
+      {isEdit && showDelete && (
+        <div
+          onClick={() => setShowDelete(false)}
+          style={{
+            position: "absolute", inset: 0, background: "rgba(4,44,83,0.55)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            zIndex: 10, padding: 24,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: C.bg, borderRadius: 16, padding: "24px 20px",
+              width: "100%", maxWidth: 280, display: "flex", flexDirection: "column",
+              gap: 8, border: `0.5px solid ${C.border}`,
+            }}
+          >
+            <div style={{ fontFamily: fontSerif, fontSize: 20, color: C.navy, fontWeight: 400, textAlign: "center" }}>
+              Delete this category?
+            </div>
+            <div style={{ fontFamily: fontSans, fontSize: 13, color: C.midBlue, textAlign: "center", marginBottom: 12 }}>
+              This will also remove all recipes saved to this category. This can't be undone.
+            </div>
+            <button
+              onClick={() => setShowDelete(false)}
+              style={{
+                width: "100%", padding: "12px", borderRadius: 10,
+                background: "transparent", border: `0.5px solid ${C.border}`,
+                color: C.midBlue, fontFamily: fontSans,
+                fontSize: 13, fontWeight: 500, cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                if (editKey) deleteCustomCategory(editKey);
+                setShowDelete(false);
+                onDeleted?.();
+              }}
+              style={{
+                width: "100%", padding: "12px", borderRadius: 10,
+                background: "#B85C5C", border: "none",
+                color: "#fff", fontFamily: fontSans,
+                fontSize: 13, fontWeight: 500, cursor: "pointer",
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
