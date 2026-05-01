@@ -400,7 +400,11 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
               <Title>Here's your recipe</Title>
               <Sub>This is exactly how it will appear in Browse.</Sub>
               <PreviewCard recipe={previewRecipe} tab={tab} setTab={setTab} />
-              <PrimaryBtn onClick={() => setTrayOpen(true)}>Save to Browse</PrimaryBtn>
+              {isEdit ? (
+                <PrimaryBtn onClick={saveEdit}>Save changes</PrimaryBtn>
+              ) : (
+                <PrimaryBtn onClick={() => setTrayOpen(true)}>Save to Browse</PrimaryBtn>
+              )}
               <GhostBtn onClick={() => setStep(3)}>← Edit recipe</GhostBtn>
             </>
           )}
