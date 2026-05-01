@@ -637,6 +637,53 @@ function DelBtn({ onClick }: { onClick: () => void }) {
   );
 }
 
+function EditInput({
+  value, onChange, placeholder, onEnter, autoFocus,
+}: { value: string; onChange: (v: string) => void; placeholder?: string; onEnter?: () => void; autoFocus?: boolean }) {
+  const [focused, setFocused] = useState(false);
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && onEnter) { e.preventDefault(); onEnter(); }
+  };
+  return (
+    <input
+      type="text"
+      autoFocus={autoFocus}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={onKey}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      placeholder={placeholder}
+      style={{
+        ...inputStyleBase,
+        padding: "8px 10px",
+        fontSize: 13,
+        borderColor: focused ? C.border : C.borderLight,
+      }}
+    />
+  );
+}
+
+function ConfirmBtn({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      onMouseDown={(e) => e.preventDefault()}
+      aria-label="Confirm"
+      style={{
+        background: C.btnBlue, border: "none", color: C.white, cursor: "pointer",
+        width: 28, height: 28, borderRadius: 8,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        flexShrink: 0, padding: 0,
+      }}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M5 12l5 5L20 7" />
+      </svg>
+    </button>
+  );
+}
+
 function browseActionStyle(primary: boolean): CSSProperties {
   return {
     flex: 1,
