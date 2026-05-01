@@ -326,9 +326,6 @@ function Categories({ push, back }: { push: (s: Screen) => void; back: () => voi
             >
               <BackArrow />
             </button>
-            <div style={{ fontSize: 11, letterSpacing: "0.18em", color: "#185FA5", textTransform: "uppercase" }}>
-              your library
-            </div>
           </div>
           <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 400, color: "#042C53" }}>
             Browse
@@ -354,7 +351,7 @@ function Categories({ push, back }: { push: (s: Screen) => void; back: () => voi
             <path d="M12 5v14" />
             <path d="M5 12h14" />
           </svg>
-          New category
+          New
         </button>
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "0 24px 24px" }}>
