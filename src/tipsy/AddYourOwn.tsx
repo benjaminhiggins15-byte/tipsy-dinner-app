@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useState, useEffect, useRef, type CSSProperties, type KeyboardEvent } from "react";
 import { categories, saveRecipe, type Recipe } from "./data";
 
 type Step = 1 | 2 | 3 | 4 | 6;
@@ -62,6 +62,56 @@ export default function AddYourOwn({ back, goCategories, goRecipe }: Props) {
   const [trayOpen, setTrayOpen] = useState(false);
   const [savedCategory, setSavedCategory] = useState<{ key: string; label: string } | null>(null);
 
+  // Inline edit state
+  const [editing, setEditing] = useState<
+    | { kind: "ingredient"; index: number; name: string; qty: string }
+    | { kind: "step"; index: number; text: string }
+    | null
+  >(null);
+  const editRowRef = useRef<HTMLDivElement | null>(null);
+
+  const cancelEdit = () => setEditing(null);
+
+  const startEditIngredient = (i: number) => {
+    if (editing) cancelEdit();
+    const it = ingredients[i];
+    setEditing({ kind: "ingredient", index: i, name: it.name, qty: it.qty });
+  };
+  const confirmEditIngredient = () => {
+    if (!editing || editing.kind !== "ingredient") return;
+    if (!editing.name.trim()) return;
+    const idx = editing.index;
+    const next = { name: editing.name.trim(), qty: editing.qty.trim() };
+    setIngredients((arr) => arr.map((v, i) => (i === idx ? next : v)));
+    setEditing(null);
+  };
+  const startEditStep = (i: number) => {
+    if (editing) cancelEdit();
+    setEditing({ kind: "step", index: i, text: steps[i] });
+  };
+  const confirmEditStep = () => {
+    if (!editing || editing.kind !== "step") return;
+    if (!editing.text.trim()) return;
+    const idx = editing.index;
+    const text = editing.text.trim();
+    setSteps((arr) => arr.map((v, i) => (i === idx ? text : v)));
+    setEditing(null);
+  };
+
+  useEffect(() => {
+    if (!editing) return;
+    const onDown = (e: MouseEvent | TouchEvent) => {
+      const node = editRowRef.current;
+      if (node && !node.contains(e.target as Node)) cancelEdit();
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("touchstart", onDown);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("touchstart", onDown);
+    };
+  }, [editing]);
+
   const headerLabel = step === 1 ? "Cook" : "Back";
   const onHeaderBack = () => {
     if (step === 1) back();
@@ -83,6 +133,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe }: Props) {
     setTab("ingredients");
     setTrayOpen(false);
     setSavedCategory(null);
+    setEditing(null);
   };
 
   const tryAdvance1 = () => {
@@ -211,13 +262,45 @@ export default function AddYourOwn({ back, goCategories, goRecipe }: Props) {
 
               {ingredients.length > 0 && (
                 <div style={{ marginBottom: 14 }}>
-                  {ingredients.map((it, i) => (
-                    <ListItem key={i}>
-                      <span style={{ flex: 1, fontSize: 13, color: C.navy, lineHeight: 1.4 }}>{it.name}</span>
-                      <span style={{ fontSize: 12, color: C.muted, textAlign: "right", minWidth: 60 }}>{it.qty}</span>
-                      <DelBtn onClick={() => removeIngredient(i)} />
-                    </ListItem>
-                  ))}
+                  {ingredients.map((it, i) => {
+                    const isEditing = editing?.kind === "ingredient" && editing.index === i;
+                    if (isEditing && editing?.kind === "ingredient") {
+                      return (
+                        <div key={i} ref={editRowRef}>
+                          <ListItem>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 90px", gap: 8, flex: 1 }}>
+                              <EditInput
+                                value={editing.name}
+                                onChange={(v) => setEditing({ ...editing, name: v })}
+                                placeholder="Ingredient"
+                                autoFocus
+                                onEnter={confirmEditIngredient}
+                              />
+                              <EditInput
+                                value={editing.qty}
+                                onChange={(v) => setEditing({ ...editing, qty: v })}
+                                placeholder="Qty"
+                                onEnter={confirmEditIngredient}
+                              />
+                            </div>
+                            <ConfirmBtn onClick={confirmEditIngredient} />
+                          </ListItem>
+                        </div>
+                      );
+                    }
+                    return (
+                      <ListItem key={i}>
+                        <div
+                          onClick={() => startEditIngredient(i)}
+                          style={{ flex: 1, display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}
+                        >
+                          <span style={{ flex: 1, fontSize: 13, color: C.navy, lineHeight: 1.4 }}>{it.name}</span>
+                          <span style={{ fontSize: 12, color: C.muted, textAlign: "right", minWidth: 60 }}>{it.qty}</span>
+                        </div>
+                        <DelBtn onClick={() => removeIngredient(i)} />
+                      </ListItem>
+                    );
+                  })}
                 </div>
               )}
 
@@ -256,13 +339,38 @@ export default function AddYourOwn({ back, goCategories, goRecipe }: Props) {
 
               {steps.length > 0 && (
                 <div style={{ marginBottom: 14 }}>
-                  {steps.map((s, i) => (
-                    <ListItem key={i}>
-                      <span style={{ fontFamily: fontSerif, fontSize: 14, color: C.stepMuted, minWidth: 18, textAlign: "center" }}>{i + 1}</span>
-                      <span style={{ flex: 1, fontSize: 13, color: C.navy, lineHeight: 1.4 }}>{s}</span>
-                      <DelBtn onClick={() => removeStep(i)} />
-                    </ListItem>
-                  ))}
+                  {steps.map((s, i) => {
+                    const isEditing = editing?.kind === "step" && editing.index === i;
+                    if (isEditing && editing?.kind === "step") {
+                      return (
+                        <div key={i} ref={editRowRef}>
+                          <ListItem>
+                            <span style={{ fontFamily: fontSerif, fontSize: 14, color: C.stepMuted, minWidth: 18, textAlign: "center" }}>{i + 1}</span>
+                            <div style={{ flex: 1 }}>
+                              <EditInput
+                                value={editing.text}
+                                onChange={(v) => setEditing({ ...editing, text: v })}
+                                placeholder="Describe the step"
+                                autoFocus
+                                onEnter={confirmEditStep}
+                              />
+                            </div>
+                            <ConfirmBtn onClick={confirmEditStep} />
+                          </ListItem>
+                        </div>
+                      );
+                    }
+                    return (
+                      <ListItem key={i}>
+                        <span style={{ fontFamily: fontSerif, fontSize: 14, color: C.stepMuted, minWidth: 18, textAlign: "center" }}>{i + 1}</span>
+                        <span
+                          onClick={() => startEditStep(i)}
+                          style={{ flex: 1, fontSize: 13, color: C.navy, lineHeight: 1.4, cursor: "pointer" }}
+                        >{s}</span>
+                        <DelBtn onClick={() => removeStep(i)} />
+                      </ListItem>
+                    );
+                  })}
                 </div>
               )}
 
@@ -526,6 +634,53 @@ function DelBtn({ onClick }: { onClick: () => void }) {
       background: "none", border: "none", color: C.border, cursor: "pointer",
       fontSize: 15, padding: "0 0 0 4px", lineHeight: 1,
     }}>×</button>
+  );
+}
+
+function EditInput({
+  value, onChange, placeholder, onEnter, autoFocus,
+}: { value: string; onChange: (v: string) => void; placeholder?: string; onEnter?: () => void; autoFocus?: boolean }) {
+  const [focused, setFocused] = useState(false);
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && onEnter) { e.preventDefault(); onEnter(); }
+  };
+  return (
+    <input
+      type="text"
+      autoFocus={autoFocus}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={onKey}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      placeholder={placeholder}
+      style={{
+        ...inputStyleBase,
+        padding: "8px 10px",
+        fontSize: 13,
+        borderColor: focused ? C.border : C.borderLight,
+      }}
+    />
+  );
+}
+
+function ConfirmBtn({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      onMouseDown={(e) => e.preventDefault()}
+      aria-label="Confirm"
+      style={{
+        background: C.btnBlue, border: "none", color: C.white, cursor: "pointer",
+        width: 28, height: 28, borderRadius: 8,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        flexShrink: 0, padding: 0,
+      }}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M5 12l5 5L20 7" />
+      </svg>
+    </button>
   );
 }
 
