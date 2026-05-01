@@ -239,6 +239,7 @@ function ScreenStage({
   replaceRecipe,
   finishEditCategory,
   finishDeleteCategory,
+  finishDeleteRecipe,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back" } | null;
@@ -247,6 +248,7 @@ function ScreenStage({
   replaceRecipe: (r: Recipe, label: string) => void;
   finishEditCategory: (newLabel: string) => void;
   finishDeleteCategory: () => void;
+  finishDeleteRecipe: () => void;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
