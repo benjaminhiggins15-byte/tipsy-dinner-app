@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type CSSProperties, type KeyboardEvent } from "react";
-import { categories, saveRecipe, type Recipe } from "./data";
+import { categories, saveRecipe, updateSavedRecipe, type Recipe } from "./data";
 
 type Step = 1 | 2 | 3 | 4 | 6;
 
@@ -7,6 +7,9 @@ type Props = {
   back: () => void;
   goCategories: () => void;
   goRecipe: (recipe: Recipe, categoryLabel: string) => void;
+  editRecipe?: Recipe;
+  editCategoryLabel?: string;
+  onSaveEdit?: (updated: Recipe, categoryLabel: string) => void;
 };
 
 const C = {
@@ -42,21 +45,22 @@ const trayEmoji: Record<string, string> = {
   soups: "🍲", salads: "🥗", sandwiches: "🥪", breakfast: "🍳",
 };
 
-export default function AddYourOwn({ back, goCategories, goRecipe }: Props) {
+export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, editCategoryLabel, onSaveEdit }: Props) {
+  const isEdit = typeof editRecipe?.savedId === "number";
   const [step, setStep] = useState<Step>(1);
-  const [title, setTitle] = useState("");
-  const [desc, setDesc] = useState("");
+  const [title, setTitle] = useState(editRecipe?.title ?? "");
+  const [desc, setDesc] = useState(editRecipe?.description ?? "");
   const [titleErr, setTitleErr] = useState(false);
   const [descErr, setDescErr] = useState(false);
 
   const [ingName, setIngName] = useState("");
   const [ingQty, setIngQty] = useState("");
   const [ingErr, setIngErr] = useState(false);
-  const [ingredients, setIngredients] = useState<{ name: string; qty: string }[]>([]);
+  const [ingredients, setIngredients] = useState<{ name: string; qty: string }[]>(editRecipe?.ingredients ?? []);
 
   const [stepInput, setStepInput] = useState("");
   const [stepErr, setStepErr] = useState(false);
-  const [steps, setSteps] = useState<string[]>([]);
+  const [steps, setSteps] = useState<string[]>(editRecipe?.steps ?? []);
 
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
   const [trayOpen, setTrayOpen] = useState(false);
