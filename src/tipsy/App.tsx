@@ -314,6 +314,7 @@ function ScreenStage({
   finishEditCategory,
   finishDeleteCategory,
   finishDeleteRecipe,
+  finishCreateCategoryForRecipe,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back" } | null;
@@ -323,6 +324,7 @@ function ScreenStage({
   finishEditCategory: (newLabel: string) => void;
   finishDeleteCategory: () => void;
   finishDeleteRecipe: () => void;
+  finishCreateCategoryForRecipe: (catKey: string, catLabel: string, draft: RecipeDraft) => void;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
@@ -371,7 +373,7 @@ function ScreenStage({
   if (!transition) {
     return (
       <div style={{ ...layerBase, position: "relative", height: "100%" }}>
-        {renderScreen(current, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe)}
+        {renderScreen(current, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe)}
       </div>
     );
   }
@@ -404,10 +406,10 @@ function ScreenStage({
   return (
     <>
       <div style={{ ...layerBase, transform: fromTransform, transition: transitionStyle, zIndex: fromZ, pointerEvents: "none" }}>
-        {renderScreen(from, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe)}
+        {renderScreen(from, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe)}
       </div>
       <div style={{ ...layerBase, transform: toTransform, transition: transitionStyle, zIndex: toZ, pointerEvents: "none" }}>
-        {renderScreen(to, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe)}
+        {renderScreen(to, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe)}
       </div>
     </>
   );
