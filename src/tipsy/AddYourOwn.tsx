@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type CSSProperties, type KeyboardEvent } from "react";
-import { categories, saveRecipe, updateSavedRecipe, type Recipe } from "./data";
+import { categories, saveRecipe, updateSavedRecipe, deleteSavedRecipe, type Recipe } from "./data";
 
 type Step = 1 | 2 | 3 | 4 | 6;
 
@@ -10,6 +10,7 @@ type Props = {
   editRecipe?: Recipe;
   editCategoryLabel?: string;
   onSaveEdit?: (updated: Recipe, categoryLabel: string) => void;
+  onDeleted?: () => void;
 };
 
 const C = {
@@ -45,8 +46,9 @@ const trayEmoji: Record<string, string> = {
   soups: "🍲", salads: "🥗", sandwiches: "🥪", breakfast: "🍳",
 };
 
-export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, editCategoryLabel, onSaveEdit }: Props) {
+export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, editCategoryLabel, onSaveEdit, onDeleted }: Props) {
   const isEdit = typeof editRecipe?.savedId === "number";
+  const [showDelete, setShowDelete] = useState(false);
   const [step, setStep] = useState<Step>(1);
   const [title, setTitle] = useState(editRecipe?.title ?? "");
   const [desc, setDesc] = useState(editRecipe?.description ?? "");
@@ -422,6 +424,15 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                 <PrimaryBtn onClick={() => setTrayOpen(true)}>Save to Browse</PrimaryBtn>
               )}
               <GhostBtn onClick={() => setStep(3)}>← Edit recipe</GhostBtn>
+              {isEdit && (
+                <button onClick={() => setShowDelete(true)} style={{
+                  width: "100%", background: "transparent", color: "#B85C5C",
+                  border: "none", padding: "12px",
+                  fontFamily: fontSans, fontSize: 12, fontWeight: 600,
+                  letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer",
+                  marginTop: 4,
+                }}>Delete recipe</button>
+              )}
             </>
           )}
 
