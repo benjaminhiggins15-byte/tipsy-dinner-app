@@ -83,6 +83,12 @@ export function saveCustomCategory(name: string, gradient: string): CustomCatego
   return cat;
 }
 
+export function deleteCustomCategory(key: string) {
+  if (typeof window === "undefined") return;
+  const list = loadCustomCategories().filter((c) => c.key !== key);
+  window.localStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(list));
+}
+
 export function getAllCategories(): { key: string; label: string; gradient: string }[] {
   return [...categories, ...loadCustomCategories()];
 }
