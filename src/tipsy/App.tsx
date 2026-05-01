@@ -132,36 +132,38 @@ function ScreenStage({
   back: () => void;
 }) {
   // Trigger animation on mount of incoming layer.
-  // Phase is derived: if the current transition key hasn't been "armed" yet,
-  // we render at "start" positions (no transition). After first paint, we
-  // flip to "end" so the CSS transition runs.
+  // Phase is derived from state: when a new transition starts, phase begins as
+  // "start" (renders incoming offscreen with NO css transition). After the
+  // browser paints that frame, we flip to "end" so the CSS transition runs.
   const transKey = transition
     ? `${screenKey(transition.from)}->${screenKey(transition.to)}:${transition.direction}`
     : null;
-  const armedKeyRef = useRef<string | null>(null);
-  const [, forceRender] = useState(0);
+  const [armedKey, setArmedKey] = useState<string | null>(null);
   const animPhase: "start" | "end" =
-    transKey && armedKeyRef.current !== transKey ? "start" : "end";
+    transKey && armedKey !== transKey ? "start" : "end";
 
   useEffect(() => {
-    if (transKey && armedKeyRef.current !== transKey) {
-      let r2 = 0;
-      // Two RAFs to guarantee the browser paints the "start" frame first.
-      const r1 = requestAnimationFrame(() => {
-        r2 = requestAnimationFrame(() => {
-          armedKeyRef.current = transKey;
-          forceRender((n) => n + 1);
-        });
-      });
-      return () => {
-        cancelAnimationFrame(r1);
-        if (r2) cancelAnimationFrame(r2);
-      };
-    }
     if (!transKey) {
-      armedKeyRef.current = null;
+      if (armedKey !== null) setArmedKey(null);
+      return;
     }
-  }, [transKey]);
+    if (armedKey === transKey) return;
+    let r2 = 0;
+    let cancelled = false;
+    // Two RAFs to guarantee the browser paints the "start" frame first.
+    const r1 = requestAnimationFrame(() => {
+      if (cancelled) return;
+      r2 = requestAnimationFrame(() => {
+        if (cancelled) return;
+        setArmedKey(transKey);
+      });
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(r1);
+      if (r2) cancelAnimationFrame(r2);
+    };
+  }, [transKey, armedKey]);
 
   const layerBase: CSSProperties = {
     position: "absolute",
