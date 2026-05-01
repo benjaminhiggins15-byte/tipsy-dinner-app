@@ -56,6 +56,37 @@ export const categories = [
   { key: "breakfast", label: "Breakfast", gradient: "linear-gradient(135deg, #E8C97A 0%, #B8942A 100%)" },
 ];
 
+const CATEGORIES_STORAGE_KEY = "tipsyDinnerCategories";
+
+export type CustomCategory = { key: string; label: string; gradient: string };
+
+export function loadCustomCategories(): CustomCategory[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(CATEGORIES_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCustomCategory(name: string, gradient: string): CustomCategory {
+  const key = `custom-${Date.now()}`;
+  const cat: CustomCategory = { key, label: name, gradient };
+  if (typeof window !== "undefined") {
+    const list = loadCustomCategories();
+    list.push(cat);
+    window.localStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(list));
+  }
+  return cat;
+}
+
+export function getAllCategories(): { key: string; label: string; gradient: string }[] {
+  return [...categories, ...loadCustomCategories()];
+}
+
 export const recipesByCategory: Record<string, Recipe[]> = {
   italian: italianRecipes,
 };
