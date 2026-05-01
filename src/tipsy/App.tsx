@@ -371,10 +371,7 @@ function Home({ push }: { push: (s: Screen) => void }) {
 
 /* ---------------- Categories ---------------- */
 function Categories({ push, back }: { push: (s: Screen) => void; back: () => void }) {
-  const [version, setVersion] = useState(0);
   const cats = getAllCategories();
-  void version;
-  const [pendingDelete, setPendingDelete] = useState<{ key: string; label: string } | null>(null);
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div style={{ padding: "32px 24px 16px", flexShrink: 0, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
@@ -434,83 +431,10 @@ function Categories({ push, back }: { push: (s: Screen) => void; back: () => voi
               <p style={{ position: "absolute", bottom: 14, left: 14, fontFamily: "'Playfair Display', serif", fontSize: 17, color: "#fff", margin: 0 }}>
                 {c.label}
               </p>
-              {c.key.startsWith("custom-") && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPendingDelete({ key: c.key, label: c.label });
-                  }}
-                  aria-label="Delete category"
-                  style={{
-                    position: "absolute", top: 8, right: 8, width: 26, height: 26,
-                    background: "rgba(255,255,255,0.75)", borderRadius: "50%",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    cursor: "pointer", border: "none", color: "#042C53", padding: 0,
-                  }}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3 6h18" />
-                    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                  </svg>
-                </button>
-              )}
             </div>
           ))}
         </div>
       </div>
-      {pendingDelete && (
-        <div
-          onClick={() => setPendingDelete(null)}
-          style={{
-            position: "absolute", inset: 0, background: "rgba(4,44,83,0.55)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            zIndex: 10, padding: 24,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: "#EEF4F8", borderRadius: 16, padding: "24px 20px",
-              width: "100%", maxWidth: 280, display: "flex", flexDirection: "column",
-              gap: 8, border: "0.5px solid #85B7EB",
-            }}
-          >
-            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 20, color: "#042C53", fontWeight: 400, textAlign: "center" }}>
-              Delete this category?
-            </div>
-            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: "#185FA5", textAlign: "center", marginBottom: 12 }}>
-              This can't be undone.
-            </div>
-            <button
-              onClick={() => setPendingDelete(null)}
-              style={{
-                width: "100%", padding: "12px", borderRadius: 10,
-                background: "transparent", border: "0.5px solid #85B7EB",
-                color: "#185FA5", fontFamily: "'DM Sans', sans-serif",
-                fontSize: 13, fontWeight: 500, cursor: "pointer",
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => {
-                deleteCustomCategory(pendingDelete.key);
-                setPendingDelete(null);
-                setVersion((v) => v + 1);
-              }}
-              style={{
-                width: "100%", padding: "12px", borderRadius: 10,
-                background: "#B85C5C", border: "none",
-                color: "#fff", fontFamily: "'DM Sans', sans-serif",
-                fontSize: 13, fontWeight: 500, cursor: "pointer",
-              }}
-            >
-              Delete
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
