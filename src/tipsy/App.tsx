@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, deleteSavedRecipe, type Recipe } from "./data";
+import { getAllCategories, getRecipesForCategory, type Recipe } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 
@@ -61,6 +61,7 @@ function renderScreen(
   replaceRecipe?: (r: Recipe, label: string) => void,
   finishEditCategory?: (newLabel: string) => void,
   finishDeleteCategory?: () => void,
+  finishDeleteRecipe?: () => void,
 ) {
   switch (s.name) {
     case "home": return <Home push={push} />;
@@ -90,6 +91,7 @@ function renderScreen(
         editRecipe={s.editRecipe}
         editCategoryLabel={s.editCategoryLabel}
         onSaveEdit={(updated, label) => replaceRecipe?.(updated, label)}
+        onDeleted={() => finishDeleteRecipe?.()}
       />
     );
     case "newcategory": return <NewCategory back={back} onSaved={back} />;
