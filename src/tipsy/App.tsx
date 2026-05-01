@@ -659,9 +659,6 @@ function Placeholder({ title, back }: { title: string; back: () => void }) {
           <button onClick={back} aria-label="Back" style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "#185FA5", display: "flex", alignItems: "center" }}>
             <BackArrow />
           </button>
-          <div style={{ fontSize: 11, letterSpacing: "0.18em", color: "#185FA5", textTransform: "uppercase" }}>
-            tipsy dinner
-          </div>
         </div>
         <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 400, color: "#042C53" }}>
           {title}
