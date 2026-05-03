@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, type CSSProperties } from "react";
 import { getAllCategories, getRecipesForCategory, saveRecipe, type Recipe } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
+import Onboarding from "./Onboarding";
 
 type RecipeDraft = {
   title: string;
@@ -132,6 +133,14 @@ function renderScreen(
 export default function App() {
   const [stack, setStack] = useState<Screen[]>([{ name: "home" }]);
   const current = stack[stack.length - 1];
+  const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
+  useEffect(() => {
+    try {
+      setShowOnboarding(localStorage.getItem("tipsyDinnerOnboardingComplete") !== "true");
+    } catch {
+      setShowOnboarding(false);
+    }
+  }, []);
   const [transition, setTransition] = useState<{
     from: Screen;
     to: Screen;
@@ -293,6 +302,9 @@ export default function App() {
   return (
     <div style={S.page}>
       <div style={S.phone}>
+        {showOnboarding === null ? null : showOnboarding ? (
+          <Onboarding onComplete={() => setShowOnboarding(false)} />
+        ) : (
         <ScreenStage
           current={current}
           transition={transition}
@@ -305,6 +317,7 @@ export default function App() {
           finishCreateCategoryForRecipe={finishCreateCategoryForRecipe}
           finishSaveRecipe={finishSaveRecipe}
         />
+        )}
       </div>
     </div>
   );
