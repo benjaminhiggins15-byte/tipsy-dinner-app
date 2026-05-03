@@ -48,7 +48,7 @@ function QuestionScreen({
         value={val}
         onChange={(e) => setVal(e.target.value)}
         style={{
-          flex: 1,
+          height: "40%",
           width: "100%",
           background: "#D8E9F7",
           border: "1px solid #85B7EB",
@@ -63,10 +63,12 @@ function QuestionScreen({
           outline: "none",
         }}
       />
+      <div style={{ flex: 1 }} />
       <button
         style={btnStyle}
         onClick={() => {
           try { localStorage.setItem(storageKey, val); } catch { /* noop */ }
+          setVal("");
           onNext();
         }}
       >
@@ -172,15 +174,74 @@ function Loader({ onDone }: { onDone: () => void }) {
 
 export default function Onboarding({ onComplete }: Props) {
   const [step, setStep] = useState(1);
-  const next = () => setStep((s) => s + 1);
+  const [transition, setTransition] = useState<{ from: number; to: number } | null>(null);
+  const next = () => {
+    setStep((s) => {
+      const to = s + 1;
+      setTransition({ from: s, to });
+      return to;
+    });
+  };
 
-  if (step === 1) return <Welcome onNext={next} />;
-  if (step === 2) return <QuestionScreen label="Palate" question="Tell us about your palate." hint="Classic, adventurous, or anywhere in between — your style, in your own words." storageKey="tipsyDinnerPalate" onNext={next} />;
-  if (step === 3) return <QuestionScreen label="Inspiration" question="Where do you go for recipes?" hint="Sites, accounts, chefs, cookbooks — who shapes how you cook?" storageKey="tipsyDinnerInspiration" onNext={next} />;
-  if (step === 4) return <QuestionScreen label="Table" question="Who are you cooking for?" hint="Just the two of you, a crowd, somewhere in between?" storageKey="tipsyDinnerTable" onNext={next} />;
-  if (step === 5) return <QuestionScreen label="Constraints" question="Anything your kitchen never touches?" hint="Allergies, hard nos, things that never make the cut." storageKey="tipsyDinnerConstraints" onNext={next} />;
-  return <Loader onDone={() => {
-    try { localStorage.setItem("tipsyDinnerOnboardingComplete", "true"); } catch { /* noop */ }
-    onComplete();
-  }} />;
+  const renderStep = (s: number) => {
+    if (s === 1) return <Welcome key="s1" onNext={next} />;
+    if (s === 2) return <QuestionScreen key="s2" label="Palate" question="Tell us about your palate." hint="Classic, adventurous, or anywhere in between — your style, in your own words." storageKey="tipsyDinnerPalate" onNext={next} />;
+    if (s === 3) return <QuestionScreen key="s3" label="Inspiration" question="Where do you go for recipes?" hint="Sites, accounts, chefs, cookbooks — who shapes how you cook?" storageKey="tipsyDinnerInspiration" onNext={next} />;
+    if (s === 4) return <QuestionScreen key="s4" label="Table" question="Who are you cooking for?" hint="Just the two of you, a crowd, somewhere in between?" storageKey="tipsyDinnerTable" onNext={next} />;
+    if (s === 5) return <QuestionScreen key="s5" label="Constraints" question="Anything your kitchen never touches?" hint="Allergies, hard nos, things that never make the cut." storageKey="tipsyDinnerConstraints" onNext={next} />;
+    return <Loader key="s6" onDone={() => {
+      try { localStorage.setItem("tipsyDinnerOnboardingComplete", "true"); } catch { /* noop */ }
+      onComplete();
+    }} />;
+  };
+
+  const DURATION = 280;
+  const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
+  const transKey = transition ? `${transition.from}->${transition.to}` : null;
+  const [armedKey, setArmedKey] = useState<string | null>(null);
+  const phase: "start" | "end" = transKey && armedKey !== transKey ? "start" : "end";
+
+  useEffect(() => {
+    if (!transKey) return;
+    if (armedKey === transKey) return;
+    let r2 = 0;
+    let cancelled = false;
+    const r1 = requestAnimationFrame(() => {
+      if (cancelled) return;
+      r2 = requestAnimationFrame(() => { if (!cancelled) setArmedKey(transKey); });
+    });
+    return () => { cancelled = true; cancelAnimationFrame(r1); if (r2) cancelAnimationFrame(r2); };
+  }, [transKey, armedKey]);
+
+  useEffect(() => {
+    if (!transition) return;
+    if (phase !== "end") return;
+    const t = setTimeout(() => { setTransition(null); setArmedKey(null); }, DURATION + 20);
+    return () => clearTimeout(t);
+  }, [phase, transition]);
+
+  const layerBase: CSSProperties = {
+    position: "absolute", inset: 0, height: "100%",
+    display: "flex", flexDirection: "column", background: "#EEF4F8",
+    willChange: "transform",
+  };
+
+  if (!transition) {
+    return <div style={{ ...layerBase, position: "relative" }}>{renderStep(step)}</div>;
+  }
+
+  const fromTransform = phase === "start" ? "translateX(0)" : "translateX(-25%)";
+  const toTransform = phase === "start" ? "translateX(100%)" : "translateX(0)";
+  const transitionStyle = phase === "start" ? "none" : `transform ${DURATION}ms ${EASE}`;
+
+  return (
+    <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", background: "#EEF4F8" }}>
+      <div style={{ ...layerBase, transform: fromTransform, transition: transitionStyle, zIndex: 1, pointerEvents: "none" }}>
+        {renderStep(transition.from)}
+      </div>
+      <div style={{ ...layerBase, transform: toTransform, transition: transitionStyle, zIndex: 2, pointerEvents: "none" }}>
+        {renderStep(transition.to)}
+      </div>
+    </div>
+  );
 }
