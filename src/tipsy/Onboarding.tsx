@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type CSSProperties } from "react";
+import { useState, useEffect, type CSSProperties } from "react";
 
 type Props = { onComplete: () => void };
 
