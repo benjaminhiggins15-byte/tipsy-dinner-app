@@ -97,20 +97,7 @@ const FIELD_META: Record<FieldKey, { label: string; multiline: boolean }> = {
   constraints: { label: "Constraints", multiline: true },
 };
 
-export default function Profile({ back }: { back: () => void }) {
-  const [, force] = useState(0);
-  const [editing, setEditing] = useState<FieldKey | null>(null);
-  const refresh = () => force((n) => n + 1);
-
-  if (editing) {
-    return (
-      <EditField
-        fieldKey={editing}
-        back={() => { setEditing(null); refresh(); }}
-      />
-    );
-  }
-
+export default function Profile({ back, openEdit }: { back: () => void; openEdit: (k: FieldKey) => void }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#EEF4F8" }}>
       <div style={{
@@ -129,14 +116,14 @@ export default function Profile({ back }: { back: () => void }) {
       </div>
       <div style={{ flex: 1, overflowY: "auto" }}>
         <div style={sectionLabel}>Account</div>
-        <Row title="Name" subtitle={read(KEYS.name) || "—"} onClick={() => setEditing("name")} />
-        <Row title="Email" subtitle={read(KEYS.email) || "—"} onClick={() => setEditing("email")} />
+        <Row title="Name" subtitle={read(KEYS.name) || "—"} onClick={() => openEdit("name")} />
+        <Row title="Email" subtitle={read(KEYS.email) || "—"} onClick={() => openEdit("email")} />
 
         <div style={sectionLabel}>Your Kitchen</div>
-        <Row title="Your palate" subtitle={trim30(read(KEYS.palate))} onClick={() => setEditing("palate")} />
-        <Row title="Inspiration" subtitle={trim30(read(KEYS.inspiration))} onClick={() => setEditing("inspiration")} />
-        <Row title="Your table" subtitle={trim30(read(KEYS.table))} onClick={() => setEditing("table")} />
-        <Row title="Constraints" subtitle={trim30(read(KEYS.constraints))} onClick={() => setEditing("constraints")} />
+        <Row title="Your palate" subtitle={trim30(read(KEYS.palate))} onClick={() => openEdit("palate")} />
+        <Row title="Inspiration" subtitle={trim30(read(KEYS.inspiration))} onClick={() => openEdit("inspiration")} />
+        <Row title="Your table" subtitle={trim30(read(KEYS.table))} onClick={() => openEdit("table")} />
+        <Row title="Constraints" subtitle={trim30(read(KEYS.constraints))} onClick={() => openEdit("constraints")} />
 
         <div style={sectionLabel}>Support</div>
         <Row title="Contact us" />
@@ -145,7 +132,7 @@ export default function Profile({ back }: { back: () => void }) {
   );
 }
 
-function EditField({ fieldKey, back }: { fieldKey: FieldKey; back: () => void }) {
+export function ProfileEdit({ fieldKey, back }: { fieldKey: FieldKey; back: () => void }) {
   const meta = FIELD_META[fieldKey];
   const storageKey = KEYS[fieldKey];
   const [val, setVal] = useState(read(storageKey));
