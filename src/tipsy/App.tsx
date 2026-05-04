@@ -3,6 +3,7 @@ import { getAllCategories, getRecipesForCategory, saveRecipe, type Recipe } from
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
+import Profile, { ProfileEdit, Avatar } from "./Profile";
 
 type RecipeDraft = {
   title: string;
@@ -21,6 +22,8 @@ type Screen =
   | { name: "newcategory" }
   | { name: "newcategoryforrecipe"; draft: RecipeDraft }
   | { name: "editcategory"; categoryKey: string }
+  | { name: "profile" }
+  | { name: "profileedit"; fieldKey: "name" | "email" | "palate" | "inspiration" | "table" | "constraints" }
   | { name: "placeholder"; title: string };
 
 const S: Record<string, CSSProperties> = {
@@ -60,6 +63,8 @@ function screenKey(s: Screen): string {
     case "newcategory": return "newcategory";
     case "newcategoryforrecipe": return "newcategoryforrecipe";
     case "editcategory": return `editcategory:${s.categoryKey}`;
+    case "profile": return "profile";
+    case "profileedit": return `profileedit:${s.fieldKey}`;
     case "placeholder": return `placeholder:${s.title}`;
   }
 }
@@ -126,6 +131,8 @@ function renderScreen(
         onDeleted={() => finishDeleteCategory?.()}
       />
     );
+    case "profile": return <Profile back={back} openEdit={(k) => push({ name: "profileedit", fieldKey: k })} />;
+    case "profileedit": return <ProfileEdit fieldKey={s.fieldKey} back={back} />;
     case "placeholder": return <Placeholder title={s.title} back={back} />;
   }
 }
