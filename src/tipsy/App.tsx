@@ -346,8 +346,6 @@ export default function App() {
       >
         Reset onboarding
       </button>
-      <div style={{ display: "none" }}>
-      </div>
     </div>
   );
 }
