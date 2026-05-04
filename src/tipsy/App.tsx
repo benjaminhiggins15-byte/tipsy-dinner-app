@@ -479,6 +479,9 @@ function Home({ push }: { push: (s: Screen) => void }) {
   ];
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <div style={{ position: "absolute", top: 16, right: 16, zIndex: 5 }}>
+        <Avatar onClick={() => push({ name: "profile" })} />
+      </div>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "48px 32px 28px" }}>
         <div style={{ fontSize: 11, letterSpacing: "0.18em", color: "#185FA5", textTransform: "uppercase", marginBottom: 16 }}>
           welcome back
