@@ -319,6 +319,35 @@ export default function App() {
         />
         )}
       </div>
+      <button
+        onClick={() => {
+          try { localStorage.removeItem("tipsyDinnerOnboardingComplete"); } catch { /* noop */ }
+          setStack([{ name: "home" }]);
+          setShowOnboarding(true);
+        }}
+        style={{
+          position: "fixed",
+          bottom: 12,
+          right: 12,
+          zIndex: 9999,
+          background: "rgba(12,68,124,0.85)",
+          color: "#EEF4F8",
+          border: "none",
+          borderRadius: 100,
+          padding: "6px 12px",
+          fontFamily: "'DM Sans', sans-serif",
+          fontSize: 10,
+          fontWeight: 500,
+          letterSpacing: "0.12em",
+          textTransform: "uppercase",
+          cursor: "pointer",
+          opacity: 0.7,
+        }}
+      >
+        Reset onboarding
+      </button>
+      <div style={{ display: "none" }}>
+      </div>
     </div>
   );
 }
