@@ -122,7 +122,6 @@ export default function Profile({ back, openEdit }: { back: () => void; openEdit
         <div style={sectionLabel}>Your Kitchen</div>
         <Row title="Your palate" subtitle={trim30(read(KEYS.palate))} onClick={() => openEdit("palate")} />
         <Row title="Inspiration" subtitle={trim30(read(KEYS.inspiration))} onClick={() => openEdit("inspiration")} />
-        <Row title="Your table" subtitle={trim30(read(KEYS.table))} onClick={() => openEdit("table")} />
         <Row title="Constraints" subtitle={trim30(read(KEYS.constraints))} onClick={() => openEdit("constraints")} />
 
         <div style={sectionLabel}>Support</div>
