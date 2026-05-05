@@ -931,13 +931,15 @@ function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
     <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative" }}>
       {/* Header */}
       <div style={{ padding: "32px 24px 12px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <button
-          onClick={back}
-          aria-label="Back"
-          style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "#185FA5", display: "flex", alignItems: "center" }}
-        >
-          <BackArrow />
-        </button>
+        {expanded ? <span /> : (
+          <button
+            onClick={back}
+            aria-label="Back"
+            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "#185FA5", display: "flex", alignItems: "center" }}
+          >
+            <BackArrow />
+          </button>
+        )}
         {isEmpty && (
           <button
             onClick={() => push({ name: "addown" })}
@@ -1185,18 +1187,12 @@ function ExpandedRecipeSheet({ open, onClose }: {
     <div
       style={{
         position: "absolute",
-        left: 0, right: 0,
-        bottom: 106,
-        height: "75%",
+        inset: 0,
         background: "#EEF4F8",
         display: "flex", flexDirection: "column",
-        zIndex: 20,
-        borderTop: "0.5px solid #85B7EB",
-        borderTopLeftRadius: 16,
-        borderTopRightRadius: 16,
+        zIndex: 50,
         overflow: "hidden",
-        boxShadow: "0 -8px 24px rgba(4, 44, 83, 0.12)",
-        transform: shown ? "translateY(0)" : "translateY(calc(100% + 106px))",
+        transform: shown ? "translateY(0)" : "translateY(100%)",
         transition: "transform 320ms cubic-bezier(0.4, 0, 0.2, 1)",
       }}
     >
