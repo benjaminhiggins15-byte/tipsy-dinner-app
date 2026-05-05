@@ -1032,7 +1032,7 @@ function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
             <div style={{ width: 32, height: 32, borderRadius: 6, background: "linear-gradient(135deg, #185FA5, #85B7EB)", flexShrink: 0 }} />
             <div style={{
               flex: 1, overflow: "hidden",
-              opacity: expanded ? 0 : (miniTitleVisible ? 1 : 0),
+              opacity: miniTitleVisible ? 1 : 0,
               transition: "opacity 150ms ease",
             }}>
               <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, textTransform: "uppercase", letterSpacing: "0.1em", color: "#185FA5", opacity: 0.7 }}>
