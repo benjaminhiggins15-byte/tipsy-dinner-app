@@ -1042,8 +1042,6 @@ function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
       <ExpandedRecipeSheet
         open={expanded}
         onClose={() => setExpanded(false)}
-        onSendFromSheet={() => { setExpanded(false); sendNext(); }}
-        placeholder={placeholder}
       />
     </div>
   );
