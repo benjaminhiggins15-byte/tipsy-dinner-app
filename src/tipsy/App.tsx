@@ -1025,7 +1025,7 @@ function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
               {RECIPE_TITLE}
             </div>
           </div>
-          <div style={{ color: "#185FA5", fontSize: 14, flexShrink: 0 }}>⌄</div>
+          <div style={{ color: "#185FA5", fontSize: 14, flexShrink: 0 }}>⌃</div>
         </div>
       )}
 
