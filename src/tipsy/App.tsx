@@ -1144,11 +1144,10 @@ function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
   );
 }
 
-function ExpandedRecipeSheet({ open, onClose, onSendFromSheet, placeholder }: {
-  open: boolean; onClose: () => void; onSendFromSheet: () => void; placeholder: string;
+function ExpandedRecipeSheet({ open, onClose }: {
+  open: boolean; onClose: () => void;
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
-  const [input, setInput] = useState("");
   const [mounted, setMounted] = useState(open);
   const [shown, setShown] = useState(false);
 
