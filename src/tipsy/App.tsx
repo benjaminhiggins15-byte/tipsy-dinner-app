@@ -996,7 +996,7 @@ function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
       {/* Mini player */}
       {recipeRevealed && (
         <div
-          onClick={() => setExpanded(true)}
+          onClick={() => setExpanded((v) => !v)}
           style={{
             flexShrink: 0,
             background: "#E6F1FB",
@@ -1025,7 +1025,7 @@ function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
               {RECIPE_TITLE}
             </div>
           </div>
-          <div style={{ color: "#185FA5", fontSize: 14, flexShrink: 0 }}>⌃</div>
+          <div style={{ color: "#185FA5", fontSize: 14, flexShrink: 0 }}>{expanded ? "⌄" : "⌃"}</div>
         </div>
       )}
 
@@ -1042,8 +1042,6 @@ function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
       <ExpandedRecipeSheet
         open={expanded}
         onClose={() => setExpanded(false)}
-        onSendFromSheet={() => { setExpanded(false); sendNext(); }}
-        placeholder={placeholder}
       />
     </div>
   );
@@ -1144,11 +1142,10 @@ function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
   );
 }
 
-function ExpandedRecipeSheet({ open, onClose, onSendFromSheet, placeholder }: {
-  open: boolean; onClose: () => void; onSendFromSheet: () => void; placeholder: string;
+function ExpandedRecipeSheet({ open, onClose }: {
+  open: boolean; onClose: () => void;
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
-  const [input, setInput] = useState("");
   const [mounted, setMounted] = useState(open);
   const [shown, setShown] = useState(false);
 
@@ -1187,11 +1184,19 @@ function ExpandedRecipeSheet({ open, onClose, onSendFromSheet, placeholder }: {
   return (
     <div
       style={{
-        position: "absolute", inset: 0,
+        position: "absolute",
+        left: 0, right: 0,
+        bottom: 106,
+        height: "75%",
         background: "#EEF4F8",
         display: "flex", flexDirection: "column",
         zIndex: 20,
-        transform: shown ? "translateY(0)" : "translateY(100%)",
+        borderTop: "0.5px solid #85B7EB",
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+        overflow: "hidden",
+        boxShadow: "0 -8px 24px rgba(4, 44, 83, 0.12)",
+        transform: shown ? "translateY(0)" : "translateY(calc(100% + 106px))",
         transition: "transform 320ms cubic-bezier(0.4, 0, 0.2, 1)",
       }}
     >
@@ -1304,14 +1309,6 @@ function ExpandedRecipeSheet({ open, onClose, onSendFromSheet, placeholder }: {
           Save to Browse
         </button>
       </div>
-
-      {/* Sheet input bar */}
-      <CookInputBar
-        value={input}
-        onChange={setInput}
-        onSend={() => { setInput(""); onSendFromSheet(); }}
-        placeholder={placeholder}
-      />
     </div>
   );
 }
