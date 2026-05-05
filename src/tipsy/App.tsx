@@ -481,7 +481,7 @@ function Home({ push }: { push: (s: Screen) => void }) {
       <div style={{ position: "absolute", top: 16, right: 16, zIndex: 5 }}>
         <Avatar onClick={() => push({ name: "profile" })} />
       </div>
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "48px 32px 28px" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "48px 32px 16px" }}>
         <div style={{ fontSize: 11, letterSpacing: "0.18em", color: "#185FA5", textTransform: "uppercase", marginBottom: 16 }}>
           welcome back
         </div>
@@ -489,11 +489,11 @@ function Home({ push }: { push: (s: Screen) => void }) {
           Tipsy<br />Dinner
         </div>
         <div style={{ width: 32, height: 1, background: "#85B7EB", margin: "20px 0" }} />
-        <div style={{ fontFamily: "'Playfair Display', serif", fontStyle: "italic", fontSize: 22, fontWeight: 400, color: "#185FA5", textAlign: "center", lineHeight: 1.2 }}>
-          What are we making tonight?
+        <div style={{ fontFamily: "'Playfair Display', serif", fontStyle: "italic", fontSize: 16, fontWeight: 400, color: "#185FA5", textAlign: "center", lineHeight: 1.2 }}>
+          what are we making tonight?
         </div>
       </div>
-      <div style={{ padding: "0 24px 44px" }}>
+      <div style={{ padding: "0 24px 64px" }}>
         {items.map((b, i) => (
           <button
             key={b.label}
@@ -513,10 +513,10 @@ function Home({ push }: { push: (s: Screen) => void }) {
             }}
           >
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, letterSpacing: "0.12em", color: "#042C53", textTransform: "uppercase" }}>
+              <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, letterSpacing: "0.12em", color: "#042C53", textTransform: "uppercase" }}>
                 {b.label}
               </span>
-              <span style={{ fontFamily: "'Playfair Display', serif", fontStyle: "italic", fontSize: 11, color: "#185FA5", lineHeight: 1.2 }}>
+              <span style={{ fontFamily: "'Playfair Display', serif", fontStyle: "italic", fontSize: 13, color: "#185FA5", lineHeight: 1.2 }}>
                 {b.sub}
               </span>
             </div>
