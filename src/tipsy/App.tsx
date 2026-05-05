@@ -474,7 +474,7 @@ function Home({ push }: { push: (s: Screen) => void }) {
   const items = [
     { label: "craft", sub: "your next dish", action: () => push({ name: "cook" }) },
     { label: "explore", sub: "your recipes", action: () => push({ name: "categories" }) },
-    { label: "curate", sub: "your menus", action: () => push({ name: "placeholder", title: "Build" }) },
+    { label: "curate", sub: "your menus", action: () => push({ name: "placeholder", title: "Curate" }) },
   ];
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -545,7 +545,7 @@ function Categories({ push, back }: { push: (s: Screen) => void; back: () => voi
             </button>
           </div>
           <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 400, color: "#042C53" }}>
-            Browse
+            Explore
           </div>
         </div>
         <button
@@ -1333,7 +1333,7 @@ function ExpandedRecipeOverlay({ open, bottomOffset }: {
             cursor: "pointer",
           }}
         >
-          Save to Browse
+          Save to Explore
         </button>
       </div>
       </div>
