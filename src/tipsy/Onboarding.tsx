@@ -30,12 +30,11 @@ const btnStyle: CSSProperties = {
 };
 
 function QuestionScreen({
-  label, question, hint, storageKey, onNext,
-}: { label: string; question: string; hint: string; storageKey: string; onNext: () => void }) {
+  question, hint, storageKey, onNext,
+}: { label?: string; question: string; hint: string; storageKey: string; onNext: () => void }) {
   const [val, setVal] = useState("");
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: "44px 24px 28px" }}>
-      <div style={{ ...labelStyle, marginBottom: 18 }}>{label}</div>
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#042C53", lineHeight: 1.3, marginBottom: 8 }}>
           {question}
