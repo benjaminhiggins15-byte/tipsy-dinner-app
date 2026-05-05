@@ -471,11 +471,10 @@ function ScreenStage({
 
 /* ---------------- Home ---------------- */
 function Home({ push }: { push: (s: Screen) => void }) {
-  const buttons = [
-    { label: "cook", sub: "your next dish", action: () => push({ name: "cook" }) },
-    { label: "browse", sub: "your recipes", action: () => push({ name: "categories" }) },
-    { label: "build", sub: "your menus", action: () => push({ name: "placeholder", title: "Build" }) },
-    { label: "share", sub: "your palette", action: () => push({ name: "placeholder", title: "Share" }) },
+  const items = [
+    { label: "craft", sub: "your next dish", action: () => push({ name: "cook" }) },
+    { label: "explore", sub: "your recipes", action: () => push({ name: "categories" }) },
+    { label: "curate", sub: "your menus", action: () => push({ name: "placeholder", title: "Build" }) },
   ];
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -490,35 +489,38 @@ function Home({ push }: { push: (s: Screen) => void }) {
           Tipsy<br />Dinner
         </div>
         <div style={{ width: 32, height: 1, background: "#85B7EB", margin: "20px 0" }} />
-        <div style={{ fontSize: 13, color: "#185FA5", letterSpacing: "0.02em" }}>
+        <div style={{ fontFamily: "'Playfair Display', serif", fontStyle: "italic", fontSize: 22, fontWeight: 400, color: "#185FA5", textAlign: "center", lineHeight: 1.2 }}>
           What are we making tonight?
         </div>
       </div>
-      <div style={{ padding: "0 24px 44px", display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-        {buttons.map((b) => (
+      <div style={{ padding: "0 24px 44px" }}>
+        {items.map((b, i) => (
           <button
             key={b.label}
             onClick={b.action}
             style={{
-              padding: "20px 14px",
-              background: "#E6F1FB",
-              border: "0.5px solid #85B7EB",
-              borderRadius: 16,
+              width: "100%",
+              padding: "12px 0",
+              background: "transparent",
+              border: "none",
+              borderTop: "0.5px solid #85B7EB",
+              borderBottom: i === items.length - 1 ? "0.5px solid #85B7EB" : "none",
               display: "flex",
-              flexDirection: "column",
               alignItems: "center",
-              justifyContent: "center",
+              justifyContent: "space-between",
               cursor: "pointer",
-              gap: 6,
-              textAlign: "center",
+              textAlign: "left",
             }}
           >
-            <span style={{ fontSize: 11, letterSpacing: "0.14em", color: "#0C447C", textTransform: "uppercase", fontWeight: 500 }}>
-              {b.label}
-            </span>
-            <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 12, color: "#042C53", fontWeight: 400, lineHeight: 1.3 }}>
-              {b.sub}
-            </span>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, letterSpacing: "0.12em", color: "#042C53", textTransform: "uppercase" }}>
+                {b.label}
+              </span>
+              <span style={{ fontFamily: "'Playfair Display', serif", fontStyle: "italic", fontSize: 11, color: "#185FA5", lineHeight: 1.2 }}>
+                {b.sub}
+              </span>
+            </div>
+            <span style={{ color: "#85B7EB", fontSize: 18, lineHeight: 1 }}>›</span>
           </button>
         ))}
       </div>
