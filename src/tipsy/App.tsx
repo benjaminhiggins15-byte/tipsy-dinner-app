@@ -931,13 +931,15 @@ function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
     <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative" }}>
       {/* Header */}
       <div style={{ padding: "32px 24px 12px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <button
-          onClick={back}
-          aria-label="Back"
-          style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "#185FA5", display: "flex", alignItems: "center" }}
-        >
-          <BackArrow />
-        </button>
+        {expanded ? <span /> : (
+          <button
+            onClick={back}
+            aria-label="Back"
+            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "#185FA5", display: "flex", alignItems: "center" }}
+          >
+            <BackArrow />
+          </button>
+        )}
         {isEmpty && (
           <button
             onClick={() => push({ name: "addown" })}
