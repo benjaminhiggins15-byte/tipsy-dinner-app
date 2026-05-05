@@ -1189,7 +1189,7 @@ function ExpandedRecipeSheet({ open, onClose, onSendFromSheet, placeholder }: {
       style={{
         position: "absolute",
         left: 0, right: 0,
-        bottom: 48,
+        bottom: 106,
         height: "75%",
         background: "#EEF4F8",
         display: "flex", flexDirection: "column",
@@ -1199,7 +1199,7 @@ function ExpandedRecipeSheet({ open, onClose, onSendFromSheet, placeholder }: {
         borderTopRightRadius: 16,
         overflow: "hidden",
         boxShadow: "0 -8px 24px rgba(4, 44, 83, 0.12)",
-        transform: shown ? "translateY(0)" : "translateY(calc(100% + 48px))",
+        transform: shown ? "translateY(0)" : "translateY(calc(100% + 106px))",
         transition: "transform 320ms cubic-bezier(0.4, 0, 0.2, 1)",
       }}
     >
