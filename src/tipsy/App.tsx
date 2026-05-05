@@ -995,7 +995,7 @@ function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
           <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#042C53", fontWeight: 400 }}>
             What are we making?
           </div>
-          <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: "#185FA5", lineHeight: 1.5, maxWidth: 240 }}>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontStyle: "italic", fontSize: 13, color: "#185FA5", lineHeight: 1.5, maxWidth: 240 }}>
             Tell me what you're in the mood for, what's in your fridge, or what the occasion is.
           </div>
         </div>
