@@ -1312,14 +1312,6 @@ function ExpandedRecipeSheet({ open, onClose, onSendFromSheet, placeholder }: {
           Save to Browse
         </button>
       </div>
-
-      {/* Sheet input bar */}
-      <CookInputBar
-        value={input}
-        onChange={setInput}
-        onSend={() => { setInput(""); onSendFromSheet(); }}
-        placeholder={placeholder}
-      />
     </div>
   );
 }
