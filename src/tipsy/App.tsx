@@ -884,7 +884,18 @@ function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
   const [miniTitleVisible, setMiniTitleVisible] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const bottomBarRef = useRef<HTMLDivElement | null>(null);
+  const [bottomBarHeight, setBottomBarHeight] = useState(0);
   const idRef = useRef(0);
+
+  useEffect(() => {
+    const measure = () => {
+      if (bottomBarRef.current) setBottomBarHeight(bottomBarRef.current.offsetHeight);
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [recipeRevealed]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -995,56 +1006,57 @@ function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
         </div>
       )}
 
-      {/* Mini player */}
-      {recipeRevealed && (
-        <div
-          onClick={() => setExpanded((v) => !v)}
-          style={{
-            flexShrink: 0,
-            background: "#E6F1FB",
-            borderTop: "0.5px solid #85B7EB",
-            padding: "8px 14px",
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            cursor: "pointer",
-            opacity: miniBarVisible ? 1 : 0,
-            transition: "opacity 600ms ease",
-          }}
-        >
-          <div style={{ width: 32, height: 32, borderRadius: 6, background: "linear-gradient(135deg, #185FA5, #85B7EB)", flexShrink: 0 }} />
-          <div style={{ flex: 1, overflow: "hidden" }}>
-            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, textTransform: "uppercase", letterSpacing: "0.1em", color: "#185FA5", opacity: 0.7 }}>
-              In progress
-            </div>
-            <div style={{
-              fontFamily: "'Playfair Display', serif", fontSize: 12, color: "#042C53",
-              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-              opacity: miniTitleVisible ? 1 : 0,
-              transform: miniTitleVisible ? "translateY(0)" : "translateY(6px)",
-              transition: "opacity 500ms ease, transform 500ms ease",
-            }}>
-              {RECIPE_TITLE}
-            </div>
-          </div>
-          <div style={{ color: "#185FA5", fontSize: 14, flexShrink: 0 }}>{expanded ? "⌄" : "⌃"}</div>
-        </div>
-      )}
-
-      {/* Input bar */}
-      <CookInputBar
-        value={input}
-        onChange={setInput}
-        onSend={sendNext}
-        placeholder={placeholder}
-        disabled={typing || turnIndex >= MOCK.length}
-      />
-
-      {/* Expanded recipe sheet */}
-      <ExpandedRecipeSheet
+      {/* Expanded recipe overlay — grows upward out of the mini player */}
+      <ExpandedRecipeOverlay
         open={expanded}
-        onClose={() => setExpanded(false)}
+        bottomOffset={bottomBarHeight}
       />
+
+      {/* Bottom bars (mini player + input) — never move, never hide */}
+      <div ref={bottomBarRef} style={{ flexShrink: 0, position: "relative", zIndex: 60 }}>
+        {recipeRevealed && (
+          <div
+            onClick={() => setExpanded((v) => !v)}
+            style={{
+              background: "#E6F1FB",
+              borderTop: "0.5px solid #85B7EB",
+              padding: "8px 14px",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              cursor: "pointer",
+              opacity: miniBarVisible ? 1 : 0,
+              transition: "opacity 600ms ease",
+            }}
+          >
+            <div style={{ width: 32, height: 32, borderRadius: 6, background: "linear-gradient(135deg, #185FA5, #85B7EB)", flexShrink: 0 }} />
+            <div style={{
+              flex: 1, overflow: "hidden",
+              opacity: expanded ? 0 : (miniTitleVisible ? 1 : 0),
+              transition: "opacity 150ms ease",
+            }}>
+              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, textTransform: "uppercase", letterSpacing: "0.1em", color: "#185FA5", opacity: 0.7 }}>
+                In progress
+              </div>
+              <div style={{
+                fontFamily: "'Playfair Display', serif", fontSize: 12, color: "#042C53",
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              }}>
+                {RECIPE_TITLE}
+              </div>
+            </div>
+            <div style={{ color: "#185FA5", fontSize: 14, flexShrink: 0 }}>{expanded ? "⌄" : "⌃"}</div>
+          </div>
+        )}
+
+        <CookInputBar
+          value={input}
+          onChange={setInput}
+          onSend={sendNext}
+          placeholder={placeholder}
+          disabled={typing || turnIndex >= MOCK.length}
+        />
+      </div>
     </div>
   );
 }
