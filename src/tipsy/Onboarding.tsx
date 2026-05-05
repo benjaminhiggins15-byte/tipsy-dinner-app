@@ -111,8 +111,8 @@ function Welcome({ onNext }: { onNext: () => void }) {
         <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 34, color: "#042C53", lineHeight: 1.1 }}>
           Tipsy Dinner
         </div>
-        <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: "#185FA5", marginTop: 6, opacity: 0.85 }}>
-          Your personal kitchen HQ
+        <div style={{ fontFamily: "'Playfair Display', serif", fontStyle: "italic", fontSize: 16, color: "#185FA5", marginTop: 6, opacity: 0.85 }}>
+          your personal kitchen headquarters
         </div>
       </div>
       <div style={{ height: 0.5, background: "#85B7EB", opacity: 0.5, margin: "26px 0 22px" }} />
@@ -140,7 +140,7 @@ function Welcome({ onNext }: { onNext: () => void }) {
           onNext();
         }}
       >
-        Get Started
+        Let's Get Started
       </button>
     </div>
   );
