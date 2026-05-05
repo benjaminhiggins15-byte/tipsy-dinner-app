@@ -132,7 +132,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
     };
   }, [editing]);
 
-  const headerLabel = step === 1 ? (isEdit ? "Back" : "Cook") : "Back";
+  const headerLabel = step === 1 ? (isEdit ? "Back" : "Craft") : "Back";
   const onHeaderBack = () => {
     if (step === 1) back();
     else if (step === 2) setStep(1);
@@ -439,12 +439,12 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
             <>
               <Eyebrow>Almost there</Eyebrow>
               <Title>Here's your recipe</Title>
-              <Sub>This is exactly how it will appear in Browse.</Sub>
+              <Sub>This is exactly how it will appear in Explore.</Sub>
               <PreviewCard recipe={previewRecipe} tab={tab} setTab={setTab} />
               {isEdit ? (
                 <PrimaryBtn onClick={saveEdit}>Save changes</PrimaryBtn>
               ) : (
-                <PrimaryBtn onClick={() => setTrayOpen(true)}>Save to Browse</PrimaryBtn>
+                <PrimaryBtn onClick={() => setTrayOpen(true)}>Save to Explore</PrimaryBtn>
               )}
               <GhostBtn onClick={() => setStep(3)}>← Edit recipe</GhostBtn>
             </>
@@ -464,13 +464,13 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
               </div>
               <Eyebrow>Your recipe</Eyebrow>
               <Title>{title}</Title>
-              <Sub>Tap the card to view it in Browse.</Sub>
+              <Sub>Tap the card to view it in Explore.</Sub>
               <div onClick={() => goRecipe({ ...previewRecipe, categoryKey: savedCategory.key }, savedCategory.key, savedCategory.label)} style={{ cursor: "pointer" }}>
                 <PreviewCard recipe={previewRecipe} tab={tab} setTab={setTab} />
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                 <button onClick={reset} style={browseActionStyle(false)}>Add another</button>
-                <button onClick={goCategories} style={browseActionStyle(true)}>Browse all</button>
+                <button onClick={goCategories} style={browseActionStyle(true)}>Explore all</button>
               </div>
             </>
           )}
