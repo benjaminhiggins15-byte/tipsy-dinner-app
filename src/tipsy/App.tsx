@@ -1156,20 +1156,24 @@ function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
   );
 }
 
-function ExpandedRecipeSheet({ open, onClose }: {
-  open: boolean; onClose: () => void;
+function ExpandedRecipeOverlay({ open, bottomOffset }: {
+  open: boolean; bottomOffset: number;
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
   const [mounted, setMounted] = useState(open);
   const [shown, setShown] = useState(false);
+  const [contentVisible, setContentVisible] = useState(false);
 
   useEffect(() => {
     if (open) {
       setMounted(true);
       requestAnimationFrame(() => requestAnimationFrame(() => setShown(true)));
+      const t = setTimeout(() => setContentVisible(true), 350);
+      return () => clearTimeout(t);
     } else if (mounted) {
+      setContentVisible(false);
       setShown(false);
-      const t = setTimeout(() => setMounted(false), 320);
+      const t = setTimeout(() => setMounted(false), 350);
       return () => clearTimeout(t);
     }
   }, [open, mounted]);
@@ -1199,15 +1203,34 @@ function ExpandedRecipeSheet({ open, onClose }: {
     <div
       style={{
         position: "absolute",
-        inset: 0,
-        background: "#EEF4F8",
-        display: "flex", flexDirection: "column",
+        left: 0,
+        right: 0,
+        bottom: bottomOffset,
+        top: 0,
+        pointerEvents: shown ? "auto" : "none",
         zIndex: 50,
         overflow: "hidden",
-        transform: shown ? "translateY(0)" : "translateY(100%)",
-        transition: "transform 320ms cubic-bezier(0.4, 0, 0.2, 1)",
       }}
     >
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: shown ? "100%" : 0,
+          background: "#E6F1FB",
+          transition: "height 350ms cubic-bezier(0.22, 1, 0.36, 1)",
+          display: "flex", flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+      <div style={{
+        opacity: contentVisible ? 1 : 0,
+        transition: "opacity 200ms ease",
+        display: "flex", flexDirection: "column", height: "100%",
+        background: "#EEF4F8",
+      }}>
       {/* Sheet header */}
       <div style={{ padding: "20px 16px 12px", flexShrink: 0, display: "grid", gridTemplateColumns: "32px 1fr 32px", alignItems: "center" }}>
         <span />
@@ -1219,13 +1242,7 @@ function ExpandedRecipeSheet({ open, onClose }: {
         }}>
           Recipe Preview
         </div>
-        <button
-          onClick={onClose}
-          aria-label="Collapse"
-          style={{ background: "transparent", border: "none", cursor: "pointer", color: "#185FA5", fontSize: 18, padding: 0, justifySelf: "end" }}
-        >
-          ⌄
-        </button>
+        <span />
       </div>
 
       {/* Scrollable card body */}
@@ -1316,6 +1333,8 @@ function ExpandedRecipeSheet({ open, onClose }: {
         >
           Save to Browse
         </button>
+      </div>
+      </div>
       </div>
     </div>
   );
