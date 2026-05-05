@@ -186,7 +186,7 @@ export default function Onboarding({ onComplete }: Props) {
     if (s === 1) return <Welcome key="s1" onNext={next} />;
     if (s === 2) return <QuestionScreen key="s2" label="Taste" question="Your palate" hint="Cuisines, flavors, techniques — what makes your cooking yours?" storageKey="tipsyDinnerPalate" onNext={next} />;
     if (s === 3) return <QuestionScreen key="s3" label="Inspiration" question="Your discovery" hint="Sites, accounts, chefs, cookbooks — who shapes how you cook?" storageKey="tipsyDinnerInspiration" onNext={next} />;
-    if (s === 4) return <QuestionScreen key="s4" label="Constraints" question="Anything your kitchen never touches?" hint="Allergies, hard nos, things that never make the cut." storageKey="tipsyDinnerConstraints" onNext={next} />;
+    if (s === 4) return <QuestionScreen key="s4" label="Constraints" question="Your no-gos" hint="Allergies, aversions, or anything that never makes your plate?" storageKey="tipsyDinnerConstraints" onNext={next} />;
     return <Loader key="s5" onDone={() => {
       try { localStorage.setItem("tipsyDinnerOnboardingComplete", "true"); } catch { /* noop */ }
       onComplete();
