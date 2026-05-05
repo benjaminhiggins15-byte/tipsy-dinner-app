@@ -865,97 +865,453 @@ function BackArrow() {
 
 /* ---------------- Cook ---------------- */
 function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
+  type Msg = { id: number; role: "user" | "ai"; text: string };
+  const MOCK: { user: string; ai: string; revealsRecipe?: boolean }[] = [
+    { user: "Something with scallops, Mediterranean feel. Cooking for two tonight.", ai: "Love that direction. Are you thinking bright and citrus-forward, or richer — saffron butter, that kind of thing?" },
+    { user: "Citrus and herbs. Have lemons and tarragon.", ai: "Perfect combo. Pan-seared scallops, lemon tarragon beurre blanc, maybe a fennel salad alongside?" },
+    { user: "Yes. Can we add some heat?", ai: "Here's what I'm thinking — Seared Scallops, Lemon Tarragon Beurre Blanc. Tap the bar below to see the full recipe and tell me what you'd change.", revealsRecipe: true },
+    { user: "Can we make it spicier?", ai: "Done — doubled the Calabrian chili and added smoked paprika to the crust. Recipe updated." },
+    { user: "What wine would you pair with this?", ai: "A white Burgundy would be ideal — the minerality plays beautifully with the beurre blanc. A Sancerre works great too if you want something crisper." },
+  ];
+  const RECIPE_TITLE = "Seared Scallops, Lemon Tarragon Beurre Blanc";
+
+  const [messages, setMessages] = useState<Msg[]>([]);
+  const [turnIndex, setTurnIndex] = useState(0);
+  const [typing, setTyping] = useState(false);
+  const [input, setInput] = useState("");
+  const [recipeRevealed, setRecipeRevealed] = useState(false);
+  const [miniBarVisible, setMiniBarVisible] = useState(false);
+  const [miniTitleVisible, setMiniTitleVisible] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const idRef = useRef(0);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, typing, miniBarVisible]);
+
+  const sendNext = () => {
+    if (turnIndex >= MOCK.length || typing) return;
+    const turn = MOCK[turnIndex];
+    const userMsg: Msg = { id: ++idRef.current, role: "user", text: turn.user };
+    setMessages((m) => [...m, userMsg]);
+    setInput("");
+    setTyping(true);
+
+    if (turn.revealsRecipe) {
+      // Step 2: at 2000ms — mini player fades in; title slides up 200ms after
+      const t1 = setTimeout(() => {
+        setRecipeRevealed(true);
+        setMiniBarVisible(true);
+        setTimeout(() => setMiniTitleVisible(true), 200);
+      }, 2000);
+      // Step 3: at 2800ms — typing disappears, AI msg fades in
+      const t2 = setTimeout(() => {
+        setTyping(false);
+        setMessages((m) => [...m, { id: ++idRef.current, role: "ai", text: turn.ai }]);
+        setTurnIndex((i) => i + 1);
+      }, 2800);
+      // cleanup ignored — component lives for screen lifetime
+      void t1; void t2;
+    } else {
+      setTimeout(() => {
+        setTyping(false);
+        setMessages((m) => [...m, { id: ++idRef.current, role: "ai", text: turn.ai }]);
+        setTurnIndex((i) => i + 1);
+      }, 1200);
+    }
+  };
+
+  const isEmpty = messages.length === 0;
+  const placeholder = recipeRevealed ? "Make it even better..." : "What are we making tonight?";
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative" }}>
       {/* Header */}
-      <div style={{ padding: "32px 24px 16px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button
-            onClick={back}
-            aria-label="Back"
-            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "#185FA5", display: "flex", alignItems: "center" }}
-          >
-            <BackArrow />
-          </button>
-        </div>
+      <div style={{ padding: "32px 24px 12px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <button
-          onClick={() => push({ name: "addown" })}
-          style={{
-            display: "inline-flex", alignItems: "center", gap: 6,
-            padding: "6px 12px",
-            background: "#E6F1FB",
-            border: "0.5px solid #85B7EB",
-            borderRadius: 999,
+          onClick={back}
+          aria-label="Back"
+          style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "#185FA5", display: "flex", alignItems: "center" }}
+        >
+          <BackArrow />
+        </button>
+        {isEmpty && (
+          <button
+            onClick={() => push({ name: "addown" })}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              padding: "6px 12px",
+              background: "#E6F1FB",
+              border: "0.5px solid #85B7EB",
+              borderRadius: 999,
+              color: "#185FA5",
+              fontFamily: "'DM Sans', sans-serif",
+              fontSize: 11,
+              letterSpacing: "0.08em",
+              cursor: "pointer",
+            }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+            </svg>
+            Add your own
+          </button>
+        )}
+      </div>
+
+      {/* Body */}
+      {isEmpty ? (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 32px", textAlign: "center", gap: 16 }}>
+          <div style={{
+            width: 48, height: 48, borderRadius: "50%",
+            background: "#E6F1FB", border: "0.5px solid #85B7EB",
+            display: "flex", alignItems: "center", justifyContent: "center",
             color: "#185FA5",
-            fontFamily: "'DM Sans', sans-serif",
-            fontSize: 11,
-            letterSpacing: "0.08em",
+          }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 5v14" />
+              <path d="M5 12h14" />
+            </svg>
+          </div>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#042C53", fontWeight: 400 }}>
+            What are we making?
+          </div>
+          <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: "#185FA5", lineHeight: 1.5, maxWidth: 240 }}>
+            Tell me what you're in the mood for, what's in your fridge, or what the occasion is.
+          </div>
+        </div>
+      ) : (
+        <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+          {messages.map((m) => (
+            <ChatBubble key={m.id} role={m.role} text={m.text} />
+          ))}
+          {typing && <TypingBubble />}
+        </div>
+      )}
+
+      {/* Mini player */}
+      {recipeRevealed && (
+        <div
+          onClick={() => setExpanded(true)}
+          style={{
+            flexShrink: 0,
+            background: "#E6F1FB",
+            borderTop: "0.5px solid #85B7EB",
+            padding: "8px 14px",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
             cursor: "pointer",
+            opacity: miniBarVisible ? 1 : 0,
+            transition: "opacity 600ms ease",
           }}
         >
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 20h9" />
-            <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
-          </svg>
-          Add your own
+          <div style={{ width: 32, height: 32, borderRadius: 6, background: "linear-gradient(135deg, #185FA5, #85B7EB)", flexShrink: 0 }} />
+          <div style={{ flex: 1, overflow: "hidden" }}>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, textTransform: "uppercase", letterSpacing: "0.1em", color: "#185FA5", opacity: 0.7 }}>
+              In progress
+            </div>
+            <div style={{
+              fontFamily: "'Playfair Display', serif", fontSize: 12, color: "#042C53",
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              opacity: miniTitleVisible ? 1 : 0,
+              transform: miniTitleVisible ? "translateY(0)" : "translateY(6px)",
+              transition: "opacity 500ms ease, transform 500ms ease",
+            }}>
+              {RECIPE_TITLE}
+            </div>
+          </div>
+          <div style={{ color: "#185FA5", fontSize: 14, flexShrink: 0 }}>⌄</div>
+        </div>
+      )}
+
+      {/* Input bar */}
+      <CookInputBar
+        value={input}
+        onChange={setInput}
+        onSend={sendNext}
+        placeholder={placeholder}
+        disabled={typing || turnIndex >= MOCK.length}
+      />
+
+      {/* Expanded recipe sheet */}
+      <ExpandedRecipeSheet
+        open={expanded}
+        onClose={() => setExpanded(false)}
+        onSendFromSheet={() => { setExpanded(false); sendNext(); }}
+        placeholder={placeholder}
+      />
+    </div>
+  );
+}
+
+function ChatBubble({ role, text }: { role: "user" | "ai"; text: string }) {
+  const isUser = role === "user";
+  return (
+    <div
+      style={{
+        alignSelf: isUser ? "flex-end" : "flex-start",
+        background: isUser ? "#042C53" : "#D8E9F7",
+        color: isUser ? "#EEF4F8" : "#042C53",
+        fontFamily: "'DM Sans', sans-serif",
+        fontSize: 13,
+        padding: "10px 14px",
+        borderRadius: isUser ? "14px 14px 3px 14px" : "14px 14px 14px 3px",
+        maxWidth: isUser ? "78%" : "82%",
+        lineHeight: 1.5,
+        animation: "tipsyChatIn 300ms ease",
+      }}
+    >
+      {text}
+      <style>{`@keyframes tipsyChatIn { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: translateY(0);} }`}</style>
+    </div>
+  );
+}
+
+function TypingBubble() {
+  return (
+    <div style={{
+      alignSelf: "flex-start",
+      background: "#D8E9F7",
+      padding: "12px 14px",
+      borderRadius: "14px 14px 14px 3px",
+      display: "flex",
+      gap: 4,
+      alignItems: "center",
+    }}>
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          style={{
+            width: 5, height: 5, borderRadius: "50%",
+            background: "#185FA5",
+            display: "inline-block",
+            animation: `tipsyDot 1.2s ease-in-out ${i * 0.2}s infinite`,
+          }}
+        />
+      ))}
+      <style>{`@keyframes tipsyDot { 0%,100% { opacity: 0.3; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-2px); } }`}</style>
+    </div>
+  );
+}
+
+function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
+  value: string; onChange: (v: string) => void; onSend: () => void; placeholder: string; disabled?: boolean;
+}) {
+  return (
+    <div style={{ padding: "10px 14px 16px", flexShrink: 0, background: "#EEF4F8", display: "flex", alignItems: "center", gap: 8 }}>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") onSend(); }}
+        placeholder={placeholder}
+        style={{
+          flex: 1,
+          background: "#fff",
+          border: "0.5px solid #85B7EB",
+          borderRadius: 100,
+          padding: "9px 14px",
+          outline: "none",
+          fontFamily: "'DM Sans', sans-serif",
+          fontSize: 13,
+          color: "#042C53",
+        }}
+      />
+      <button
+        onClick={onSend}
+        disabled={disabled}
+        aria-label="Send"
+        style={{
+          width: 32, height: 32, borderRadius: "50%",
+          background: "#0C447C", border: "none",
+          cursor: disabled ? "default" : "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          color: "#fff", flexShrink: 0,
+          opacity: disabled ? 0.5 : 1,
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M5 12h14" />
+          <path d="M13 5l7 7-7 7" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+function ExpandedRecipeSheet({ open, onClose, onSendFromSheet, placeholder }: {
+  open: boolean; onClose: () => void; onSendFromSheet: () => void; placeholder: string;
+}) {
+  const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
+  const [input, setInput] = useState("");
+  const [mounted, setMounted] = useState(open);
+  const [shown, setShown] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      requestAnimationFrame(() => requestAnimationFrame(() => setShown(true)));
+    } else if (mounted) {
+      setShown(false);
+      const t = setTimeout(() => setMounted(false), 320);
+      return () => clearTimeout(t);
+    }
+  }, [open, mounted]);
+
+  if (!mounted) return null;
+
+  const ingredients = [
+    ["Large sea scallops", "12 oz"],
+    ["Unsalted butter", "4 tbsp"],
+    ["Lemon, zested + juiced", "1"],
+    ["Fresh tarragon", "2 tbsp"],
+    ["Calabrian chili", "1 tsp"],
+    ["Dry white wine", "¼ cup"],
+    ["Shallot, minced", "1 small"],
+    ["Neutral oil", "1 tbsp"],
+    ["Salt + white pepper", "to taste"],
+  ];
+  const steps = [
+    "Pat scallops dry and season with salt and white pepper. Heat neutral oil in a cast iron skillet over high heat until smoking.",
+    "Sear scallops 90 seconds per side without moving. Remove and rest on a warm plate.",
+    "Reduce heat to medium. Add shallot and cook 1 minute. Add wine and reduce by half.",
+    "Add lemon juice, zest, and Calabrian chili. Whisk in cold butter one tablespoon at a time until emulsified.",
+    "Finish with fresh tarragon. Spoon beurre blanc over scallops and serve immediately.",
+  ];
+
+  return (
+    <div
+      style={{
+        position: "absolute", inset: 0,
+        background: "#EEF4F8",
+        display: "flex", flexDirection: "column",
+        zIndex: 20,
+        transform: shown ? "translateY(0)" : "translateY(100%)",
+        transition: "transform 320ms cubic-bezier(0.4, 0, 0.2, 1)",
+      }}
+    >
+      {/* Sheet header */}
+      <div style={{ padding: "20px 16px 12px", flexShrink: 0, display: "grid", gridTemplateColumns: "32px 1fr 32px", alignItems: "center" }}>
+        <span />
+        <div style={{
+          textAlign: "center",
+          fontFamily: "'DM Sans', sans-serif", fontSize: 10,
+          textTransform: "uppercase", letterSpacing: "0.1em",
+          color: "#185FA5", opacity: 0.7,
+        }}>
+          Recipe Preview
+        </div>
+        <button
+          onClick={onClose}
+          aria-label="Collapse"
+          style={{ background: "transparent", border: "none", cursor: "pointer", color: "#185FA5", fontSize: 18, padding: 0, justifySelf: "end" }}
+        >
+          ⌄
         </button>
       </div>
 
-      {/* Empty state */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 32px", textAlign: "center", gap: 16 }}>
-        <div style={{
-          width: 48, height: 48, borderRadius: "50%",
-          background: "#E6F1FB", border: "0.5px solid #85B7EB",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          color: "#185FA5",
-        }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 5v14" />
-            <path d="M5 12h14" />
-          </svg>
+      {/* Scrollable card body */}
+      <div style={{ flex: 1, overflowY: "auto" }}>
+        <div style={{ height: 120, background: "linear-gradient(135deg, #042C53 0%, #185FA5 50%, #85B7EB 100%)" }} />
+        <div style={{ padding: "16px 20px 14px" }}>
+          <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, textTransform: "uppercase", letterSpacing: "0.14em", color: "#185FA5", marginBottom: 6 }}>
+            Seafood
+          </div>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, color: "#042C53", lineHeight: 1.3, marginBottom: 8 }}>
+            Seared Scallops, Lemon Tarragon Beurre Blanc
+          </div>
+          <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#185FA5", opacity: 0.8, lineHeight: 1.5 }}>
+            Pan-seared scallops with bright citrus butter, Calabrian chili heat, and fresh tarragon. An elegant weeknight dinner for two.
+          </div>
         </div>
-        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#042C53", fontWeight: 400 }}>
-          What are we making?
+        <div style={{ borderTop: "0.5px solid #85B7EB" }} />
+        {/* Tabs */}
+        <div style={{ display: "flex" }}>
+          {(["ingredients", "steps"] as const).map((t) => {
+            const active = tab === t;
+            return (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                style={{
+                  flex: 1,
+                  padding: "11px 0",
+                  background: active ? "#0C447C" : "#E6F1FB",
+                  color: active ? "#EEF4F8" : "#185FA5",
+                  border: "none",
+                  cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif",
+                  fontSize: 11,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.1em",
+                }}
+              >
+                {t}
+              </button>
+            );
+          })}
         </div>
-        <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: "#185FA5", lineHeight: 1.5, maxWidth: 240 }}>
-          Tell me what you're in the mood for, what's in your fridge, or what the occasion is.
-        </div>
+        {tab === "ingredients" ? (
+          <div>
+            {ingredients.map(([name, qty], i) => (
+              <div key={i} style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                padding: "10px 20px",
+                borderBottom: "0.5px solid #85B7EB",
+              }}>
+                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#042C53" }}>{name}</span>
+                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#185FA5" }}>{qty}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div>
+            {steps.map((s, i) => (
+              <div key={i} style={{
+                display: "flex", gap: 14, alignItems: "flex-start",
+                padding: "12px 20px",
+                borderBottom: "0.5px solid #85B7EB",
+              }}>
+                <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#85B7EB", lineHeight: 1, flexShrink: 0, minWidth: 18 }}>{i + 1}</span>
+                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#042C53", lineHeight: 1.6 }}>{s}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {/* Save button */}
+        <button
+          style={{
+            display: "block",
+            width: "calc(100% - 32px)",
+            margin: "12px 16px",
+            padding: "12px 0",
+            background: "#0C447C",
+            color: "#EEF4F8",
+            border: "none",
+            borderRadius: 100,
+            fontFamily: "'DM Sans', sans-serif",
+            fontSize: 11,
+            textTransform: "uppercase",
+            letterSpacing: "0.1em",
+            cursor: "pointer",
+          }}
+        >
+          Save to Browse
+        </button>
       </div>
 
-      {/* Input bar */}
-      <div style={{ padding: "12px 16px 20px", flexShrink: 0 }}>
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8,
-          background: "#E6F1FB",
-          border: "0.5px solid #85B7EB",
-          borderRadius: 999,
-          padding: "6px 6px 6px 16px",
-        }}>
-          <input
-            type="text"
-            placeholder="What are we making tonight?"
-            style={{
-              flex: 1, border: "none", outline: "none", background: "transparent",
-              fontFamily: "'DM Sans', sans-serif", fontSize: 13,
-              color: "#042C53",
-            }}
-          />
-          <button
-            aria-label="Send"
-            style={{
-              width: 32, height: 32, borderRadius: "50%",
-              background: "#0C447C", border: "none", cursor: "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              color: "#E6F1FB", flexShrink: 0,
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M5 12h14" />
-              <path d="M13 5l7 7-7 7" />
-            </svg>
-          </button>
-        </div>
-      </div>
+      {/* Sheet input bar */}
+      <CookInputBar
+        value={input}
+        onChange={setInput}
+        onSend={() => { setInput(""); onSendFromSheet(); }}
+        placeholder={placeholder}
+      />
     </div>
   );
 }
