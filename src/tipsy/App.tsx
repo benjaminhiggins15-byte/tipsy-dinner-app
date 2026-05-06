@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, saveRecipe, type Recipe } from "./data";
+import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, type Recipe } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
@@ -99,7 +99,13 @@ function renderScreen(
         push={push}
       />
     );
-    case "cook": return <Cook back={back} push={push} />;
+    case "cook": return (
+      <Cook
+        back={back}
+        push={push}
+        finishSaveRecipe={(r, k, l) => finishSaveRecipe?.(r, k, l)}
+      />
+    );
     case "addown": return (
       <AddYourOwn
         back={back}
@@ -170,6 +176,9 @@ export default function App() {
       });
       return;
     }
+    // When leaving the Cook screen to create a new category for an
+    // AI-generated recipe, just push — the Cook screen will be wiped from the
+    // back stack on save anyway.
     setTransition({ from: current, to: s, direction: "forward" });
     setStack((st) => [...st, s]);
   };
@@ -866,7 +875,11 @@ function BackArrow() {
 }
 
 /* ---------------- Cook ---------------- */
-function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
+function Cook({ back, push, finishSaveRecipe }: {
+  back: () => void;
+  push: (s: Screen) => void;
+  finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
+}) {
   type Msg = { id: number; role: "user" | "ai"; text: string };
   const MOCK: { user: string; ai: string; revealsRecipe?: boolean }[] = [
     { user: "Something with scallops, Mediterranean feel. Cooking for two tonight.", ai: "Love that direction. Are you thinking bright and citrus-forward, or richer — saffron butter, that kind of thing?" },
@@ -876,6 +889,65 @@ function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
     { user: "What wine would you pair with this?", ai: "A white Burgundy would be ideal — the minerality plays beautifully with the beurre blanc. A Sancerre works great too if you want something crisper." },
   ];
   const RECIPE_TITLE = "Seared Scallops, Lemon Tarragon Beurre Blanc";
+  const RECIPE_DESC = "Pan-seared scallops with bright citrus butter, Calabrian chili heat, and fresh tarragon. An elegant weeknight dinner for two.";
+  const RECIPE_INGREDIENTS: { name: string; qty: string }[] = [
+    { name: "Large sea scallops", qty: "12 oz" },
+    { name: "Unsalted butter", qty: "4 tbsp" },
+    { name: "Lemon, zested + juiced", qty: "1" },
+    { name: "Fresh tarragon", qty: "2 tbsp" },
+    { name: "Calabrian chili", qty: "1 tsp" },
+    { name: "Dry white wine", qty: "¼ cup" },
+    { name: "Shallot, minced", qty: "1 small" },
+    { name: "Neutral oil", qty: "1 tbsp" },
+    { name: "Salt + white pepper", qty: "to taste" },
+  ];
+  const RECIPE_STEPS: string[] = [
+    "Pat scallops dry and season with salt and white pepper. Heat neutral oil in a cast iron skillet over high heat until smoking.",
+    "Sear scallops 90 seconds per side without moving. Remove and rest on a warm plate.",
+    "Reduce heat to medium. Add shallot and cook 1 minute. Add wine and reduce by half.",
+    "Add lemon juice, zest, and Calabrian chili. Whisk in cold butter one tablespoon at a time until emulsified.",
+    "Finish with fresh tarragon. Spoon beurre blanc over scallops and serve immediately.",
+  ];
+
+  const [trayOpen, setTrayOpen] = useState(false);
+
+  const onPickCategory = (catKey: string, catLabel: string) => {
+    const id = Date.now();
+    saveRecipe({
+      id,
+      title: RECIPE_TITLE,
+      description: RECIPE_DESC,
+      category: catKey,
+      ingredients: RECIPE_INGREDIENTS,
+      steps: RECIPE_STEPS,
+      createdAt: new Date().toISOString(),
+    });
+    const recipe: Recipe = {
+      title: RECIPE_TITLE,
+      description: RECIPE_DESC,
+      color: "linear-gradient(135deg, #C5DCF4 0%, #85B7EB 100%)",
+      category: catLabel.toLowerCase(),
+      ingredients: RECIPE_INGREDIENTS,
+      steps: RECIPE_STEPS,
+      savedId: id,
+      categoryKey: catKey,
+    };
+    setTrayOpen(false);
+    finishSaveRecipe(recipe, catKey, catLabel);
+  };
+
+  const onPickNewCategory = () => {
+    setTrayOpen(false);
+    push({
+      name: "newcategoryforrecipe",
+      draft: {
+        title: RECIPE_TITLE,
+        description: RECIPE_DESC,
+        ingredients: RECIPE_INGREDIENTS,
+        steps: RECIPE_STEPS,
+      },
+    });
+  };
 
   const [messages, setMessages] = useState<Msg[]>([]);
   const [turnIndex, setTurnIndex] = useState(0);
@@ -1012,6 +1084,7 @@ function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
       <ExpandedRecipeOverlay
         open={expanded}
         bottomOffset={bottomBarHeight}
+        onSave={() => setTrayOpen(true)}
       />
 
       {/* Bottom bars (mini player + input) — never move, never hide */}
@@ -1058,6 +1131,92 @@ function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
           placeholder={placeholder}
           disabled={typing || turnIndex >= MOCK.length}
         />
+      </div>
+
+      {/* Bottom sheet: pick a category to save the AI recipe */}
+      {trayOpen && (
+        <SaveCategoryTray
+          onClose={() => setTrayOpen(false)}
+          onPick={onPickCategory}
+          onNew={onPickNewCategory}
+        />
+      )}
+    </div>
+  );
+}
+
+function SaveCategoryTray({ onClose, onPick, onNew }: {
+  onClose: () => void;
+  onPick: (key: string, label: string) => void;
+  onNew: () => void;
+}) {
+  const cats = loadCustomCategories();
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "absolute", inset: 0, background: "rgba(4, 44, 83, 0.38)",
+        zIndex: 80, display: "flex", alignItems: "flex-end", justifyContent: "center",
+        animation: "tipsy-fade 0.22s ease",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "#fff", borderRadius: "20px 20px 0 0",
+          padding: "16px 0 24px", width: "100%",
+          animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
+        }}
+      >
+        <div style={{ width: 32, height: 4, borderRadius: 2, background: "#C5DCF4", margin: "0 auto 14px" }} />
+        <div style={{ padding: "0 18px 14px", borderBottom: "1px solid #C5DCF4" }}>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 17, color: "#042C53", marginBottom: 2 }}>Where does it live?</div>
+          <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#5A7FA3" }}>Swipe to find the right category.</div>
+        </div>
+        <div style={{ overflowX: "auto", padding: "14px 18px 4px", display: "flex", gap: 10, scrollbarWidth: "none" }}>
+          <button
+            onClick={onNew}
+            style={{
+              flexShrink: 0, width: 96, cursor: "pointer",
+              background: "none", padding: 0, textAlign: "left", border: "none",
+            }}
+          >
+            <div style={{
+              width: 96, height: 70, borderRadius: 12,
+              background: "#E6F1FB", border: "1px solid #85B7EB",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "#185FA5", fontSize: 32, fontWeight: 300, lineHeight: 1,
+              boxSizing: "border-box",
+            }}>+</div>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 500, color: "#042C53", padding: "6px 4px 2px" }}>New category</div>
+          </button>
+          {cats.map((c) => (
+            <button
+              key={c.key}
+              onClick={() => onPick(c.key, c.label)}
+              style={{
+                flexShrink: 0, width: 96, cursor: "pointer",
+                borderRadius: 12, overflow: "hidden",
+                border: "2px solid transparent", background: "none", padding: 0, textAlign: "left",
+              }}
+            >
+              <div style={{
+                width: 96, height: 70, position: "relative",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                background: c.gradient,
+              }}>
+                <div style={{ position: "absolute", inset: 0, background: "rgba(4, 44, 83, 0.22)" }} />
+                <div style={{
+                  position: "absolute", bottom: 6, left: 0, right: 0, textAlign: "center",
+                  fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, letterSpacing: "0.12em",
+                  textTransform: "uppercase", color: "rgba(255,255,255,0.95)",
+                  textShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                }}>{c.label}</div>
+              </div>
+              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 500, color: "#042C53", padding: "6px 4px 2px" }}>{c.label}</div>
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -1158,8 +1317,8 @@ function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
   );
 }
 
-function ExpandedRecipeOverlay({ open, bottomOffset }: {
-  open: boolean; bottomOffset: number;
+function ExpandedRecipeOverlay({ open, bottomOffset, onSave }: {
+  open: boolean; bottomOffset: number; onSave: () => void;
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
   const [mounted, setMounted] = useState(open);
@@ -1317,6 +1476,7 @@ function ExpandedRecipeOverlay({ open, bottomOffset }: {
         )}
         {/* Save button */}
         <button
+          onClick={onSave}
           style={{
             display: "block",
             width: "calc(100% - 32px)",
@@ -1333,7 +1493,7 @@ function ExpandedRecipeOverlay({ open, bottomOffset }: {
             cursor: "pointer",
           }}
         >
-          Save to Explore
+          Save
         </button>
       </div>
       </div>

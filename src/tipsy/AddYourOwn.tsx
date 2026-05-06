@@ -444,7 +444,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
               {isEdit ? (
                 <PrimaryBtn onClick={saveEdit}>Save changes</PrimaryBtn>
               ) : (
-                <PrimaryBtn onClick={() => setTrayOpen(true)}>Save to Explore</PrimaryBtn>
+                <PrimaryBtn onClick={() => setTrayOpen(true)}>Save</PrimaryBtn>
               )}
               <GhostBtn onClick={() => setStep(3)}>← Edit recipe</GhostBtn>
             </>
