@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, saveRecipe, type Recipe } from "./data";
+import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, type Recipe } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
@@ -176,6 +176,9 @@ export default function App() {
       });
       return;
     }
+    // When leaving the Cook screen to create a new category for an
+    // AI-generated recipe, just push — the Cook screen will be wiped from the
+    // back stack on save anyway.
     setTransition({ from: current, to: s, direction: "forward" });
     setStack((st) => [...st, s]);
   };
