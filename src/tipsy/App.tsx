@@ -875,7 +875,11 @@ function BackArrow() {
 }
 
 /* ---------------- Cook ---------------- */
-function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
+function Cook({ back, push, finishSaveRecipe }: {
+  back: () => void;
+  push: (s: Screen) => void;
+  finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
+}) {
   type Msg = { id: number; role: "user" | "ai"; text: string };
   const MOCK: { user: string; ai: string; revealsRecipe?: boolean }[] = [
     { user: "Something with scallops, Mediterranean feel. Cooking for two tonight.", ai: "Love that direction. Are you thinking bright and citrus-forward, or richer — saffron butter, that kind of thing?" },
@@ -885,6 +889,65 @@ function Cook({ back, push }: { back: () => void; push: (s: Screen) => void }) {
     { user: "What wine would you pair with this?", ai: "A white Burgundy would be ideal — the minerality plays beautifully with the beurre blanc. A Sancerre works great too if you want something crisper." },
   ];
   const RECIPE_TITLE = "Seared Scallops, Lemon Tarragon Beurre Blanc";
+  const RECIPE_DESC = "Pan-seared scallops with bright citrus butter, Calabrian chili heat, and fresh tarragon. An elegant weeknight dinner for two.";
+  const RECIPE_INGREDIENTS: { name: string; qty: string }[] = [
+    { name: "Large sea scallops", qty: "12 oz" },
+    { name: "Unsalted butter", qty: "4 tbsp" },
+    { name: "Lemon, zested + juiced", qty: "1" },
+    { name: "Fresh tarragon", qty: "2 tbsp" },
+    { name: "Calabrian chili", qty: "1 tsp" },
+    { name: "Dry white wine", qty: "¼ cup" },
+    { name: "Shallot, minced", qty: "1 small" },
+    { name: "Neutral oil", qty: "1 tbsp" },
+    { name: "Salt + white pepper", qty: "to taste" },
+  ];
+  const RECIPE_STEPS: string[] = [
+    "Pat scallops dry and season with salt and white pepper. Heat neutral oil in a cast iron skillet over high heat until smoking.",
+    "Sear scallops 90 seconds per side without moving. Remove and rest on a warm plate.",
+    "Reduce heat to medium. Add shallot and cook 1 minute. Add wine and reduce by half.",
+    "Add lemon juice, zest, and Calabrian chili. Whisk in cold butter one tablespoon at a time until emulsified.",
+    "Finish with fresh tarragon. Spoon beurre blanc over scallops and serve immediately.",
+  ];
+
+  const [trayOpen, setTrayOpen] = useState(false);
+
+  const onPickCategory = (catKey: string, catLabel: string) => {
+    const id = Date.now();
+    saveRecipe({
+      id,
+      title: RECIPE_TITLE,
+      description: RECIPE_DESC,
+      category: catKey,
+      ingredients: RECIPE_INGREDIENTS,
+      steps: RECIPE_STEPS,
+      createdAt: new Date().toISOString(),
+    });
+    const recipe: Recipe = {
+      title: RECIPE_TITLE,
+      description: RECIPE_DESC,
+      color: "linear-gradient(135deg, #C5DCF4 0%, #85B7EB 100%)",
+      category: catLabel.toLowerCase(),
+      ingredients: RECIPE_INGREDIENTS,
+      steps: RECIPE_STEPS,
+      savedId: id,
+      categoryKey: catKey,
+    };
+    setTrayOpen(false);
+    finishSaveRecipe(recipe, catKey, catLabel);
+  };
+
+  const onPickNewCategory = () => {
+    setTrayOpen(false);
+    push({
+      name: "newcategoryforrecipe",
+      draft: {
+        title: RECIPE_TITLE,
+        description: RECIPE_DESC,
+        ingredients: RECIPE_INGREDIENTS,
+        steps: RECIPE_STEPS,
+      },
+    });
+  };
 
   const [messages, setMessages] = useState<Msg[]>([]);
   const [turnIndex, setTurnIndex] = useState(0);
