@@ -1084,6 +1084,7 @@ function Cook({ back, push, finishSaveRecipe }: {
       <ExpandedRecipeOverlay
         open={expanded}
         bottomOffset={bottomBarHeight}
+        onSave={() => setTrayOpen(true)}
       />
 
       {/* Bottom bars (mini player + input) — never move, never hide */}
@@ -1130,6 +1131,92 @@ function Cook({ back, push, finishSaveRecipe }: {
           placeholder={placeholder}
           disabled={typing || turnIndex >= MOCK.length}
         />
+      </div>
+
+      {/* Bottom sheet: pick a category to save the AI recipe */}
+      {trayOpen && (
+        <SaveCategoryTray
+          onClose={() => setTrayOpen(false)}
+          onPick={onPickCategory}
+          onNew={onPickNewCategory}
+        />
+      )}
+    </div>
+  );
+}
+
+function SaveCategoryTray({ onClose, onPick, onNew }: {
+  onClose: () => void;
+  onPick: (key: string, label: string) => void;
+  onNew: () => void;
+}) {
+  const cats = loadCustomCategories();
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "absolute", inset: 0, background: "rgba(4, 44, 83, 0.38)",
+        zIndex: 80, display: "flex", alignItems: "flex-end", justifyContent: "center",
+        animation: "tipsy-fade 0.22s ease",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "#fff", borderRadius: "20px 20px 0 0",
+          padding: "16px 0 24px", width: "100%",
+          animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
+        }}
+      >
+        <div style={{ width: 32, height: 4, borderRadius: 2, background: "#C5DCF4", margin: "0 auto 14px" }} />
+        <div style={{ padding: "0 18px 14px", borderBottom: "1px solid #C5DCF4" }}>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 17, color: "#042C53", marginBottom: 2 }}>Where does it live?</div>
+          <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#5A7FA3" }}>Swipe to find the right category.</div>
+        </div>
+        <div style={{ overflowX: "auto", padding: "14px 18px 4px", display: "flex", gap: 10, scrollbarWidth: "none" }}>
+          <button
+            onClick={onNew}
+            style={{
+              flexShrink: 0, width: 96, cursor: "pointer",
+              background: "none", padding: 0, textAlign: "left", border: "none",
+            }}
+          >
+            <div style={{
+              width: 96, height: 70, borderRadius: 12,
+              background: "#E6F1FB", border: "1px solid #85B7EB",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "#185FA5", fontSize: 32, fontWeight: 300, lineHeight: 1,
+              boxSizing: "border-box",
+            }}>+</div>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 500, color: "#042C53", padding: "6px 4px 2px" }}>New category</div>
+          </button>
+          {cats.map((c) => (
+            <button
+              key={c.key}
+              onClick={() => onPick(c.key, c.label)}
+              style={{
+                flexShrink: 0, width: 96, cursor: "pointer",
+                borderRadius: 12, overflow: "hidden",
+                border: "2px solid transparent", background: "none", padding: 0, textAlign: "left",
+              }}
+            >
+              <div style={{
+                width: 96, height: 70, position: "relative",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                background: c.gradient,
+              }}>
+                <div style={{ position: "absolute", inset: 0, background: "rgba(4, 44, 83, 0.22)" }} />
+                <div style={{
+                  position: "absolute", bottom: 6, left: 0, right: 0, textAlign: "center",
+                  fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, letterSpacing: "0.12em",
+                  textTransform: "uppercase", color: "rgba(255,255,255,0.95)",
+                  textShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                }}>{c.label}</div>
+              </div>
+              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 500, color: "#042C53", padding: "6px 4px 2px" }}>{c.label}</div>
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -1230,8 +1317,8 @@ function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
   );
 }
 
-function ExpandedRecipeOverlay({ open, bottomOffset }: {
-  open: boolean; bottomOffset: number;
+function ExpandedRecipeOverlay({ open, bottomOffset, onSave }: {
+  open: boolean; bottomOffset: number; onSave: () => void;
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
   const [mounted, setMounted] = useState(open);
@@ -1389,6 +1476,7 @@ function ExpandedRecipeOverlay({ open, bottomOffset }: {
         )}
         {/* Save button */}
         <button
+          onClick={onSave}
           style={{
             display: "block",
             width: "calc(100% - 32px)",
@@ -1405,7 +1493,7 @@ function ExpandedRecipeOverlay({ open, bottomOffset }: {
             cursor: "pointer",
           }}
         >
-          Save to Explore
+          Save
         </button>
       </div>
       </div>
