@@ -99,7 +99,13 @@ function renderScreen(
         push={push}
       />
     );
-    case "cook": return <Cook back={back} push={push} />;
+    case "cook": return (
+      <Cook
+        back={back}
+        push={push}
+        finishSaveRecipe={(r, k, l) => finishSaveRecipe?.(r, k, l)}
+      />
+    );
     case "addown": return (
       <AddYourOwn
         back={back}
