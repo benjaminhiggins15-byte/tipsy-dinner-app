@@ -4,6 +4,7 @@ import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
 import Profile, { ProfileEdit, Avatar } from "./Profile";
+import Anthropic from "@anthropic-ai/sdk";
 
 type RecipeDraft = {
   title: string;
@@ -881,86 +882,28 @@ function Cook({ back, push, finishSaveRecipe }: {
   finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
 }) {
   type Msg = { id: number; role: "user" | "ai"; text: string };
-  const MOCK: { user: string; ai: string; revealsRecipe?: boolean }[] = [
-    { user: "Something with scallops, Mediterranean feel. Cooking for two tonight.", ai: "Love that direction. Are you thinking bright and citrus-forward, or richer — saffron butter, that kind of thing?" },
-    { user: "Citrus and herbs. Have lemons and tarragon.", ai: "Perfect combo. Pan-seared scallops, lemon tarragon beurre blanc, maybe a fennel salad alongside?" },
-    { user: "Yes. Can we add some heat?", ai: "Here's what I'm thinking — Seared Scallops, Lemon Tarragon Beurre Blanc. Tap the bar below to see the full recipe and tell me what you'd change.", revealsRecipe: true },
-    { user: "Can we make it spicier?", ai: "Done — doubled the Calabrian chili and added smoked paprika to the crust. Recipe updated." },
-    { user: "What wine would you pair with this?", ai: "A white Burgundy would be ideal — the minerality plays beautifully with the beurre blanc. A Sancerre works great too if you want something crisper." },
-  ];
-  const RECIPE_TITLE = "Seared Scallops, Lemon Tarragon Beurre Blanc";
-  const RECIPE_DESC = "Pan-seared scallops with bright citrus butter, Calabrian chili heat, and fresh tarragon. An elegant weeknight dinner for two.";
-  const RECIPE_INGREDIENTS: { name: string; qty: string }[] = [
-    { name: "Large sea scallops", qty: "12 oz" },
-    { name: "Unsalted butter", qty: "4 tbsp" },
-    { name: "Lemon, zested + juiced", qty: "1" },
-    { name: "Fresh tarragon", qty: "2 tbsp" },
-    { name: "Calabrian chili", qty: "1 tsp" },
-    { name: "Dry white wine", qty: "¼ cup" },
-    { name: "Shallot, minced", qty: "1 small" },
-    { name: "Neutral oil", qty: "1 tbsp" },
-    { name: "Salt + white pepper", qty: "to taste" },
-  ];
-  const RECIPE_STEPS: string[] = [
-    "Pat scallops dry and season with salt and white pepper. Heat neutral oil in a cast iron skillet over high heat until smoking.",
-    "Sear scallops 90 seconds per side without moving. Remove and rest on a warm plate.",
-    "Reduce heat to medium. Add shallot and cook 1 minute. Add wine and reduce by half.",
-    "Add lemon juice, zest, and Calabrian chili. Whisk in cold butter one tablespoon at a time until emulsified.",
-    "Finish with fresh tarragon. Spoon beurre blanc over scallops and serve immediately.",
-  ];
 
   const [trayOpen, setTrayOpen] = useState(false);
-
-  const onPickCategory = (catKey: string, catLabel: string) => {
-    const id = Date.now();
-    saveRecipe({
-      id,
-      title: RECIPE_TITLE,
-      description: RECIPE_DESC,
-      category: catKey,
-      ingredients: RECIPE_INGREDIENTS,
-      steps: RECIPE_STEPS,
-      createdAt: new Date().toISOString(),
-    });
-    const recipe: Recipe = {
-      title: RECIPE_TITLE,
-      description: RECIPE_DESC,
-      color: "linear-gradient(135deg, #C5DCF4 0%, #85B7EB 100%)",
-      category: catLabel.toLowerCase(),
-      ingredients: RECIPE_INGREDIENTS,
-      steps: RECIPE_STEPS,
-      savedId: id,
-      categoryKey: catKey,
-    };
-    setTrayOpen(false);
-    finishSaveRecipe(recipe, catKey, catLabel);
-  };
-
-  const onPickNewCategory = () => {
-    setTrayOpen(false);
-    push({
-      name: "newcategoryforrecipe",
-      draft: {
-        title: RECIPE_TITLE,
-        description: RECIPE_DESC,
-        ingredients: RECIPE_INGREDIENTS,
-        steps: RECIPE_STEPS,
-      },
-    });
-  };
-
   const [messages, setMessages] = useState<Msg[]>([]);
-  const [turnIndex, setTurnIndex] = useState(0);
   const [typing, setTyping] = useState(false);
   const [input, setInput] = useState("");
   const [recipeRevealed, setRecipeRevealed] = useState(false);
   const [miniBarVisible, setMiniBarVisible] = useState(false);
   const [miniTitleVisible, setMiniTitleVisible] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [currentRecipe, setCurrentRecipe] = useState<{
+    title: string;
+    description: string;
+    ingredients: { name: string; qty: string }[];
+    steps: string[];
+  } | null>(null);
+  const [conversationHistory, setConversationHistory] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
+
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomBarRef = useRef<HTMLDivElement | null>(null);
   const [bottomBarHeight, setBottomBarHeight] = useState(0);
   const idRef = useRef(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const measure = () => {
@@ -977,36 +920,221 @@ function Cook({ back, push, finishSaveRecipe }: {
     }
   }, [messages, typing, miniBarVisible]);
 
-  const sendNext = () => {
-    if (turnIndex >= MOCK.length || typing) return;
-    const turn = MOCK[turnIndex];
-    const userMsg: Msg = { id: ++idRef.current, role: "user", text: turn.user };
+  const sendMessage = async () => {
+    if (!input.trim() || typing) return;
+
+    const userText = input.trim();
+    const userMsg: Msg = { id: ++idRef.current, role: "user", text: userText };
     setMessages((m) => [...m, userMsg]);
     setInput("");
     setTyping(true);
 
-    if (turn.revealsRecipe) {
-      // Step 2: at 2000ms — mini player fades in; title slides up 200ms after
-      const t1 = setTimeout(() => {
-        setRecipeRevealed(true);
-        setMiniBarVisible(true);
-        setTimeout(() => setMiniTitleVisible(true), 200);
-      }, 2000);
-      // Step 3: at 2800ms — typing disappears, AI msg fades in
-      const t2 = setTimeout(() => {
-        setTyping(false);
-        setMessages((m) => [...m, { id: ++idRef.current, role: "ai", text: turn.ai }]);
-        setTurnIndex((i) => i + 1);
-      }, 2800);
-      // cleanup ignored — component lives for screen lifetime
-      void t1; void t2;
-    } else {
-      setTimeout(() => {
-        setTyping(false);
-        setMessages((m) => [...m, { id: ++idRef.current, role: "ai", text: turn.ai }]);
-        setTurnIndex((i) => i + 1);
-      }, 1200);
+    // Add user message to conversation history
+    const updatedHistory = [...conversationHistory, { role: "user" as const, content: userText }];
+    setConversationHistory(updatedHistory);
+
+    // Load user profile from localStorage
+    const palate = typeof window !== "undefined" ? localStorage.getItem("tipsyDinnerPalate") || "" : "";
+    const inspiration = typeof window !== "undefined" ? localStorage.getItem("tipsyDinnerInspiration") || "" : "";
+    const constraints = typeof window !== "undefined" ? localStorage.getItem("tipsyDinnerConstraints") || "" : "";
+
+    try {
+      console.log("Calling Anthropic API...");
+
+      // Initialize Anthropic client
+      const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+      if (!apiKey) {
+        throw new Error("API key not found");
+      }
+
+      const anthropic = new Anthropic({
+        apiKey,
+        dangerouslyAllowBrowser: true,
+      });
+
+      // Build system prompt
+      const systemPrompt = `You are a culinary AI assistant for Tipsy Dinner, a personal digital cookbook. You help craft personalized recipes through conversation.
+
+# User's Kitchen Profile
+**Palate**: ${palate || "Not specified"}
+**Inspiration sources**: ${inspiration || "Not specified"}
+**Constraints**: ${constraints || "Not specified"}
+
+# Your Role
+- Have natural, conversational back-and-forth about what they want to cook
+- Ask follow-up questions to refine the recipe
+- Tailor all suggestions to their palate, inspiration, and constraints
+- When ready, propose a complete recipe
+
+# Critical Rules
+1. **Only update the recipe when the user is explicitly iterating on it** — never on conversational tangents
+2. Answer questions about wine pairings, techniques, substitutions conversationally WITHOUT touching the recipe
+3. When you've crafted a recipe and want to present it, use this EXACT format:
+
+<recipe>
+<title>Recipe Title Here</title>
+<description>One-sentence description</description>
+<ingredients>
+<item><name>Ingredient name</name><qty>Amount</qty></item>
+<item><name>Another ingredient</name><qty>Amount</qty></item>
+</ingredients>
+<steps>
+<step>First step instructions</step>
+<step>Second step instructions</step>
+</steps>
+</recipe>
+
+4. When user asks to modify the recipe (make it spicier, add an ingredient, etc.), respond conversationally AND include an updated <recipe> block
+5. Keep your tone warm, elevated but approachable — like a knowledgeable friend who loves to cook
+
+Remember: The recipe block should only appear when you're presenting or updating an actual recipe. Conversational responses about technique, wine, or general cooking questions should have NO recipe block.`;
+
+      const stream = await anthropic.messages.stream({
+        model: "claude-sonnet-4-5",
+        max_tokens: 2048,
+        system: systemPrompt,
+        messages: updatedHistory,
+      });
+
+      let fullText = "";
+
+      for await (const chunk of stream) {
+        if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
+          fullText += chunk.delta.text;
+        }
+      }
+
+      console.log("Anthropic response received");
+
+      if (!fullText) {
+        throw new Error("Empty response from API");
+      }
+
+      // Parse for recipe XML
+      const recipeMatch = fullText.match(/<recipe>([\s\S]*?)<\/recipe>/);
+      let parsedRecipe = null;
+
+      if (recipeMatch) {
+        const recipeXml = recipeMatch[1];
+
+        const titleMatch = recipeXml.match(/<title>(.*?)<\/title>/);
+        const descMatch = recipeXml.match(/<description>(.*?)<\/description>/);
+        const ingredientsMatch = recipeXml.match(/<ingredients>([\s\S]*?)<\/ingredients>/);
+        const stepsMatch = recipeXml.match(/<steps>([\s\S]*?)<\/steps>/);
+
+        const ingredients: { name: string; qty: string }[] = [];
+        if (ingredientsMatch) {
+          const itemMatches = [
+            ...ingredientsMatch[1].matchAll(
+              /<item>[\s\S]*?<name>(.*?)<\/name>[\s\S]*?<qty>(.*?)<\/qty>[\s\S]*?<\/item>/g
+            ),
+          ];
+          for (const match of itemMatches) {
+            ingredients.push({ name: match[1].trim(), qty: match[2].trim() });
+          }
+        }
+
+        const steps: string[] = [];
+        if (stepsMatch) {
+          const stepMatches = [...stepsMatch[1].matchAll(/<step>(.*?)<\/step>/g)];
+          for (const match of stepMatches) {
+            steps.push(match[1].trim());
+          }
+        }
+
+        if (titleMatch && descMatch && ingredients.length > 0 && steps.length > 0) {
+          parsedRecipe = {
+            title: titleMatch[1].trim(),
+            description: descMatch[1].trim(),
+            ingredients,
+            steps,
+          };
+          console.log("Recipe parsed:", parsedRecipe.title);
+        }
+      }
+
+      // Remove XML tags from displayed text
+      const displayText = fullText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "").trim();
+
+      // Add AI message
+      setTyping(false);
+      const aiMessageId = ++idRef.current;
+      setMessages((m) => [...m, { id: aiMessageId, role: "ai", text: displayText || "..." }]);
+
+      // Update conversation history
+      setConversationHistory([...updatedHistory, { role: "assistant", content: fullText }]);
+
+      // Handle recipe if present
+      if (parsedRecipe) {
+        setCurrentRecipe(parsedRecipe);
+
+        // Trigger mini player animation
+        if (!recipeRevealed) {
+          setRecipeRevealed(true);
+          setTimeout(() => {
+            setMiniBarVisible(true);
+            setTimeout(() => setMiniTitleVisible(true), 200);
+          }, 300);
+        } else {
+          // Recipe updated - already revealed, just update data
+          setMiniBarVisible(true);
+          setMiniTitleVisible(true);
+        }
+      }
+    } catch (error) {
+      console.error("Error sending message:", error);
+      setTyping(false);
+      setMessages((m) => [
+        ...m,
+        {
+          id: ++idRef.current,
+          role: "ai",
+          text: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
+        },
+      ]);
     }
+  };
+
+  const onPickCategory = (catKey: string, catLabel: string) => {
+    if (!currentRecipe) return;
+
+    const id = Date.now();
+    saveRecipe({
+      id,
+      title: currentRecipe.title,
+      description: currentRecipe.description,
+      category: catKey,
+      ingredients: currentRecipe.ingredients,
+      steps: currentRecipe.steps,
+      createdAt: new Date().toISOString(),
+    });
+    const recipe: Recipe = {
+      title: currentRecipe.title,
+      description: currentRecipe.description,
+      color: "linear-gradient(135deg, #C5DCF4 0%, #85B7EB 100%)",
+      category: catLabel.toLowerCase(),
+      ingredients: currentRecipe.ingredients,
+      steps: currentRecipe.steps,
+      savedId: id,
+      categoryKey: catKey,
+    };
+    setTrayOpen(false);
+    finishSaveRecipe(recipe, catKey, catLabel);
+  };
+
+  const onPickNewCategory = () => {
+    if (!currentRecipe) return;
+
+    setTrayOpen(false);
+    push({
+      name: "newcategoryforrecipe",
+      draft: {
+        title: currentRecipe.title,
+        description: currentRecipe.description,
+        ingredients: currentRecipe.ingredients,
+        steps: currentRecipe.steps,
+      },
+    });
   };
 
   const isEmpty = messages.length === 0;
@@ -1081,15 +1209,18 @@ function Cook({ back, push, finishSaveRecipe }: {
       )}
 
       {/* Expanded recipe overlay — grows upward out of the mini player */}
-      <ExpandedRecipeOverlay
-        open={expanded}
-        bottomOffset={bottomBarHeight}
-        onSave={() => setTrayOpen(true)}
-      />
+      {currentRecipe && (
+        <ExpandedRecipeOverlay
+          open={expanded}
+          bottomOffset={bottomBarHeight}
+          onSave={() => setTrayOpen(true)}
+          recipe={currentRecipe}
+        />
+      )}
 
       {/* Bottom bars (mini player + input) — never move, never hide */}
       <div ref={bottomBarRef} style={{ flexShrink: 0, position: "relative", zIndex: 60 }}>
-        {recipeRevealed && (
+        {recipeRevealed && currentRecipe && (
           <div
             onClick={() => setExpanded((v) => !v)}
             style={{
@@ -1117,7 +1248,7 @@ function Cook({ back, push, finishSaveRecipe }: {
                 fontFamily: "'Playfair Display', serif", fontSize: 12, color: "#042C53",
                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
               }}>
-                {RECIPE_TITLE}
+                {currentRecipe.title}
               </div>
             </div>
             <div style={{ color: "#185FA5", fontSize: 14, flexShrink: 0 }}>{expanded ? "⌄" : "⌃"}</div>
@@ -1127,9 +1258,9 @@ function Cook({ back, push, finishSaveRecipe }: {
         <CookInputBar
           value={input}
           onChange={setInput}
-          onSend={sendNext}
+          onSend={sendMessage}
           placeholder={placeholder}
-          disabled={typing || turnIndex >= MOCK.length}
+          disabled={typing}
         />
       </div>
 
@@ -1317,8 +1448,16 @@ function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
   );
 }
 
-function ExpandedRecipeOverlay({ open, bottomOffset, onSave }: {
-  open: boolean; bottomOffset: number; onSave: () => void;
+function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
+  open: boolean;
+  bottomOffset: number;
+  onSave: () => void;
+  recipe: {
+    title: string;
+    description: string;
+    ingredients: { name: string; qty: string }[];
+    steps: string[];
+  };
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
   const [mounted, setMounted] = useState(open);
@@ -1340,25 +1479,6 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave }: {
   }, [open, mounted]);
 
   if (!mounted) return null;
-
-  const ingredients = [
-    ["Large sea scallops", "12 oz"],
-    ["Unsalted butter", "4 tbsp"],
-    ["Lemon, zested + juiced", "1"],
-    ["Fresh tarragon", "2 tbsp"],
-    ["Calabrian chili", "1 tsp"],
-    ["Dry white wine", "¼ cup"],
-    ["Shallot, minced", "1 small"],
-    ["Neutral oil", "1 tbsp"],
-    ["Salt + white pepper", "to taste"],
-  ];
-  const steps = [
-    "Pat scallops dry and season with salt and white pepper. Heat neutral oil in a cast iron skillet over high heat until smoking.",
-    "Sear scallops 90 seconds per side without moving. Remove and rest on a warm plate.",
-    "Reduce heat to medium. Add shallot and cook 1 minute. Add wine and reduce by half.",
-    "Add lemon juice, zest, and Calabrian chili. Whisk in cold butter one tablespoon at a time until emulsified.",
-    "Finish with fresh tarragon. Spoon beurre blanc over scallops and serve immediately.",
-  ];
 
   return (
     <div
@@ -1414,10 +1534,10 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave }: {
             Seafood
           </div>
           <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, color: "#042C53", lineHeight: 1.3, marginBottom: 8 }}>
-            Seared Scallops, Lemon Tarragon Beurre Blanc
+            {recipe.title}
           </div>
           <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#185FA5", opacity: 0.8, lineHeight: 1.5 }}>
-            Pan-seared scallops with bright citrus butter, Calabrian chili heat, and fresh tarragon. An elegant weeknight dinner for two.
+            {recipe.description}
           </div>
         </div>
         <div style={{ borderTop: "0.5px solid #85B7EB" }} />
@@ -1449,20 +1569,20 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave }: {
         </div>
         {tab === "ingredients" ? (
           <div>
-            {ingredients.map(([name, qty], i) => (
+            {recipe.ingredients.map((item, i) => (
               <div key={i} style={{
                 display: "flex", justifyContent: "space-between", alignItems: "center",
                 padding: "10px 20px",
                 borderBottom: "0.5px solid #85B7EB",
               }}>
-                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#042C53" }}>{name}</span>
-                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#185FA5" }}>{qty}</span>
+                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#042C53" }}>{item.name}</span>
+                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#185FA5" }}>{item.qty}</span>
               </div>
             ))}
           </div>
         ) : (
           <div>
-            {steps.map((s, i) => (
+            {recipe.steps.map((s, i) => (
               <div key={i} style={{
                 display: "flex", gap: 14, alignItems: "flex-start",
                 padding: "12px 20px",
