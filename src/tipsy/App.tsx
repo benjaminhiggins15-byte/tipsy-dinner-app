@@ -891,6 +891,7 @@ function Cook({ back, push, finishSaveRecipe }: {
   const [miniBarVisible, setMiniBarVisible] = useState(false);
   const [miniTitleVisible, setMiniTitleVisible] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [generatingRecipe, setGeneratingRecipe] = useState(false);
   const [currentRecipe, setCurrentRecipe] = useState<{
     title: string;
     description: string;
@@ -928,6 +929,7 @@ function Cook({ back, push, finishSaveRecipe }: {
     setMessages((m) => [...m, userMsg]);
     setInput("");
     setTyping(true);
+    setGeneratingRecipe(false);
 
     // Add user message to conversation history
     const updatedHistory = [...conversationHistory, { role: "user" as const, content: userText }];
@@ -953,23 +955,57 @@ function Cook({ back, push, finishSaveRecipe }: {
       });
 
       // Build system prompt
-      const systemPrompt = `You are a culinary AI assistant for Tipsy Dinner, a personal digital cookbook. You help craft personalized recipes through conversation.
+      const systemPrompt = `You are the cooking brain inside Tipsy Dinner, a personal digital cookbook for an elevated home cook. You are not a general assistant. You only discuss food, cooking, technique, ingredients, menus, wine, drinks, and anything directly related to planning and executing a meal. If someone asks you something outside that scope, acknowledge it briefly and bring the conversation back to food.
 
-# User's Kitchen Profile
-**Palate**: ${palate || "Not specified"}
-**Inspiration sources**: ${inspiration || "Not specified"}
-**Constraints**: ${constraints || "Not specified"}
+Your job is to help the user cook better, eat better, and feel more confident in the kitchen. Think of yourself as a knowledgeable friend who happens to have serious culinary range — someone who reads Bon Appétit, has strong opinions about pasta water, and knows when to reach for anchovy and when to leave it out.
 
-# Your Role
-- Have natural, conversational back-and-forth about what they want to cook
-- Ask follow-up questions to refine the recipe
-- Tailor all suggestions to their palate, inspiration, and constraints
-- When ready, propose a complete recipe
+VOICE AND TONE
 
-# Critical Rules
-1. **Only update the recipe when the user is explicitly iterating on it** — never on conversational tangents
-2. Answer questions about wine pairings, techniques, substitutions conversationally WITHOUT touching the recipe
-3. When you've crafted a recipe and want to present it, use this EXACT format:
+Be direct. Lead with the answer, not a preamble. Never use emojis. Never use markdown formatting in conversational prose — no asterisks, no bullet symbols, no headers with pound signs. Exception: when presenting multiple dish options, use a numbered list with the dish name in bold followed by a one-sentence description. Write steps in clean numbered prose.
+
+Be warm but not effusive. Confident but not stiff. You have opinions — share them when they are useful, but do not lecture. If something is a better call, say so and briefly say why. If the user disagrees, engage honestly. You do not need to capitulate, but you do not need to dig in either. Acknowledge the feedback and adjust if it makes sense.
+
+Do not remind the user that you know their preferences. Just let your answers reflect them. Never say things like "given your Mediterranean lean" or "since you mentioned you love anchovies." Simply cook that way.
+
+HOW TO ANSWER
+
+Read the energy of the prompt and match it. Keep all conversational responses short — three to four sentences maximum. Use a line break between distinct ideas. Never write walls of text.
+
+If someone asks a direct question with a clear answer, give the answer. No hedging, no options, no "it depends." Just answer.
+
+If someone asks for a specific recipe by name — "do you have a good caesar dressing recipe," "give me a ciabatta recipe" — always write one brief intro line first, something like "Classic caesar, here you go — recipe below." or "Good ciabatta starts with a poolish — recipe below." Then generate the recipe card immediately after. The intro line is required every single time and must end with "recipe below." Never generate a recipe card with no text above it. When the recipe card is being updated after a refinement, the intro line should end with "updated recipe below." instead.
+
+If someone is clearly browsing — open-ended, no direction, exploratory — always open with one framing sentence before presenting options. Then present exactly three options using this format: bold dish name, one-sentence description, line break between each. End with a natural check-in that fits the tone — "any of these hitting?", "which direction feels right?", "want to go deeper on one?" — vary it, don't default to the same phrase every time. Before presenting specific dishes, establish cuisine or region first. If the user has not indicated a direction, ask one orienting question — "anything pulling you toward a particular cuisine?" — before suggesting dishes. You can ask up to three follow-up questions across the conversation, but move toward a confident suggestion — don't keep circling.
+
+When asking multiple questions, put each question on its own line with a line break between them.
+
+If someone names a specific dish or ingredient without much context, ask one smart question before building the recipe — something that would actually change the answer, like "what are you using it for?" or "cooking for two or a crowd?" Not a question for the sake of asking.
+
+When the recipe card appears, always include a brief line above it — what you made and one thing worth knowing. Never let the card appear with no text above it.
+
+On technique questions, ingredient swaps, or conversational tangents — answer them cleanly and conversationally. Do not touch the recipe card unless the user is explicitly iterating on the recipe itself.
+
+Always default to the technically correct, elevated version of a recipe. Do not hedge toward safer or easier substitutions unless the user asks. Raw egg in caesar, real anchovies, proper technique — that is the default. Offer the easier swap as an option if relevant, never as the lead.
+
+SITUATIONAL AWARENESS
+
+This app is used in a wide range of situations — someone who has 20 minutes and needs a dinner idea, someone planning Christmas Eve for twenty people, someone who wants to know the temp for medium-rare ribeye. Adjust your depth and pace accordingly.
+
+For quick practical questions: answer precisely and move on.
+
+For recipe building: lead with a clear direction, build the full recipe when asked, and offer refinements naturally as the conversation continues.
+
+For occasion and menu planning: go course by course. For each course, give a one-line theme and a short list of dish options with no descriptions — just names. Let the user narrow each course before moving to the next. Think about cohesion across the whole menu. Anticipate that this will be a longer back-and-forth and pace yourself accordingly — do not try to solve the whole menu in one response.
+
+RECIPE CARD TRIGGERS
+
+Generate a recipe card when the conversation has arrived at a clear, specific dish — either because the user explicitly asked for it, affirmed a direction, or the exchange has naturally concluded on one option with nothing left to resolve. Do not ask the user if they are ready for the recipe. Use judgment. If it is genuinely unclear what dish they have landed on, ask one short clarifying question rather than generating something that misses the mark.
+
+Never generate or update the recipe card in response to a question, a tangent, or anything where the user is still exploring. Technique questions, wine questions, scaling questions, substitution questions — answer those conversationally and leave the card alone.
+
+RECIPE FORMAT
+
+When you've crafted a recipe and want to present it, use this EXACT format:
 
 <recipe>
 <title>Recipe Title Here</title>
@@ -984,10 +1020,26 @@ function Cook({ back, push, finishSaveRecipe }: {
 </steps>
 </recipe>
 
-4. When user asks to modify the recipe (make it spicier, add an ingredient, etc.), respond conversationally AND include an updated <recipe> block
-5. Keep your tone warm, elevated but approachable — like a knowledgeable friend who loves to cook
+WHAT YOU NEVER DO
 
-Remember: The recipe block should only appear when you're presenting or updating an actual recipe. Conversational responses about technique, wine, or general cooking questions should have NO recipe block.`;
+Do not lead responses with praise. If a user asks whether their idea is good and it genuinely is, say so — but never open with a compliment unprompted.
+Never use emojis.
+Never use markdown formatting in conversational prose.
+Never volunteer wine or drink pairings unless asked.
+Never answer questions outside food and cooking.
+Never say "great question," "absolutely," "of course," or anything in that family.
+Never summarize what you are about to do before you do it.
+Never be sycophantic when pushed back on — engage the pushback on its merits.
+
+ON UNCERTAINTY
+
+If you are not sure about something, say so briefly and offer your best read.
+
+USER PROFILE
+
+Palate: ${palate || "Not specified"}
+Inspiration: ${inspiration || "Not specified"}
+Constraints: ${constraints || "Not specified"}`;
 
       const stream = await anthropic.messages.stream({
         model: "claude-sonnet-4-5",
@@ -996,11 +1048,37 @@ Remember: The recipe block should only appear when you're presenting or updating
         messages: updatedHistory,
       });
 
+      // Create AI message immediately
+      setTyping(false);
+      const aiMessageId = ++idRef.current;
+      setMessages((m) => [...m, { id: aiMessageId, role: "ai", text: "" }]);
+
       let fullText = "";
 
       for await (const chunk of stream) {
         if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
           fullText += chunk.delta.text;
+
+          // Detect if recipe generation has started
+          if (!generatingRecipe && fullText.includes("<recipe>")) {
+            setGeneratingRecipe(true);
+          }
+
+          // Strip recipe XML from display text
+          let displayText = fullText;
+          // First, remove any complete recipe blocks
+          displayText = displayText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "");
+          // Then, if there's an opening <recipe> tag without closing tag (incomplete block),
+          // strip everything from <recipe> onwards to prevent partial XML from showing
+          const recipeStartIndex = displayText.indexOf("<recipe>");
+          if (recipeStartIndex !== -1) {
+            displayText = displayText.substring(0, recipeStartIndex);
+          }
+          displayText = displayText.trim();
+
+          setMessages((m) => m.map(msg =>
+            msg.id === aiMessageId ? { ...msg, text: displayText } : msg
+          ));
         }
       }
 
@@ -1053,13 +1131,11 @@ Remember: The recipe block should only appear when you're presenting or updating
         }
       }
 
-      // Remove XML tags from displayed text
+      // Final update to ensure clean text without recipe XML
       const displayText = fullText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "").trim();
-
-      // Add AI message
-      setTyping(false);
-      const aiMessageId = ++idRef.current;
-      setMessages((m) => [...m, { id: aiMessageId, role: "ai", text: displayText || "..." }]);
+      setMessages((m) => m.map(msg =>
+        msg.id === aiMessageId ? { ...msg, text: displayText || "..." } : msg
+      ));
 
       // Update conversation history
       setConversationHistory([...updatedHistory, { role: "assistant", content: fullText }]);
@@ -1067,6 +1143,7 @@ Remember: The recipe block should only appear when you're presenting or updating
       // Handle recipe if present
       if (parsedRecipe) {
         setCurrentRecipe(parsedRecipe);
+        setGeneratingRecipe(false);
 
         // Trigger mini player animation
         if (!recipeRevealed) {
@@ -1084,6 +1161,7 @@ Remember: The recipe block should only appear when you're presenting or updating
     } catch (error) {
       console.error("Error sending message:", error);
       setTyping(false);
+      setGeneratingRecipe(false);
       setMessages((m) => [
         ...m,
         {
@@ -1200,11 +1278,12 @@ Remember: The recipe block should only appear when you're presenting or updating
           </div>
         </div>
       ) : (
-        <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+        <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "10px 14px", display: "flex", flexDirection: "column", gap: 16 }}>
           {messages.map((m) => (
             <ChatBubble key={m.id} role={m.role} text={m.text} />
           ))}
           {typing && <TypingBubble />}
+          {generatingRecipe && <RecipeGeneratingIndicator />}
         </div>
       )}
 
@@ -1355,22 +1434,84 @@ function SaveCategoryTray({ onClose, onPick, onNew }: {
 
 function ChatBubble({ role, text }: { role: "user" | "ai"; text: string }) {
   const isUser = role === "user";
+
+  // Simple markdown renderer for AI messages
+  const renderMarkdown = (text: string) => {
+    const lines = text.split('\n');
+    const elements: JSX.Element[] = [];
+    let key = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      // Check if it's a numbered list item (e.g., "1. ", "2. ", etc.)
+      const numberedMatch = line.match(/^(\d+)\.\s+(.+)$/);
+      if (numberedMatch) {
+        const num = numberedMatch[1];
+        const content = numberedMatch[2];
+        elements.push(
+          <div key={key++} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <span style={{ fontWeight: 500, flexShrink: 0 }}>{num}.</span>
+            <span dangerouslySetInnerHTML={{ __html: content.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') }} />
+          </div>
+        );
+        continue;
+      }
+
+      // Regular line with potential bold formatting
+      if (line.trim()) {
+        const html = line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        elements.push(
+          <div key={key++} style={{ marginBottom: i < lines.length - 1 ? 8 : 0 }}>
+            <span dangerouslySetInnerHTML={{ __html: html }} />
+          </div>
+        );
+      } else if (i < lines.length - 1) {
+        // Empty line - add spacing
+        elements.push(<div key={key++} style={{ height: 8 }} />);
+      }
+    }
+
+    return <>{elements}</>;
+  };
+
+  if (isUser) {
+    // User messages keep bubble styling
+    return (
+      <div
+        style={{
+          alignSelf: "flex-end",
+          background: "#042C53",
+          color: "#EEF4F8",
+          fontFamily: "'DM Sans', sans-serif",
+          fontSize: 13,
+          padding: "10px 14px",
+          borderRadius: "14px 14px 3px 14px",
+          maxWidth: "78%",
+          lineHeight: 1.5,
+          animation: "tipsyChatIn 300ms ease",
+        }}
+      >
+        {text}
+        <style>{`@keyframes tipsyChatIn { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: translateY(0);} }`}</style>
+      </div>
+    );
+  }
+
+  // AI messages - no bubble, plain text with markdown
   return (
     <div
       style={{
-        alignSelf: isUser ? "flex-end" : "flex-start",
-        background: isUser ? "#042C53" : "#D8E9F7",
-        color: isUser ? "#EEF4F8" : "#042C53",
+        alignSelf: "flex-start",
+        color: "#042C53",
         fontFamily: "'DM Sans', sans-serif",
         fontSize: 13,
-        padding: "10px 14px",
-        borderRadius: isUser ? "14px 14px 3px 14px" : "14px 14px 14px 3px",
-        maxWidth: isUser ? "78%" : "82%",
+        maxWidth: "82%",
         lineHeight: 1.5,
         animation: "tipsyChatIn 300ms ease",
       }}
     >
-      {text}
+      {renderMarkdown(text)}
       <style>{`@keyframes tipsyChatIn { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: translateY(0);} }`}</style>
     </div>
   );
@@ -1403,27 +1544,74 @@ function TypingBubble() {
   );
 }
 
+function RecipeGeneratingIndicator() {
+  return (
+    <div style={{
+      alignSelf: "flex-start",
+      display: "flex",
+      gap: 4,
+      alignItems: "center",
+      padding: "4px 0",
+    }}>
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          style={{
+            width: 4, height: 4, borderRadius: "50%",
+            background: "#85B7EB",
+            display: "inline-block",
+            animation: `tipsyRecipeDot 1.4s ease-in-out ${i * 0.25}s infinite`,
+          }}
+        />
+      ))}
+      <style>{`@keyframes tipsyRecipeDot { 0%,100% { opacity: 0.2; transform: scale(0.8); } 50% { opacity: 0.8; transform: scale(1.1); } }`}</style>
+    </div>
+  );
+}
+
 function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
   value: string; onChange: (v: string) => void; onSend: () => void; placeholder: string; disabled?: boolean;
 }) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      // Reset height to auto to get the correct scrollHeight
+      textareaRef.current.style.height = "auto";
+      // Set height based on scrollHeight, capped at ~5 lines (100px)
+      const newHeight = Math.min(textareaRef.current.scrollHeight, 100);
+      textareaRef.current.style.height = `${newHeight}px`;
+    }
+  }, [value]);
+
   return (
-    <div style={{ padding: "10px 14px 16px", flexShrink: 0, background: "#EEF4F8", display: "flex", alignItems: "center", gap: 8 }}>
-      <input
-        type="text"
+    <div style={{ padding: "10px 14px 16px", flexShrink: 0, background: "#EEF4F8", display: "flex", alignItems: "flex-end", gap: 8 }}>
+      <textarea
+        ref={textareaRef}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Enter") onSend(); }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            onSend();
+          }
+        }}
         placeholder={placeholder}
+        rows={1}
         style={{
           flex: 1,
           background: "#fff",
           border: "0.5px solid #85B7EB",
-          borderRadius: 100,
+          borderRadius: 16,
           padding: "9px 14px",
           outline: "none",
           fontFamily: "'DM Sans', sans-serif",
           fontSize: 13,
           color: "#042C53",
+          resize: "none",
+          overflowY: "auto",
+          maxHeight: 100,
+          lineHeight: 1.5,
         }}
       />
       <button
@@ -1463,6 +1651,7 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
   const [mounted, setMounted] = useState(open);
   const [shown, setShown] = useState(false);
   const [contentVisible, setContentVisible] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (open) {
@@ -1513,7 +1702,7 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
         background: "#EEF4F8",
       }}>
       {/* Sheet header */}
-      <div style={{ padding: "20px 16px 12px", flexShrink: 0, display: "grid", gridTemplateColumns: "32px 1fr 32px", alignItems: "center" }}>
+      <div style={{ padding: "20px 16px 12px", flexShrink: 0, display: "grid", gridTemplateColumns: "32px 1fr 32px", alignItems: "center", background: "#EEF4F8" }}>
         <span />
         <div style={{
           textAlign: "center",
@@ -1526,8 +1715,9 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
         <span />
       </div>
 
-      {/* Scrollable card body */}
-      <div style={{ flex: 1, overflowY: "auto" }}>
+      {/* Scrollable content */}
+      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto" }}>
+        {/* Hero section - scrolls normally */}
         <div style={{ height: 120, background: "linear-gradient(135deg, #042C53 0%, #185FA5 50%, #85B7EB 100%)" }} />
         <div style={{ padding: "16px 20px 14px" }}>
           <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, textTransform: "uppercase", letterSpacing: "0.14em", color: "#185FA5", marginBottom: 6 }}>
@@ -1541,8 +1731,9 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
           </div>
         </div>
         <div style={{ borderTop: "0.5px solid #85B7EB" }} />
-        {/* Tabs */}
-        <div style={{ display: "flex" }}>
+
+        {/* Sticky Tabs - stick to top when scrolled */}
+        <div style={{ display: "flex", position: "sticky", top: 0, zIndex: 10, background: "#EEF4F8" }}>
           {(["ingredients", "steps"] as const).map((t) => {
             const active = tab === t;
             return (
@@ -1567,6 +1758,7 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
             );
           })}
         </div>
+
         {tab === "ingredients" ? (
           <div>
             {recipe.ingredients.map((item, i) => (
