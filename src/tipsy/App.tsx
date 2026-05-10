@@ -1,10 +1,32 @@
 import { useState, useRef, useEffect, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, type Recipe } from "./data";
+import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, type Recipe, type Occasion, type Menu, type SavedRecipe, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
 import Profile, { ProfileEdit, Avatar } from "./Profile";
+import Occasions from "./Occasions";
+import Menus from "./Menus";
+import MenuInterior from "./MenuInterior";
+import RecipePicker from "./RecipePicker";
+import SaveRecipeFlow from "./SaveRecipeFlow";
 import Anthropic from "@anthropic-ai/sdk";
+import {
+  IconChefHat,
+  IconCandle,
+  IconGrill,
+  IconCake,
+  IconGlassFull,
+  IconHeart,
+  IconStar,
+  IconSun,
+  IconMoon,
+  IconSnowflake,
+  IconFlame,
+  IconLeaf,
+  IconToolsKitchen2,
+  IconBowlSpoon,
+  IconPizza,
+} from "@tabler/icons-react";
 
 type RecipeDraft = {
   title: string;
@@ -18,13 +40,17 @@ type Screen =
   | { name: "categories" }
   | { name: "recipes"; categoryKey: string; categoryLabel: string }
   | { name: "recipe"; recipe: Recipe; categoryLabel: string }
-  | { name: "cook" }
-  | { name: "addown"; editRecipe?: Recipe; editCategoryLabel?: string; draft?: RecipeDraft & { trayOpen?: boolean } }
+  | { name: "cook"; newCategory?: { key: string; label: string }; draft?: RecipeDraft }
+  | { name: "addown"; editRecipe?: Recipe; editCategoryLabel?: string; draft?: RecipeDraft & { trayOpen?: boolean; newCategory?: { key: string; label: string } } }
   | { name: "newcategory" }
-  | { name: "newcategoryforrecipe"; draft: RecipeDraft }
+  | { name: "newcategoryforrecipe"; draft: RecipeDraft; returnTo: "cook" | "addown" }
   | { name: "editcategory"; categoryKey: string }
   | { name: "profile" }
   | { name: "profileedit"; fieldKey: "name" | "email" | "palate" | "inspiration" | "table" | "constraints" }
+  | { name: "occasions" }
+  | { name: "menus"; occasionId: number; occasionName: string }
+  | { name: "menuinterior"; menuId: number }
+  | { name: "recipepicker"; menuId: number; section: MenuSection }
   | { name: "placeholder"; title: string };
 
 const S: Record<string, CSSProperties> = {
@@ -66,6 +92,10 @@ function screenKey(s: Screen): string {
     case "editcategory": return `editcategory:${s.categoryKey}`;
     case "profile": return "profile";
     case "profileedit": return `profileedit:${s.fieldKey}`;
+    case "occasions": return "occasions";
+    case "menus": return `menus:${s.occasionId}`;
+    case "menuinterior": return `menuinterior:${s.menuId}`;
+    case "recipepicker": return `recipepicker:${s.menuId}:${s.section}`;
     case "placeholder": return `placeholder:${s.title}`;
   }
 }
@@ -78,7 +108,7 @@ function renderScreen(
   finishEditCategory?: (newLabel: string) => void,
   finishDeleteCategory?: () => void,
   finishDeleteRecipe?: () => void,
-  finishCreateCategoryForRecipe?: (catKey: string, catLabel: string, draft: RecipeDraft) => void,
+  finishCreateCategoryForRecipe?: (catKey: string, catLabel: string, draft: RecipeDraft, returnTo: "cook" | "addown") => void,
   finishSaveRecipe?: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void,
 ) {
   switch (s.name) {
@@ -105,6 +135,7 @@ function renderScreen(
         back={back}
         push={push}
         finishSaveRecipe={(r, k, l) => finishSaveRecipe?.(r, k, l)}
+        screen={s}
       />
     );
     case "addown": return (
@@ -117,7 +148,7 @@ function renderScreen(
         onSaveEdit={(updated, label) => replaceRecipe?.(updated, label)}
         onDeleted={() => finishDeleteRecipe?.()}
         initialDraft={s.draft ? { ...s.draft, step: 4, trayOpen: s.draft.trayOpen } : undefined}
-        onCreateCategoryForRecipe={(payload) => push({ name: "newcategoryforrecipe", draft: payload })}
+        onCreateCategoryForRecipe={(payload) => push({ name: "newcategoryforrecipe", draft: payload, returnTo: "addown" })}
       />
     );
     case "newcategory": return <NewCategory back={back} onSaved={back} />;
@@ -125,7 +156,7 @@ function renderScreen(
       <NewCategory
         back={back}
         onSaved={(cat) => {
-          if (cat) finishCreateCategoryForRecipe?.(cat.key, cat.label, s.draft);
+          if (cat) finishCreateCategoryForRecipe?.(cat.key, cat.label, s.draft, s.returnTo);
         }}
       />
     );
@@ -140,6 +171,34 @@ function renderScreen(
     );
     case "profile": return <Profile back={back} openEdit={(k) => push({ name: "profileedit", fieldKey: k })} />;
     case "profileedit": return <ProfileEdit fieldKey={s.fieldKey} back={back} />;
+    case "occasions": return (
+      <Occasions
+        back={back}
+        push={(occasion) => push({ name: "menus", occasionId: occasion.id, occasionName: occasion.name })}
+      />
+    );
+    case "menus": return (
+      <Menus
+        occasionId={s.occasionId}
+        occasionName={s.occasionName}
+        back={back}
+        push={(menu) => push({ name: "menuinterior", menuId: menu.id })}
+      />
+    );
+    case "menuinterior": return (
+      <MenuInterior
+        menuId={s.menuId}
+        back={back}
+        push={push}
+      />
+    );
+    case "recipepicker": return (
+      <RecipePicker
+        menuId={s.menuId}
+        section={s.section}
+        onClose={back}
+      />
+    );
     case "placeholder": return <Placeholder title={s.title} back={back} />;
   }
 }
@@ -269,29 +328,27 @@ export default function App() {
   };
 
   // Save the in-progress recipe under the freshly created category and
-  // navigate directly to the recipe card. Replace both the newcategoryforrecipe
-  // screen and the addown screen beneath with: recipes list + recipe card.
-  const finishCreateCategoryForRecipe = (catKey: string, catLabel: string, draft: RecipeDraft) => {
+  // Return to the parent screen with the newly created category selected in the save flow
+  const finishCreateCategoryForRecipe = (catKey: string, catLabel: string, draft: RecipeDraft, returnTo: "cook" | "addown") => {
     if (transition) return;
-    saveRecipe({
-      id: Date.now(),
-      title: draft.title,
-      description: draft.description,
-      category: catKey,
-      ingredients: draft.ingredients,
-      steps: draft.steps,
-      createdAt: new Date().toISOString(),
-    });
-    const recipe: Recipe = {
-      title: draft.title,
-      description: draft.description,
-      color: "linear-gradient(135deg, #C5DCF4 0%, #85B7EB 100%)",
-      category: catLabel.toLowerCase(),
-      ingredients: draft.ingredients,
-      steps: draft.steps,
-      categoryKey: catKey,
-    };
-    finishSaveRecipe(recipe, catKey, catLabel);
+
+    // Don't save the recipe yet - just return to the parent screen with the category selected
+    if (returnTo === "cook") {
+      // Return to cook screen with the new category and recipe draft
+      setStack((prev) => {
+        const newStack = prev.slice(0, -1); // Remove newcategoryforrecipe screen
+        return [...newStack, { name: "cook", newCategory: { key: catKey, label: catLabel }, draft }];
+      });
+    } else {
+      // Return to addown screen with the new category
+      setStack((prev) => {
+        const newStack = prev.slice(0, -1); // Remove newcategoryforrecipe screen
+        return [...newStack, {
+          name: "addown",
+          draft: { ...draft, trayOpen: true, newCategory: { key: catKey, label: catLabel } }
+        }];
+      });
+    }
   };
 
   // After a recipe is saved (existing or new category), rebuild the back
@@ -387,7 +444,7 @@ function ScreenStage({
   finishEditCategory: (newLabel: string) => void;
   finishDeleteCategory: () => void;
   finishDeleteRecipe: () => void;
-  finishCreateCategoryForRecipe: (catKey: string, catLabel: string, draft: RecipeDraft) => void;
+  finishCreateCategoryForRecipe: (catKey: string, catLabel: string, draft: RecipeDraft, returnTo: "cook" | "addown") => void;
   finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
 }) {
   // Trigger animation on mount of incoming layer.
@@ -484,7 +541,7 @@ function Home({ push }: { push: (s: Screen) => void }) {
   const items = [
     { label: "craft", sub: "your next dish", action: () => push({ name: "cook" }) },
     { label: "explore", sub: "your recipes", action: () => push({ name: "categories" }) },
-    { label: "curate", sub: "your menus", action: () => push({ name: "placeholder", title: "Curate" }) },
+    { label: "curate", sub: "your menus", action: () => push({ name: "occasions" }) },
   ];
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -725,97 +782,107 @@ function RecipeCard({
   const editable = typeof recipe.savedId === "number";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{
-        width: "100%", height: 200,
-        background: "linear-gradient(160deg, #C8DFF0 0%, #A8C5DC 100%)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        flexShrink: 0, position: "relative",
-      }}>
-        <button
-          onClick={back}
-          aria-label="Back"
-          style={{
-            position: "absolute", top: 16, left: 16, width: 32, height: 32,
-            background: "rgba(238,244,248,0.85)", borderRadius: "50%",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            cursor: "pointer", border: "none", color: "#042C53",
-          }}
-        >
-          <BackArrow />
-        </button>
-        {editable && (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      <div style={{ flex: 1, overflowY: "auto" }}>
+        {/* Photo - scrolls away */}
+        <div style={{
+          width: "100%", height: 200,
+          background: "linear-gradient(160deg, #C8DFF0 0%, #A8C5DC 100%)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          position: "relative",
+        }}>
           <button
-            onClick={() => push({ name: "addown", editRecipe: recipe, editCategoryLabel: categoryLabel })}
-            aria-label="Edit"
+            onClick={back}
+            aria-label="Back"
             style={{
-              position: "absolute", top: 16, right: 16, width: 32, height: 32,
+              position: "absolute", top: 16, left: 16, width: 32, height: 32,
               background: "rgba(238,244,248,0.85)", borderRadius: "50%",
               display: "flex", alignItems: "center", justifyContent: "center",
               cursor: "pointer", border: "none", color: "#042C53",
             }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 20h9" />
-              <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
-            </svg>
+            <BackArrow />
           </button>
-        )}
-        <p style={{ fontSize: 11, letterSpacing: "0.12em", color: "#185FA5", textTransform: "uppercase", opacity: 0.7, margin: 0 }}>
-          photo coming soon
-        </p>
-      </div>
-
-      <div style={{ padding: "20px 24px 16px", flexShrink: 0, borderBottom: "0.5px solid #85B7EB" }}>
-        <div style={{ fontSize: 11, letterSpacing: "0.14em", color: "#185FA5", textTransform: "uppercase", marginBottom: 6 }}>
-          {recipe.category}
+          {editable && (
+            <button
+              onClick={() => push({ name: "addown", editRecipe: recipe, editCategoryLabel: categoryLabel })}
+              aria-label="Edit"
+              style={{
+                position: "absolute", top: 16, right: 16, width: 32, height: 32,
+                background: "rgba(238,244,248,0.85)", borderRadius: "50%",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                cursor: "pointer", border: "none", color: "#042C53",
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+              </svg>
+            </button>
+          )}
+          <p style={{ fontSize: 11, letterSpacing: "0.12em", color: "#185FA5", textTransform: "uppercase", opacity: 0.7, margin: 0 }}>
+            photo coming soon
+          </p>
         </div>
-        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 24, fontWeight: 400, color: "#042C53", marginBottom: 8, lineHeight: 1.2 }}>
-          {recipe.title}
-        </div>
-        <div style={{ fontSize: 13, color: "#185FA5", lineHeight: 1.5 }}>
-          {recipe.description}
-        </div>
-        {recipe.yield && (
-          <div style={{ fontSize: 11, letterSpacing: "0.08em", color: "#85B7EB", marginTop: 10 }}>
-            {recipe.yield}
-          </div>
-        )}
-      </div>
 
-      <div style={{ display: "flex", borderBottom: "0.5px solid #85B7EB", flexShrink: 0 }}>
-        <TabButton active={tab === "ingredients"} onClick={() => setTab("ingredients")}>Ingredients</TabButton>
-        <TabButton active={tab === "steps"} onClick={() => setTab("steps")} withBorder>Steps</TabButton>
-      </div>
+        {/* Title and description - scroll away */}
+        <div style={{ padding: "20px 24px 16px" }}>
+          <div style={{ fontSize: 11, letterSpacing: "0.14em", color: "#185FA5", textTransform: "uppercase", marginBottom: 6 }}>
+            {recipe.category}
+          </div>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 24, fontWeight: 400, color: "#042C53", marginBottom: 8, lineHeight: 1.2 }}>
+            {recipe.title}
+          </div>
+          <div style={{ fontSize: 13, color: "#185FA5", lineHeight: 1.5 }}>
+            {recipe.description}
+          </div>
+          {recipe.yield && (
+            <div style={{ fontSize: 11, letterSpacing: "0.08em", color: "#85B7EB", marginTop: 10 }}>
+              {recipe.yield}
+            </div>
+          )}
+        </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
-        {tab === "ingredients" && ingredients.map((i, idx) => (
-          <div key={idx} style={{
-            display: "flex", justifyContent: "space-between", alignItems: "baseline",
-            borderBottom: idx === ingredients.length - 1 ? "none" : "0.5px solid #B5D4F4",
-            paddingBottom: 10, marginBottom: idx === ingredients.length - 1 ? 0 : 12,
-          }}>
-            <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 15, color: "#042C53" }}>{i.name}</span>
-            <span style={{ fontSize: 12, color: "#185FA5", whiteSpace: "nowrap", marginLeft: 12 }}>{i.qty}</span>
+        {/* Sticky tab bar */}
+        <div style={{ position: "sticky", top: 0, zIndex: 10, display: "flex", borderBottom: "0.5px solid #85B7EB", background: "#EEF4F8" }}>
+          <TabButton active={tab === "ingredients"} onClick={() => setTab("ingredients")}>Ingredients</TabButton>
+          <TabButton active={tab === "steps"} onClick={() => setTab("steps")} withBorder>Steps</TabButton>
+        </div>
+
+        {/* Tab content - both rendered, only one visible */}
+        <div style={{ padding: "20px 24px" }}>
+          <div style={{ display: tab === "ingredients" ? "block" : "none" }}>
+            {ingredients.map((i, idx) => (
+              <div key={idx} style={{
+                display: "flex", justifyContent: "space-between", alignItems: "baseline",
+                borderBottom: idx === ingredients.length - 1 ? "none" : "0.5px solid #B5D4F4",
+                paddingBottom: 10, marginBottom: idx === ingredients.length - 1 ? 0 : 12,
+              }}>
+                <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 15, color: "#042C53" }}>{i.name}</span>
+                <span style={{ fontSize: 12, color: "#185FA5", whiteSpace: "nowrap", marginLeft: 12 }}>{i.qty}</span>
+              </div>
+            ))}
+            {ingredients.length === 0 && (
+              <p style={{ fontSize: 13, color: "#185FA5" }}>No ingredients yet.</p>
+            )}
           </div>
-        ))}
-        {tab === "ingredients" && ingredients.length === 0 && (
-          <p style={{ fontSize: 13, color: "#185FA5" }}>No ingredients yet.</p>
-        )}
-        {tab === "steps" && steps.map((s, idx) => (
-          <div key={idx} style={{
-            display: "flex", gap: 14, alignItems: "flex-start",
-            marginBottom: idx === steps.length - 1 ? 0 : 16,
-          }}>
-            <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, color: "#85B7EB", flexShrink: 0, lineHeight: 1.4 }}>
-              {idx + 1}
-            </span>
-            <p style={{ fontSize: 14, color: "#042C53", lineHeight: 1.6, margin: 0 }}>{s}</p>
+          <div style={{ display: tab === "steps" ? "block" : "none" }}>
+            {steps.map((s, idx) => (
+              <div key={idx} style={{
+                display: "flex", gap: 14, alignItems: "flex-start",
+                marginBottom: idx === steps.length - 1 ? 0 : 16,
+              }}>
+                <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, color: "#85B7EB", flexShrink: 0, lineHeight: 1.4 }}>
+                  {idx + 1}
+                </span>
+                <p style={{ fontSize: 14, color: "#042C53", lineHeight: 1.6, margin: 0 }}>{s}</p>
+              </div>
+            ))}
+            {steps.length === 0 && (
+              <p style={{ fontSize: 13, color: "#185FA5" }}>No steps yet.</p>
+            )}
           </div>
-        ))}
-        {tab === "steps" && steps.length === 0 && (
-          <p style={{ fontSize: 13, color: "#185FA5" }}>No steps yet.</p>
-        )}
+        </div>
       </div>
     </div>
   );
@@ -876,20 +943,22 @@ function BackArrow() {
 }
 
 /* ---------------- Cook ---------------- */
-function Cook({ back, push, finishSaveRecipe }: {
+function Cook({ back, push, finishSaveRecipe, screen }: {
   back: () => void;
   push: (s: Screen) => void;
   finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
+  screen: Extract<Screen, { name: "cook" }>;
 }) {
   type Msg = { id: number; role: "user" | "ai"; text: string };
 
-  const [trayOpen, setTrayOpen] = useState(false);
+  const [trayOpen, setTrayOpen] = useState(!!screen.newCategory);
+  const [newCategorySelection, setNewCategorySelection] = useState<{ key: string; label: string } | null>(screen.newCategory || null);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [typing, setTyping] = useState(false);
   const [input, setInput] = useState("");
-  const [recipeRevealed, setRecipeRevealed] = useState(false);
-  const [miniBarVisible, setMiniBarVisible] = useState(false);
-  const [miniTitleVisible, setMiniTitleVisible] = useState(false);
+  const [recipeRevealed, setRecipeRevealed] = useState(!!screen.draft);
+  const [miniBarVisible, setMiniBarVisible] = useState(!!screen.draft);
+  const [miniTitleVisible, setMiniTitleVisible] = useState(!!screen.draft);
   const [expanded, setExpanded] = useState(false);
   const [generatingRecipe, setGeneratingRecipe] = useState(false);
   const [currentRecipe, setCurrentRecipe] = useState<{
@@ -897,7 +966,7 @@ function Cook({ back, push, finishSaveRecipe }: {
     description: string;
     ingredients: { name: string; qty: string }[];
     steps: string[];
-  } | null>(null);
+  } | null>(screen.draft || null);
   const [conversationHistory, setConversationHistory] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -1173,7 +1242,7 @@ Constraints: ${constraints || "Not specified"}`;
     }
   };
 
-  const onPickCategory = (catKey: string, catLabel: string) => {
+  const onPickCategory = (catKey: string, catLabel: string, menuInfo?: { menuId: number; section: MenuSection }) => {
     if (!currentRecipe) return;
 
     const id = Date.now();
@@ -1186,6 +1255,12 @@ Constraints: ${constraints || "Not specified"}`;
       steps: currentRecipe.steps,
       createdAt: new Date().toISOString(),
     });
+
+    // If menu info provided, add recipe to menu section
+    if (menuInfo) {
+      addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, id);
+    }
+
     const recipe: Recipe = {
       title: currentRecipe.title,
       description: currentRecipe.description,
@@ -1212,6 +1287,7 @@ Constraints: ${constraints || "Not specified"}`;
         ingredients: currentRecipe.ingredients,
         steps: currentRecipe.steps,
       },
+      returnTo: "cook",
     });
   };
 
@@ -1345,92 +1421,20 @@ Constraints: ${constraints || "Not specified"}`;
 
       {/* Bottom sheet: pick a category to save the AI recipe */}
       {trayOpen && (
-        <SaveCategoryTray
-          onClose={() => setTrayOpen(false)}
+        <SaveRecipeFlow
+          onClose={() => {
+            setTrayOpen(false);
+            setNewCategorySelection(null);
+          }}
           onPick={onPickCategory}
           onNew={onPickNewCategory}
+          initialSelectedCategory={newCategorySelection}
         />
       )}
     </div>
   );
 }
 
-function SaveCategoryTray({ onClose, onPick, onNew }: {
-  onClose: () => void;
-  onPick: (key: string, label: string) => void;
-  onNew: () => void;
-}) {
-  const cats = loadCustomCategories();
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "absolute", inset: 0, background: "rgba(4, 44, 83, 0.38)",
-        zIndex: 80, display: "flex", alignItems: "flex-end", justifyContent: "center",
-        animation: "tipsy-fade 0.22s ease",
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: "#fff", borderRadius: "20px 20px 0 0",
-          padding: "16px 0 24px", width: "100%",
-          animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
-        }}
-      >
-        <div style={{ width: 32, height: 4, borderRadius: 2, background: "#C5DCF4", margin: "0 auto 14px" }} />
-        <div style={{ padding: "0 18px 14px", borderBottom: "1px solid #C5DCF4" }}>
-          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 17, color: "#042C53", marginBottom: 2 }}>Where does it live?</div>
-          <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#5A7FA3" }}>Swipe to find the right category.</div>
-        </div>
-        <div style={{ overflowX: "auto", padding: "14px 18px 4px", display: "flex", gap: 10, scrollbarWidth: "none" }}>
-          <button
-            onClick={onNew}
-            style={{
-              flexShrink: 0, width: 96, cursor: "pointer",
-              background: "none", padding: 0, textAlign: "left", border: "none",
-            }}
-          >
-            <div style={{
-              width: 96, height: 70, borderRadius: 12,
-              background: "#E6F1FB", border: "1px solid #85B7EB",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              color: "#185FA5", fontSize: 32, fontWeight: 300, lineHeight: 1,
-              boxSizing: "border-box",
-            }}>+</div>
-            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 500, color: "#042C53", padding: "6px 4px 2px" }}>New category</div>
-          </button>
-          {cats.map((c) => (
-            <button
-              key={c.key}
-              onClick={() => onPick(c.key, c.label)}
-              style={{
-                flexShrink: 0, width: 96, cursor: "pointer",
-                borderRadius: 12, overflow: "hidden",
-                border: "2px solid transparent", background: "none", padding: 0, textAlign: "left",
-              }}
-            >
-              <div style={{
-                width: 96, height: 70, position: "relative",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                background: c.gradient,
-              }}>
-                <div style={{ position: "absolute", inset: 0, background: "rgba(4, 44, 83, 0.22)" }} />
-                <div style={{
-                  position: "absolute", bottom: 6, left: 0, right: 0, textAlign: "center",
-                  fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, letterSpacing: "0.12em",
-                  textTransform: "uppercase", color: "rgba(255,255,255,0.95)",
-                  textShadow: "0 1px 3px rgba(0,0,0,0.3)",
-                }}>{c.label}</div>
-              </div>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 500, color: "#042C53", padding: "6px 4px 2px" }}>{c.label}</div>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function ChatBubble({ role, text }: { role: "user" | "ai"; text: string }) {
   const isUser = role === "user";
@@ -1759,33 +1763,31 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
           })}
         </div>
 
-        {tab === "ingredients" ? (
-          <div>
-            {recipe.ingredients.map((item, i) => (
-              <div key={i} style={{
-                display: "flex", justifyContent: "space-between", alignItems: "center",
-                padding: "10px 20px",
-                borderBottom: "0.5px solid #85B7EB",
-              }}>
-                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#042C53" }}>{item.name}</span>
-                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#185FA5" }}>{item.qty}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div>
-            {recipe.steps.map((s, i) => (
-              <div key={i} style={{
-                display: "flex", gap: 14, alignItems: "flex-start",
-                padding: "12px 20px",
-                borderBottom: "0.5px solid #85B7EB",
-              }}>
-                <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#85B7EB", lineHeight: 1, flexShrink: 0, minWidth: 18 }}>{i + 1}</span>
-                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#042C53", lineHeight: 1.6 }}>{s}</span>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* Both tabs rendered, only one visible */}
+        <div style={{ display: tab === "ingredients" ? "block" : "none" }}>
+          {recipe.ingredients.map((item, i) => (
+            <div key={i} style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "10px 20px",
+              borderBottom: "0.5px solid #85B7EB",
+            }}>
+              <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#042C53" }}>{item.name}</span>
+              <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#185FA5" }}>{item.qty}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: tab === "steps" ? "block" : "none" }}>
+          {recipe.steps.map((s, i) => (
+            <div key={i} style={{
+              display: "flex", gap: 14, alignItems: "flex-start",
+              padding: "12px 20px",
+              borderBottom: "0.5px solid #85B7EB",
+            }}>
+              <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#85B7EB", lineHeight: 1, flexShrink: 0, minWidth: 18 }}>{i + 1}</span>
+              <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#042C53", lineHeight: 1.6 }}>{s}</span>
+            </div>
+          ))}
+        </div>
         {/* Save button */}
         <button
           onClick={onSave}

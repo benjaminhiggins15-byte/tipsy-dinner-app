@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, type CSSProperties, type KeyboardEvent } from "react";
-import { saveRecipe, updateSavedRecipe, deleteSavedRecipe, loadCustomCategories, type Recipe } from "./data";
+import { saveRecipe, updateSavedRecipe, deleteSavedRecipe, loadCustomCategories, addRecipeToMenuSection, type Recipe, type MenuSection } from "./data";
+import SaveRecipeFlow from "./SaveRecipeFlow";
 
 type Step = 1 | 2 | 3 | 4 | 6;
 
@@ -80,6 +81,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
 
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
   const [trayOpen, setTrayOpen] = useState(!!initialDraft?.trayOpen);
+  const [newCategorySelection, setNewCategorySelection] = useState<{ key: string; label: string } | null>((initialDraft as any)?.newCategory || null);
   const [savedCategory, setSavedCategory] = useState<{ key: string; label: string } | null>(null);
 
   // Inline edit state
@@ -182,9 +184,10 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
     setStep(4);
   };
 
-  const onPickCategory = (key: string, label: string) => {
+  const onPickCategory = (key: string, label: string, menuInfo?: { menuId: number; section: MenuSection }) => {
+    const id = Date.now();
     saveRecipe({
-      id: Date.now(),
+      id,
       title: title.trim(),
       description: desc.trim(),
       category: key,
@@ -192,6 +195,11 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
       steps,
       createdAt: new Date().toISOString(),
     });
+
+    if (menuInfo) {
+      addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, id);
+    }
+
     setSavedCategory({ key, label });
     setTrayOpen(false);
     setStep(6);
@@ -479,93 +487,23 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
 
       {/* Bottom sheet */}
       {trayOpen && (
-        <div
-          onClick={() => setTrayOpen(false)}
-          style={{
-            position: "absolute", inset: 0, background: "rgba(4, 44, 83, 0.38)",
-            zIndex: 20, display: "flex", alignItems: "flex-end", justifyContent: "center",
-            animation: "tipsy-fade 0.22s ease",
+        <SaveRecipeFlow
+          onClose={() => {
+            setTrayOpen(false);
+            setNewCategorySelection(null);
           }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: C.white, borderRadius: "20px 20px 0 0",
-              padding: "16px 0 24px", width: "100%",
-              animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
-            }}
-          >
-            <div style={{ width: 32, height: 4, borderRadius: 2, background: C.borderLight, margin: "0 auto 14px" }} />
-            <div style={{ padding: "0 18px 14px", borderBottom: `1px solid ${C.borderLight}` }}>
-              <div style={{ fontFamily: fontSerif, fontSize: 17, color: C.navy, marginBottom: 2 }}>Where does it live?</div>
-              <div style={{ fontFamily: fontSans, fontSize: 12, color: C.muted }}>Swipe to find the right category.</div>
-            </div>
-            {(() => {
-              const savedCats = loadCustomCategories();
-              const newCard = (
-                <button
-                  key="__new__"
-                  onClick={() => {
-                    setTrayOpen(false);
-                    onCreateCategoryForRecipe?.({
-                      title: title.trim(),
-                      description: desc.trim(),
-                      ingredients,
-                      steps,
-                    });
-                  }}
-                  style={{
-                    flexShrink: 0, width: 96, cursor: "pointer",
-                    background: "none", padding: 0, textAlign: "left", border: "none",
-                  }}
-                >
-                  <div style={{
-                    width: 96, height: 70, borderRadius: 12,
-                    background: C.accent, border: `1px solid ${C.border}`,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    color: C.midBlue, fontSize: 32, fontWeight: 300, lineHeight: 1,
-                    boxSizing: "border-box",
-                  }}>+</div>
-                  <div style={{ fontFamily: fontSans, fontSize: 11, fontWeight: 500, color: C.navy, padding: "6px 4px 2px" }}>New category</div>
-                </button>
-              );
-              return (
-                <div style={{
-                  overflowX: "auto", padding: "14px 18px 4px", display: "flex", gap: 10,
-                  scrollbarWidth: "none",
-                }}>
-                  {newCard}
-                  {savedCats.map((c) => (
-                    <button
-                      key={c.key}
-                      onClick={() => onPickCategory(c.key, c.label)}
-                      style={{
-                        flexShrink: 0, width: 96, cursor: "pointer",
-                        borderRadius: 12, overflow: "hidden",
-                        border: "2px solid transparent", background: "none", padding: 0, textAlign: "left",
-                      }}
-                    >
-                      <div style={{
-                        width: 96, height: 70, position: "relative",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        background: c.gradient,
-                      }}>
-                        <div style={{ position: "absolute", inset: 0, background: "rgba(4, 44, 83, 0.22)" }} />
-                        <div style={{
-                          position: "absolute", bottom: 6, left: 0, right: 0, textAlign: "center",
-                          fontFamily: fontSans, fontSize: 9, fontWeight: 700, letterSpacing: "0.12em",
-                          textTransform: "uppercase", color: "rgba(255,255,255,0.95)",
-                          textShadow: "0 1px 3px rgba(0,0,0,0.3)",
-                        }}>{c.label}</div>
-                      </div>
-                      <div style={{ fontFamily: fontSans, fontSize: 11, fontWeight: 500, color: C.navy, padding: "6px 4px 2px" }}>{c.label}</div>
-                    </button>
-                  ))}
-                </div>
-              );
-            })()}
-          </div>
-        </div>
+          onPick={onPickCategory}
+          onNew={() => {
+            setTrayOpen(false);
+            onCreateCategoryForRecipe?.({
+              title: title.trim(),
+              description: desc.trim(),
+              ingredients,
+              steps,
+            });
+          }}
+          initialSelectedCategory={newCategorySelection}
+        />
       )}
 
       <style>{`

@@ -136,10 +136,218 @@ export function getSavedRecipesForCategory(key: string, label: string): Recipe[]
       title: s.title,
       description: s.description,
       color: categoryGradient[key] ?? "linear-gradient(135deg, #C5DCF4 0%, #85B7EB 100%)",
-      category: label.toLowerCase(),
+      category: label?.toLowerCase() ?? "",
       ingredients: s.ingredients,
       steps: s.steps,
       savedId: s.id,
       categoryKey: key,
     }));
+}
+
+// ==================== CURATE: OCCASIONS & MENUS ====================
+
+const OCCASIONS_STORAGE_KEY = "tipsyDinnerOccasions";
+const MENUS_STORAGE_KEY = "tipsyDinnerMenus";
+
+export type Occasion = {
+  id: number;
+  name: string;
+  icon: string; // Tabler icon name (e.g., "IconChefHat")
+  createdAt: string;
+};
+
+export type MenuSection = "apps" | "mains" | "sides" | "desserts" | "drinks";
+
+export type Menu = {
+  id: number;
+  occasionId: number;
+  title: string;
+  description: string;
+  enabledSections: MenuSection[]; // Which sections are toggled on
+  recipes: {
+    apps: number[]; // Array of SavedRecipe IDs
+    mains: number[];
+    sides: number[];
+    desserts: number[];
+    drinks: number[];
+  };
+  createdAt: string;
+};
+
+// ==================== OCCASIONS ====================
+
+export function loadOccasions(): Occasion[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(OCCASIONS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveOccasion(name: string, icon: string): Occasion {
+  const occasion: Occasion = {
+    id: Date.now(),
+    name,
+    icon,
+    createdAt: new Date().toISOString(),
+  };
+  if (typeof window !== "undefined") {
+    const list = loadOccasions();
+    list.push(occasion);
+    window.localStorage.setItem(OCCASIONS_STORAGE_KEY, JSON.stringify(list));
+  }
+  return occasion;
+}
+
+export function updateOccasion(
+  id: number,
+  patch: Partial<Pick<Occasion, "name" | "icon">>,
+): Occasion | null {
+  if (typeof window === "undefined") return null;
+  const list = loadOccasions();
+  const idx = list.findIndex((o) => o.id === id);
+  if (idx === -1) return null;
+  const updated: Occasion = { ...list[idx], ...patch };
+  list[idx] = updated;
+  window.localStorage.setItem(OCCASIONS_STORAGE_KEY, JSON.stringify(list));
+  return updated;
+}
+
+export function deleteOccasion(id: number) {
+  if (typeof window === "undefined") return;
+  const list = loadOccasions().filter((o) => o.id !== id);
+  window.localStorage.setItem(OCCASIONS_STORAGE_KEY, JSON.stringify(list));
+  // Also delete all menus for this occasion
+  const menus = loadMenus().filter((m) => m.occasionId !== id);
+  window.localStorage.setItem(MENUS_STORAGE_KEY, JSON.stringify(menus));
+}
+
+export function findOccasion(id: number): Occasion | null {
+  return loadOccasions().find((o) => o.id === id) ?? null;
+}
+
+// ==================== MENUS ====================
+
+export function loadMenus(): Menu[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(MENUS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveMenu(
+  occasionId: number,
+  title: string,
+  description: string,
+  enabledSections: MenuSection[],
+): Menu {
+  const menu: Menu = {
+    id: Date.now(),
+    occasionId,
+    title,
+    description,
+    enabledSections,
+    recipes: {
+      apps: [],
+      mains: [],
+      sides: [],
+      desserts: [],
+      drinks: [],
+    },
+    createdAt: new Date().toISOString(),
+  };
+  if (typeof window !== "undefined") {
+    const list = loadMenus();
+    list.push(menu);
+    window.localStorage.setItem(MENUS_STORAGE_KEY, JSON.stringify(list));
+  }
+  return menu;
+}
+
+export function updateMenu(
+  id: number,
+  patch: Partial<Pick<Menu, "title" | "description" | "enabledSections" | "recipes">>,
+): Menu | null {
+  if (typeof window === "undefined") return null;
+  const list = loadMenus();
+  const idx = list.findIndex((m) => m.id === id);
+  if (idx === -1) return null;
+  const updated: Menu = { ...list[idx], ...patch };
+  list[idx] = updated;
+  window.localStorage.setItem(MENUS_STORAGE_KEY, JSON.stringify(list));
+  return updated;
+}
+
+export function deleteMenu(id: number) {
+  if (typeof window === "undefined") return;
+  const list = loadMenus().filter((m) => m.id !== id);
+  window.localStorage.setItem(MENUS_STORAGE_KEY, JSON.stringify(list));
+}
+
+export function findMenu(id: number): Menu | null {
+  return loadMenus().find((m) => m.id === id) ?? null;
+}
+
+export function getMenusForOccasion(occasionId: number): Menu[] {
+  return loadMenus().filter((m) => m.occasionId === occasionId);
+}
+
+// ==================== MENU RECIPE MANAGEMENT ====================
+
+export function addRecipeToMenuSection(
+  menuId: number,
+  section: MenuSection,
+  recipeId: number,
+): Menu | null {
+  if (typeof window === "undefined") return null;
+  const menu = findMenu(menuId);
+  if (!menu) return null;
+
+  // Don't add duplicates
+  if (menu.recipes[section].includes(recipeId)) return menu;
+
+  const updatedRecipes = {
+    ...menu.recipes,
+    [section]: [...menu.recipes[section], recipeId],
+  };
+
+  return updateMenu(menuId, { recipes: updatedRecipes });
+}
+
+export function removeRecipeFromMenuSection(
+  menuId: number,
+  section: MenuSection,
+  recipeId: number,
+): Menu | null {
+  if (typeof window === "undefined") return null;
+  const menu = findMenu(menuId);
+  if (!menu) return null;
+
+  const updatedRecipes = {
+    ...menu.recipes,
+    [section]: menu.recipes[section].filter((id) => id !== recipeId),
+  };
+
+  return updateMenu(menuId, { recipes: updatedRecipes });
+}
+
+export function getRecipesForMenuSection(menuId: number, section: MenuSection): SavedRecipe[] {
+  const menu = findMenu(menuId);
+  if (!menu) return [];
+
+  const recipeIds = menu.recipes[section];
+  const allRecipes = loadSavedRecipes();
+
+  return recipeIds
+    .map((id) => allRecipes.find((r) => r.id === id))
+    .filter((r): r is SavedRecipe => r !== undefined);
 }
