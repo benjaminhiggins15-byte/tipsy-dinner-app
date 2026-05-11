@@ -97,16 +97,20 @@ const FIELD_META: Record<FieldKey, { label: string; multiline: boolean }> = {
   constraints: { label: "Constraints", multiline: true },
 };
 
-export default function Profile({ back, openEdit }: { back: () => void; openEdit: (k: FieldKey) => void }) {
+export default function Profile({ back, openEdit, isTabRoot = false }: { back: () => void; openEdit: (k: FieldKey) => void; isTabRoot?: boolean }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#EEF4F8" }}>
       <div style={{
         display: "grid", gridTemplateColumns: "44px 1fr 44px", alignItems: "center",
         padding: "20px 16px 14px",
       }}>
-        <button onClick={back} style={{ background: "none", border: "none", cursor: "pointer", color: "#185FA5", fontSize: 22, padding: 0, textAlign: "left" }}>
-          ‹
-        </button>
+        {!isTabRoot ? (
+          <button onClick={back} style={{ background: "none", border: "none", cursor: "pointer", color: "#185FA5", fontSize: 22, padding: 0, textAlign: "left" }}>
+            ‹
+          </button>
+        ) : (
+          <div />
+        )}
         <div style={{ textAlign: "center", fontFamily: "'Playfair Display', serif", fontSize: 20, color: "#042C53" }}>
           Profile
         </div>

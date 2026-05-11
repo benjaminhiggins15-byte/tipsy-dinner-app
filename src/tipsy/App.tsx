@@ -3,7 +3,7 @@ import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveReci
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
-import Profile, { ProfileEdit, Avatar } from "./Profile";
+import Profile, { ProfileEdit } from "./Profile";
 import Occasions from "./Occasions";
 import Menus from "./Menus";
 import MenuInterior from "./MenuInterior";
@@ -12,20 +12,9 @@ import SaveRecipeFlow from "./SaveRecipeFlow";
 import Anthropic from "@anthropic-ai/sdk";
 import {
   IconChefHat,
-  IconCandle,
-  IconGrill,
-  IconCake,
-  IconGlassFull,
-  IconHeart,
-  IconStar,
-  IconSun,
-  IconMoon,
-  IconSnowflake,
-  IconFlame,
-  IconLeaf,
-  IconToolsKitchen2,
-  IconBowlSpoon,
-  IconPizza,
+  IconBook,
+  IconLayoutList,
+  IconUser,
 } from "@tabler/icons-react";
 
 type RecipeDraft = {
@@ -36,22 +25,23 @@ type RecipeDraft = {
 };
 
 type Screen =
-  | { name: "home" }
-  | { name: "categories" }
-  | { name: "recipes"; categoryKey: string; categoryLabel: string }
-  | { name: "recipe"; recipe: Recipe; categoryLabel: string }
   | { name: "cook"; newCategory?: { key: string; label: string }; draft?: RecipeDraft }
   | { name: "addown"; editRecipe?: Recipe; editCategoryLabel?: string; draft?: RecipeDraft & { trayOpen?: boolean; newCategory?: { key: string; label: string } } }
   | { name: "newcategory" }
   | { name: "newcategoryforrecipe"; draft: RecipeDraft; returnTo: "cook" | "addown" }
   | { name: "editcategory"; categoryKey: string }
-  | { name: "profile" }
-  | { name: "profileedit"; fieldKey: "name" | "email" | "palate" | "inspiration" | "table" | "constraints" }
+  | { name: "categories" }
+  | { name: "recipes"; categoryKey: string; categoryLabel: string }
+  | { name: "recipe"; recipe: Recipe; categoryLabel: string }
   | { name: "occasions" }
   | { name: "menus"; occasionId: number; occasionName: string }
   | { name: "menuinterior"; menuId: number }
   | { name: "recipepicker"; menuId: number; section: MenuSection }
+  | { name: "profile" }
+  | { name: "profileedit"; fieldKey: "name" | "email" | "palate" | "inspiration" | "table" | "constraints" }
   | { name: "placeholder"; title: string };
+
+type TabId = "build" | "recipes" | "menus" | "profile";
 
 const S: Record<string, CSSProperties> = {
   page: {
@@ -81,21 +71,20 @@ const EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
 
 function screenKey(s: Screen): string {
   switch (s.name) {
-    case "home": return "home";
-    case "categories": return "categories";
-    case "recipes": return `recipes:${s.categoryKey}`;
-    case "recipe": return `recipe:${s.categoryLabel}:${s.recipe.title}`;
     case "cook": return "cook";
     case "addown": return s.editRecipe?.savedId ? `addown:edit:${s.editRecipe.savedId}` : "addown";
     case "newcategory": return "newcategory";
     case "newcategoryforrecipe": return "newcategoryforrecipe";
     case "editcategory": return `editcategory:${s.categoryKey}`;
-    case "profile": return "profile";
-    case "profileedit": return `profileedit:${s.fieldKey}`;
+    case "categories": return "categories";
+    case "recipes": return `recipes:${s.categoryKey}`;
+    case "recipe": return `recipe:${s.categoryLabel}:${s.recipe.title}`;
     case "occasions": return "occasions";
     case "menus": return `menus:${s.occasionId}`;
     case "menuinterior": return `menuinterior:${s.menuId}`;
     case "recipepicker": return `recipepicker:${s.menuId}:${s.section}`;
+    case "profile": return "profile";
+    case "profileedit": return `profileedit:${s.fieldKey}`;
     case "placeholder": return `placeholder:${s.title}`;
   }
 }
@@ -104,6 +93,7 @@ function renderScreen(
   s: Screen,
   push: (s: Screen) => void,
   back: () => void,
+  isTabRoot: boolean,
   replaceRecipe?: (r: Recipe, label: string) => void,
   finishEditCategory?: (newLabel: string) => void,
   finishDeleteCategory?: () => void,
@@ -112,30 +102,13 @@ function renderScreen(
   finishSaveRecipe?: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void,
 ) {
   switch (s.name) {
-    case "home": return <Home push={push} />;
-    case "categories": return <Categories push={push} back={back} />;
-    case "recipes": return (
-      <Recipes
-        categoryKey={s.categoryKey}
-        categoryLabel={s.categoryLabel}
-        push={push}
-        back={back}
-      />
-    );
-    case "recipe": return (
-      <RecipeCard
-        recipe={s.recipe}
-        categoryLabel={s.categoryLabel}
-        back={back}
-        push={push}
-      />
-    );
     case "cook": return (
       <Cook
         back={back}
         push={push}
         finishSaveRecipe={(r, k, l) => finishSaveRecipe?.(r, k, l)}
         screen={s}
+        isTabRoot={isTabRoot}
       />
     );
     case "addown": return (
@@ -169,12 +142,28 @@ function renderScreen(
         onDeleted={() => finishDeleteCategory?.()}
       />
     );
-    case "profile": return <Profile back={back} openEdit={(k) => push({ name: "profileedit", fieldKey: k })} />;
-    case "profileedit": return <ProfileEdit fieldKey={s.fieldKey} back={back} />;
+    case "categories": return <Categories push={push} back={back} isTabRoot={isTabRoot} />;
+    case "recipes": return (
+      <Recipes
+        categoryKey={s.categoryKey}
+        categoryLabel={s.categoryLabel}
+        push={push}
+        back={back}
+      />
+    );
+    case "recipe": return (
+      <RecipeCard
+        recipe={s.recipe}
+        categoryLabel={s.categoryLabel}
+        back={back}
+        push={push}
+      />
+    );
     case "occasions": return (
       <Occasions
         back={back}
         push={(occasion) => push({ name: "menus", occasionId: occasion.id, occasionName: occasion.name })}
+        isTabRoot={isTabRoot}
       />
     );
     case "menus": return (
@@ -199,13 +188,31 @@ function renderScreen(
         onClose={back}
       />
     );
+    case "profile": return <Profile back={back} openEdit={(k) => push({ name: "profileedit", fieldKey: k })} isTabRoot={isTabRoot} />;
+    case "profileedit": return <ProfileEdit fieldKey={s.fieldKey} back={back} />;
     case "placeholder": return <Placeholder title={s.title} back={back} />;
   }
 }
 
+const TAB_ORDER: TabId[] = ["build", "recipes", "menus", "profile"];
+
+function getTabIndex(tab: TabId): number {
+  return TAB_ORDER.indexOf(tab);
+}
+
 export default function App() {
-  const [stack, setStack] = useState<Screen[]>([{ name: "home" }]);
-  const current = stack[stack.length - 1];
+  const [activeTab, setActiveTab] = useState<TabId>("build");
+  const [tabStacks, setTabStacks] = useState<Record<TabId, Screen[]>>({
+    build: [{ name: "cook" }],
+    recipes: [{ name: "categories" }],
+    menus: [{ name: "occasions" }],
+    profile: [{ name: "profile" }],
+  });
+
+  const currentStack = tabStacks[activeTab];
+  const current = currentStack[currentStack.length - 1];
+  const isTabRoot = currentStack.length === 1;
+
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
   useEffect(() => {
     try {
@@ -214,21 +221,74 @@ export default function App() {
       setShowOnboarding(false);
     }
   }, []);
+
   const [transition, setTransition] = useState<{
     from: Screen;
     to: Screen;
     direction: "forward" | "back";
+    fromIsTabRoot?: boolean;
+    toIsTabRoot?: boolean;
   } | null>(null);
+
+  const updateCurrentTabStack = (updater: (stack: Screen[]) => Screen[]) => {
+    setTabStacks((stacks) => ({
+      ...stacks,
+      [activeTab]: updater(stacks[activeTab]),
+    }));
+  };
+
+  const switchToTab = (tab: TabId, screen?: Screen) => {
+    if (tab === activeTab) {
+      // Tapping active tab pops to root
+      if (currentStack.length > 1) {
+        const root = currentStack[0];
+        setTransition({ from: current, to: root, direction: "back", fromIsTabRoot: false, toIsTabRoot: true });
+        updateCurrentTabStack(() => [root]);
+      }
+      return;
+    }
+
+    // Calculate direction based on tab order
+    const fromIndex = getTabIndex(activeTab);
+    const toIndex = getTabIndex(tab);
+    const direction = toIndex > fromIndex ? "forward" : "back";
+
+    const targetStack = tabStacks[tab];
+    const targetScreen = screen || targetStack[targetStack.length - 1];
+
+    // Calculate isTabRoot for both screens
+    const fromIsTabRoot = currentStack.length === 1;
+    const toIsTabRoot = screen ? false : targetStack.length === 1;
+
+    setTransition({
+      from: current,
+      to: targetScreen,
+      direction,
+      fromIsTabRoot,
+      toIsTabRoot,
+    });
+
+    setActiveTab(tab);
+
+    // If a specific screen is provided, navigate to it in the new tab
+    if (screen) {
+      setTabStacks((stacks) => ({
+        ...stacks,
+        [tab]: [...stacks[tab], screen],
+      }));
+    }
+  };
 
   const push = (s: Screen) => {
     if (transition) return;
+
     // Special-case: when leaving addown to create a new category for the
     // in-progress recipe, persist the draft + tray state on the addown screen
     // beneath so back navigation restores it.
     if (s.name === "newcategoryforrecipe" && current.name === "addown") {
       const updatedAddown: Screen = { ...current, draft: { ...s.draft, trayOpen: true } };
-      setTransition({ from: current, to: s, direction: "forward" });
-      setStack((st) => {
+      setTransition({ from: current, to: s, direction: "forward", fromIsTabRoot: isTabRoot, toIsTabRoot: false });
+      updateCurrentTabStack((st) => {
         const next = st.slice();
         next[next.length - 1] = updatedAddown;
         next.push(s);
@@ -236,33 +296,35 @@ export default function App() {
       });
       return;
     }
-    // When leaving the Cook screen to create a new category for an
-    // AI-generated recipe, just push — the Cook screen will be wiped from the
-    // back stack on save anyway.
-    setTransition({ from: current, to: s, direction: "forward" });
-    setStack((st) => [...st, s]);
+
+    setTransition({ from: current, to: s, direction: "forward", fromIsTabRoot: isTabRoot, toIsTabRoot: false });
+    updateCurrentTabStack((st) => [...st, s]);
   };
+
   const back = () => {
     if (transition) return;
-    if (stack.length <= 1) return;
-    const prev = stack[stack.length - 2];
-    setTransition({ from: current, to: prev, direction: "back" });
-    setStack((st) => st.slice(0, -1));
+    if (currentStack.length <= 1) return;
+    const prev = currentStack[currentStack.length - 2];
+    const prevIsTabRoot = currentStack.length === 2; // After popping, will be at root
+    setTransition({ from: current, to: prev, direction: "back", fromIsTabRoot: isTabRoot, toIsTabRoot: prevIsTabRoot });
+    updateCurrentTabStack((st) => st.slice(0, -1));
   };
+
   // Pop the current addown screen AND replace the recipe screen below
   // with the updated recipe data, then animate back to it.
   const replaceRecipeAndBack = (updated: Recipe, categoryLabel: string) => {
     if (transition) return;
-    if (stack.length < 2) return;
-    const prevIdx = stack.length - 2;
-    const prev = stack[prevIdx];
+    if (currentStack.length < 2) return;
+    const prevIdx = currentStack.length - 2;
+    const prev = currentStack[prevIdx];
     if (prev.name !== "recipe") {
       back();
       return;
     }
     const newPrev: Screen = { name: "recipe", recipe: updated, categoryLabel };
-    setTransition({ from: current, to: newPrev, direction: "back" });
-    setStack((st) => {
+    const prevIsTabRoot = currentStack.length === 2;
+    setTransition({ from: current, to: newPrev, direction: "back", fromIsTabRoot: isTabRoot, toIsTabRoot: prevIsTabRoot });
+    updateCurrentTabStack((st) => {
       const next = st.slice(0, -1);
       next[next.length - 1] = newPrev;
       return next;
@@ -273,15 +335,16 @@ export default function App() {
   // new label, animating back to it.
   const finishEditCategory = (newLabel: string) => {
     if (transition) return;
-    if (stack.length < 2) return;
-    const prev = stack[stack.length - 2];
+    if (currentStack.length < 2) return;
+    const prev = currentStack[currentStack.length - 2];
     if (prev.name !== "recipes") {
       back();
       return;
     }
     const newPrev: Screen = { name: "recipes", categoryKey: prev.categoryKey, categoryLabel: newLabel };
-    setTransition({ from: current, to: newPrev, direction: "back" });
-    setStack((st) => {
+    const prevIsTabRoot = currentStack.length === 2;
+    setTransition({ from: current, to: newPrev, direction: "back", fromIsTabRoot: isTabRoot, toIsTabRoot: prevIsTabRoot });
+    updateCurrentTabStack((st) => {
       const next = st.slice(0, -1);
       next[next.length - 1] = newPrev;
       return next;
@@ -294,8 +357,8 @@ export default function App() {
     if (transition) return;
     // Find the nearest "categories" screen below current; fall back to back().
     const idx = (() => {
-      for (let i = stack.length - 2; i >= 0; i--) {
-        if (stack[i].name === "categories") return i;
+      for (let i = currentStack.length - 2; i >= 0; i--) {
+        if (currentStack[i].name === "categories") return i;
       }
       return -1;
     })();
@@ -303,9 +366,10 @@ export default function App() {
       back();
       return;
     }
-    const target = stack[idx];
-    setTransition({ from: current, to: target, direction: "back" });
-    setStack((st) => st.slice(0, idx + 1));
+    const target = currentStack[idx];
+    const targetIsTabRoot = idx === 0;
+    setTransition({ from: current, to: target, direction: "back", fromIsTabRoot: isTabRoot, toIsTabRoot: targetIsTabRoot });
+    updateCurrentTabStack((st) => st.slice(0, idx + 1));
   };
 
   // Pop the addown (edit) screen and the recipe screen, animating back to
@@ -313,8 +377,8 @@ export default function App() {
   const finishDeleteRecipe = () => {
     if (transition) return;
     const idx = (() => {
-      for (let i = stack.length - 2; i >= 0; i--) {
-        if (stack[i].name === "recipes") return i;
+      for (let i = currentStack.length - 2; i >= 0; i--) {
+        if (currentStack[i].name === "recipes") return i;
       }
       return -1;
     })();
@@ -322,9 +386,10 @@ export default function App() {
       back();
       return;
     }
-    const target = stack[idx];
-    setTransition({ from: current, to: target, direction: "back" });
-    setStack((st) => st.slice(0, idx + 1));
+    const target = currentStack[idx];
+    const targetIsTabRoot = idx === 0;
+    setTransition({ from: current, to: target, direction: "back", fromIsTabRoot: isTabRoot, toIsTabRoot: targetIsTabRoot });
+    updateCurrentTabStack((st) => st.slice(0, idx + 1));
   };
 
   // Save the in-progress recipe under the freshly created category and
@@ -335,13 +400,13 @@ export default function App() {
     // Don't save the recipe yet - just return to the parent screen with the category selected
     if (returnTo === "cook") {
       // Return to cook screen with the new category and recipe draft
-      setStack((prev) => {
+      updateCurrentTabStack((prev) => {
         const newStack = prev.slice(0, -1); // Remove newcategoryforrecipe screen
         return [...newStack, { name: "cook", newCategory: { key: catKey, label: catLabel }, draft }];
       });
     } else {
       // Return to addown screen with the new category
-      setStack((prev) => {
+      updateCurrentTabStack((prev) => {
         const newStack = prev.slice(0, -1); // Remove newcategoryforrecipe screen
         return [...newStack, {
           name: "addown",
@@ -351,20 +416,24 @@ export default function App() {
     }
   };
 
-  // After a recipe is saved (existing or new category), rebuild the back
-  // stack to follow the Browse hierarchy: home → categories → recipes → recipe.
-  // The Cook and Add Your Own screens are removed entirely.
+  // After a recipe is saved, switch to Recipes tab and navigate to the saved recipe
   const finishSaveRecipe = (recipe: Recipe, categoryKey: string, categoryLabel: string) => {
     if (transition) return;
     const target: Screen = { name: "recipe", recipe, categoryLabel };
-    const newStack: Screen[] = [
-      { name: "home" },
-      { name: "categories" },
-      { name: "recipes", categoryKey, categoryLabel },
-      target,
-    ];
-    setTransition({ from: current, to: target, direction: "forward" });
-    setStack(newStack);
+
+    // Build the Recipes tab stack: categories → recipes → recipe
+    setTabStacks((stacks) => ({
+      ...stacks,
+      build: [{ name: "cook" }], // Reset Build tab to root
+      recipes: [
+        { name: "categories" },
+        { name: "recipes", categoryKey, categoryLabel },
+        target,
+      ],
+    }));
+
+    // Switch to Recipes tab
+    setActiveTab("recipes");
   };
 
   useEffect(() => {
@@ -379,24 +448,34 @@ export default function App() {
         {showOnboarding === null ? null : showOnboarding ? (
           <Onboarding onComplete={() => setShowOnboarding(false)} />
         ) : (
-        <ScreenStage
-          current={current}
-          transition={transition}
-          push={push}
-          back={back}
-          replaceRecipe={replaceRecipeAndBack}
-          finishEditCategory={finishEditCategory}
-          finishDeleteCategory={finishDeleteCategory}
-          finishDeleteRecipe={finishDeleteRecipe}
-          finishCreateCategoryForRecipe={finishCreateCategoryForRecipe}
-          finishSaveRecipe={finishSaveRecipe}
-        />
+        <>
+          <ScreenStage
+            current={current}
+            transition={transition}
+            push={push}
+            back={back}
+            isTabRoot={isTabRoot}
+            replaceRecipe={replaceRecipeAndBack}
+            finishEditCategory={finishEditCategory}
+            finishDeleteCategory={finishDeleteCategory}
+            finishDeleteRecipe={finishDeleteRecipe}
+            finishCreateCategoryForRecipe={finishCreateCategoryForRecipe}
+            finishSaveRecipe={finishSaveRecipe}
+          />
+          <BottomTabBar activeTab={activeTab} onTabClick={switchToTab} />
+        </>
         )}
       </div>
       <button
         onClick={() => {
           try { localStorage.removeItem("tipsyDinnerOnboardingComplete"); } catch { /* noop */ }
-          setStack([{ name: "home" }]);
+          setTabStacks({
+            build: [{ name: "cook" }],
+            recipes: [{ name: "categories" }],
+            menus: [{ name: "occasions" }],
+            profile: [{ name: "profile" }],
+          });
+          setActiveTab("build");
           setShowOnboarding(true);
         }}
         style={{
@@ -429,6 +508,7 @@ function ScreenStage({
   transition,
   push,
   back,
+  isTabRoot,
   replaceRecipe,
   finishEditCategory,
   finishDeleteCategory,
@@ -437,9 +517,10 @@ function ScreenStage({
   finishSaveRecipe,
 }: {
   current: Screen;
-  transition: { from: Screen; to: Screen; direction: "forward" | "back" } | null;
+  transition: { from: Screen; to: Screen; direction: "forward" | "back"; fromIsTabRoot?: boolean; toIsTabRoot?: boolean } | null;
   push: (s: Screen) => void;
   back: () => void;
+  isTabRoot: boolean;
   replaceRecipe: (r: Recipe, label: string) => void;
   finishEditCategory: (newLabel: string) => void;
   finishDeleteCategory: () => void;
@@ -493,8 +574,8 @@ function ScreenStage({
 
   if (!transition) {
     return (
-      <div style={{ ...layerBase, position: "relative", height: "100%" }}>
-        {renderScreen(current, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe)}
+      <div style={{ ...layerBase, position: "relative", height: "100%", paddingBottom: 64 }}>
+        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe)}
       </div>
     );
   }
@@ -524,95 +605,105 @@ function ScreenStage({
   const toZ = direction === "forward" ? 2 : 1;
 
   // Outgoing layer should not capture clicks during animation
+  // Use transition-specific isTabRoot values if available (for tab switches)
+  const fromIsTabRoot = transition.fromIsTabRoot ?? isTabRoot;
+  const toIsTabRoot = transition.toIsTabRoot ?? isTabRoot;
+
   return (
     <>
-      <div style={{ ...layerBase, transform: fromTransform, transition: transitionStyle, zIndex: fromZ, pointerEvents: "none" }}>
-        {renderScreen(from, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe)}
+      <div style={{ ...layerBase, transform: fromTransform, transition: transitionStyle, zIndex: fromZ, pointerEvents: "none", paddingBottom: 64 }}>
+        {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe)}
       </div>
-      <div style={{ ...layerBase, transform: toTransform, transition: transitionStyle, zIndex: toZ, pointerEvents: "none" }}>
-        {renderScreen(to, push, back, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe)}
+      <div style={{ ...layerBase, transform: toTransform, transition: transitionStyle, zIndex: toZ, pointerEvents: "none", paddingBottom: 64 }}>
+        {renderScreen(to, push, back, toIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe)}
       </div>
     </>
   );
 }
 
-/* ---------------- Home ---------------- */
-function Home({ push }: { push: (s: Screen) => void }) {
-  const items = [
-    { label: "craft", sub: "your next dish", action: () => push({ name: "cook" }) },
-    { label: "explore", sub: "your recipes", action: () => push({ name: "categories" }) },
-    { label: "curate", sub: "your menus", action: () => push({ name: "occasions" }) },
+/* ---------------- Bottom Tab Bar ---------------- */
+function BottomTabBar({ activeTab, onTabClick }: { activeTab: TabId; onTabClick: (tab: TabId) => void }) {
+  const tabs: { id: TabId; icon: React.ReactNode; label: string }[] = [
+    { id: "build", icon: <IconChefHat size={20} stroke={1.5} />, label: "Build" },
+    { id: "recipes", icon: <IconBook size={20} stroke={1.5} />, label: "Recipes" },
+    { id: "menus", icon: <IconLayoutList size={20} stroke={1.5} />, label: "Menus" },
+    { id: "profile", icon: <IconUser size={20} stroke={1.5} />, label: "Profile" },
   ];
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ position: "absolute", top: 16, right: 16, zIndex: 5 }}>
-        <Avatar onClick={() => push({ name: "profile" })} />
-      </div>
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "48px 32px 16px" }}>
-        <div style={{ fontSize: 11, letterSpacing: "0.18em", color: "#185FA5", textTransform: "uppercase", marginBottom: 16 }}>
-          welcome back
-        </div>
-        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 44, fontWeight: 400, color: "#042C53", letterSpacing: "-0.5px", lineHeight: 1.1, textAlign: "center" }}>
-          Tipsy<br />Dinner
-        </div>
-        <div style={{ width: 32, height: 1, background: "#85B7EB", margin: "20px 0" }} />
-        <div style={{ fontFamily: "'Playfair Display', serif", fontStyle: "italic", fontSize: 16, fontWeight: 400, color: "#185FA5", textAlign: "center", lineHeight: 1.2 }}>
-          what are we making tonight?
-        </div>
-      </div>
-      <div style={{ padding: "0 24px 64px" }}>
-        {items.map((b, i) => (
+    <div
+      style={{
+        position: "absolute",
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: 64,
+        background: "#EEF4F8",
+        borderTop: "0.5px solid #85B7EB",
+        display: "flex",
+        paddingBottom: "env(safe-area-inset-bottom)",
+        zIndex: 100,
+      }}
+    >
+      {tabs.map((tab) => {
+        const isActive = activeTab === tab.id;
+        return (
           <button
-            key={b.label}
-            onClick={b.action}
+            key={tab.id}
+            onClick={() => onTabClick(tab.id)}
             style={{
-              width: "100%",
-              padding: "12px 0",
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 4,
               background: "transparent",
               border: "none",
-              borderTop: "0.5px solid #85B7EB",
-              borderBottom: i === items.length - 1 ? "0.5px solid #85B7EB" : "none",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
               cursor: "pointer",
-              textAlign: "left",
+              padding: "8px 0",
+              color: isActive ? "#0C447C" : "#85B7EB",
             }}
           >
-            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, letterSpacing: "0.12em", color: "#042C53", textTransform: "uppercase" }}>
-                {b.label}
-              </span>
-              <span style={{ fontFamily: "'Playfair Display', serif", fontStyle: "italic", fontSize: 13, color: "#185FA5", lineHeight: 1.2 }}>
-                {b.sub}
-              </span>
-            </div>
-            <span style={{ color: "#85B7EB", fontSize: 18, lineHeight: 1 }}>›</span>
+            {tab.icon}
+            <span
+              style={{
+                fontFamily: "'DM Sans', sans-serif",
+                fontSize: 10,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                fontWeight: isActive ? 500 : 400,
+              }}
+            >
+              {tab.label}
+            </span>
           </button>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 }
 
 /* ---------------- Categories ---------------- */
-function Categories({ push, back }: { push: (s: Screen) => void; back: () => void }) {
+function Categories({ push, back, isTabRoot }: { push: (s: Screen) => void; back: () => void; isTabRoot: boolean }) {
   const cats = getAllCategories();
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div style={{ padding: "32px 24px 16px", flexShrink: 0, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-            <button
-              onClick={back}
-              aria-label="Back"
-              style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "#185FA5", display: "flex", alignItems: "center" }}
-            >
-              <BackArrow />
-            </button>
-          </div>
-          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 400, color: "#042C53" }}>
-            Explore
+          {!isTabRoot && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+              <button
+                onClick={back}
+                aria-label="Back"
+                style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "#185FA5", display: "flex", alignItems: "center" }}
+              >
+                <BackArrow />
+              </button>
+            </div>
+          )}
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 400, color: "#042C53", marginTop: isTabRoot ? 6 : 0 }}>
+            Recipes
           </div>
         </div>
         <button
@@ -943,11 +1034,12 @@ function BackArrow() {
 }
 
 /* ---------------- Cook ---------------- */
-function Cook({ back, push, finishSaveRecipe, screen }: {
+function Cook({ back, push, finishSaveRecipe, screen, isTabRoot }: {
   back: () => void;
   push: (s: Screen) => void;
   finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
   screen: Extract<Screen, { name: "cook" }>;
+  isTabRoot: boolean;
 }) {
   type Msg = { id: number; role: "user" | "ai"; text: string };
 
@@ -1292,22 +1384,13 @@ Constraints: ${constraints || "Not specified"}`;
   };
 
   const isEmpty = messages.length === 0;
-  const placeholder = recipeRevealed ? "Make it even better..." : "What are we making tonight?";
+  const placeholder = isEmpty ? "What are we making tonight?" : "";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative" }}>
-      {/* Header */}
-      <div style={{ padding: "32px 24px 12px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        {expanded ? <span /> : (
-          <button
-            onClick={back}
-            aria-label="Back"
-            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "#185FA5", display: "flex", alignItems: "center" }}
-          >
-            <BackArrow />
-          </button>
-        )}
-        {isEmpty && (
+      {/* Header - Create a recipe button (only when empty) */}
+      {!expanded && isEmpty && (
+        <div style={{ padding: "32px 24px 12px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 12, position: "absolute", top: 0, right: 0, zIndex: 10 }}>
           <button
             onClick={() => push({ name: "addown" })}
             style={{
@@ -1327,34 +1410,24 @@ Constraints: ${constraints || "Not specified"}`;
               <path d="M12 20h9" />
               <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
             </svg>
-            Write your own
+            Create a recipe
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Body */}
       {isEmpty ? (
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 32px", textAlign: "center", gap: 16 }}>
-          <div style={{
-            width: 48, height: 48, borderRadius: "50%",
-            background: "#E6F1FB", border: "0.5px solid #85B7EB",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            color: "#185FA5",
-          }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 5v14" />
-              <path d="M5 12h14" />
-            </svg>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "48px 32px 80px", textAlign: "center" }}>
+          <div style={{ fontSize: 11, letterSpacing: "0.18em", color: "#185FA5", textTransform: "uppercase", marginBottom: 16, fontFamily: "'DM Sans', sans-serif" }}>
+            welcome back
           </div>
-          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#042C53", fontWeight: 400 }}>
-            What are we making?
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 44, fontWeight: 400, color: "#042C53", letterSpacing: "-0.5px", lineHeight: 1.1, textAlign: "center", marginBottom: 20 }}>
+            Tipsy<br />Dinner
           </div>
-          <div style={{ fontFamily: "'Playfair Display', serif", fontStyle: "italic", fontSize: 13, color: "#185FA5", lineHeight: 1.5, maxWidth: 240 }}>
-            Tell me what you're in the mood for, what's in your fridge, or what the occasion is.
-          </div>
+          <div style={{ width: 32, height: 1, background: "#85B7EB" }} />
         </div>
       ) : (
-        <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "10px 14px", display: "flex", flexDirection: "column", gap: 16 }}>
+        <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "48px 14px 10px", display: "flex", flexDirection: "column", gap: 16 }}>
           {messages.map((m) => (
             <ChatBubble key={m.id} role={m.role} text={m.text} />
           ))}

@@ -90,9 +90,10 @@ function BackArrow() {
 type Props = {
   back: () => void;
   push: (occasion: Occasion) => void;
+  isTabRoot?: boolean;
 };
 
-export default function Occasions({ back, push }: Props) {
+export default function Occasions({ back, push, isTabRoot = false }: Props) {
   const [occasions, setOccasions] = useState<Occasion[]>(() => loadOccasions());
   const [showCreate, setShowCreate] = useState(false);
   const [editingOccasion, setEditingOccasion] = useState<Occasion | null>(null);
@@ -113,25 +114,27 @@ export default function Occasions({ back, push }: Props) {
         gap: 12,
       }}>
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-            <button
-              onClick={back}
-              aria-label="Back"
-              style={{
-                background: "transparent",
-                border: "none",
-                padding: 0,
-                cursor: "pointer",
-                color: C.midBlue,
-                display: "flex",
-                alignItems: "center",
-              }}
-            >
-              <BackArrow />
-            </button>
-          </div>
-          <div style={{ fontFamily: fontSerif, fontSize: 28, fontWeight: 400, color: C.navy }}>
-            Curate
+          {!isTabRoot && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+              <button
+                onClick={back}
+                aria-label="Back"
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  padding: 0,
+                  cursor: "pointer",
+                  color: C.midBlue,
+                  display: "flex",
+                  alignItems: "center",
+                }}
+              >
+                <BackArrow />
+              </button>
+            </div>
+          )}
+          <div style={{ fontFamily: fontSerif, fontSize: 28, fontWeight: 400, color: C.navy, marginTop: isTabRoot ? 6 : 0 }}>
+            Menus
           </div>
         </div>
         <button
