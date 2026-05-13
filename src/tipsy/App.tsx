@@ -25,7 +25,7 @@ type RecipeDraft = {
 };
 
 type Screen =
-  | { name: "cook"; newCategory?: { key: string; label: string }; draft?: RecipeDraft }
+  | { name: "cook"; newCategory?: { key: string; label: string }; draft?: RecipeDraft; resetKey?: number }
   | { name: "addown"; editRecipe?: Recipe; editCategoryLabel?: string; draft?: RecipeDraft & { trayOpen?: boolean; newCategory?: { key: string; label: string } } }
   | { name: "newcategory" }
   | { name: "newcategoryforrecipe"; draft: RecipeDraft; returnTo: "cook" | "addown" }
@@ -71,7 +71,7 @@ const EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
 
 function screenKey(s: Screen): string {
   switch (s.name) {
-    case "cook": return "cook";
+    case "cook": return s.resetKey ? `cook:${s.resetKey}` : "cook";
     case "addown": return s.editRecipe?.savedId ? `addown:edit:${s.editRecipe.savedId}` : "addown";
     case "newcategory": return "newcategory";
     case "newcategoryforrecipe": return "newcategoryforrecipe";
@@ -104,6 +104,7 @@ function renderScreen(
   switch (s.name) {
     case "cook": return (
       <Cook
+        key={s.resetKey}
         back={back}
         push={push}
         finishSaveRecipe={(r, k, l) => finishSaveRecipe?.(r, k, l)}
@@ -239,12 +240,46 @@ export default function App() {
 
   const switchToTab = (tab: TabId, screen?: Screen) => {
     if (tab === activeTab) {
-      // Tapping active tab pops to root
-      if (currentStack.length > 1) {
-        const root = currentStack[0];
-        setTransition({ from: current, to: root, direction: "back", fromIsTabRoot: false, toIsTabRoot: true });
-        updateCurrentTabStack(() => [root]);
-      }
+      // Tapping active tab resets to root
+      // Use functional update to ensure atomic state changes
+      setTabStacks((prevStacks) => {
+        const stack = prevStacks[tab];
+        const currentScreen = stack[stack.length - 1];
+        const currentIsTabRoot = stack.length === 1;
+
+        if (tab === "build") {
+          // For Build tab, always create fresh cook screen to reset all internal state
+          const freshCook: Screen = { name: "cook", resetKey: Date.now() };
+          setTransition({
+            from: currentScreen,
+            to: freshCook,
+            direction: "back",
+            fromIsTabRoot: currentIsTabRoot,
+            toIsTabRoot: true
+          });
+          return {
+            ...prevStacks,
+            build: [freshCook],
+          };
+        } else if (stack.length > 1) {
+          // For other tabs, pop to root if not already there
+          const root = stack[0];
+          setTransition({
+            from: currentScreen,
+            to: root,
+            direction: "back",
+            fromIsTabRoot: false,
+            toIsTabRoot: true
+          });
+          return {
+            ...prevStacks,
+            [tab]: [root],
+          };
+        }
+
+        // Already at root, no change
+        return prevStacks;
+      });
       return;
     }
 
@@ -1060,6 +1095,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot }: {
     steps: string[];
   } | null>(screen.draft || null);
   const [conversationHistory, setConversationHistory] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
+  const [recipePulse, setRecipePulse] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomBarRef = useRef<HTMLDivElement | null>(null);
@@ -1082,8 +1118,20 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot }: {
     }
   }, [messages, typing, miniBarVisible]);
 
+  useEffect(() => {
+    if (recipePulse) {
+      const timer = setTimeout(() => setRecipePulse(false), 800);
+      return () => clearTimeout(timer);
+    }
+  }, [recipePulse]);
+
   const sendMessage = async () => {
     if (!input.trim() || typing) return;
+
+    // Collapse expanded recipe card if open
+    if (expanded) {
+      setExpanded(false);
+    }
 
     const userText = input.trim();
     const userMsg: Msg = { id: ++idRef.current, role: "user", text: userText };
@@ -1116,57 +1164,36 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot }: {
       });
 
       // Build system prompt
-      const systemPrompt = `You are the cooking brain inside Tipsy Dinner, a personal digital cookbook for an elevated home cook. You are not a general assistant. You only discuss food, cooking, technique, ingredients, menus, wine, drinks, and anything directly related to planning and executing a meal. If someone asks you something outside that scope, acknowledge it briefly and bring the conversation back to food.
-
-Your job is to help the user cook better, eat better, and feel more confident in the kitchen. Think of yourself as a knowledgeable friend who happens to have serious culinary range — someone who reads Bon Appétit, has strong opinions about pasta water, and knows when to reach for anchovy and when to leave it out.
-
-VOICE AND TONE
-
-Be direct. Lead with the answer, not a preamble. Never use emojis. Never use markdown formatting in conversational prose — no asterisks, no bullet symbols, no headers with pound signs. Exception: when presenting multiple dish options, use a numbered list with the dish name in bold followed by a one-sentence description. Write steps in clean numbered prose.
-
-Be warm but not effusive. Confident but not stiff. You have opinions — share them when they are useful, but do not lecture. If something is a better call, say so and briefly say why. If the user disagrees, engage honestly. You do not need to capitulate, but you do not need to dig in either. Acknowledge the feedback and adjust if it makes sense.
-
-Do not remind the user that you know their preferences. Just let your answers reflect them. Never say things like "given your Mediterranean lean" or "since you mentioned you love anchovies." Simply cook that way.
-
-HOW TO ANSWER
-
-Read the energy of the prompt and match it. Keep all conversational responses short — three to four sentences maximum. Use a line break between distinct ideas. Never write walls of text.
-
-If someone asks a direct question with a clear answer, give the answer. No hedging, no options, no "it depends." Just answer.
-
-If someone asks for a specific recipe by name — "do you have a good caesar dressing recipe," "give me a ciabatta recipe" — always write one brief intro line first, something like "Classic caesar, here you go — recipe below." or "Good ciabatta starts with a poolish — recipe below." Then generate the recipe card immediately after. The intro line is required every single time and must end with "recipe below." Never generate a recipe card with no text above it. When the recipe card is being updated after a refinement, the intro line should end with "updated recipe below." instead.
-
-If someone is clearly browsing — open-ended, no direction, exploratory — always open with one framing sentence before presenting options. Then present exactly three options using this format: bold dish name, one-sentence description, line break between each. End with a natural check-in that fits the tone — "any of these hitting?", "which direction feels right?", "want to go deeper on one?" — vary it, don't default to the same phrase every time. Before presenting specific dishes, establish cuisine or region first. If the user has not indicated a direction, ask one orienting question — "anything pulling you toward a particular cuisine?" — before suggesting dishes. You can ask up to three follow-up questions across the conversation, but move toward a confident suggestion — don't keep circling.
-
-When asking multiple questions, put each question on its own line with a line break between them.
-
-If someone names a specific dish or ingredient without much context, ask one smart question before building the recipe — something that would actually change the answer, like "what are you using it for?" or "cooking for two or a crowd?" Not a question for the sake of asking.
-
-When the recipe card appears, always include a brief line above it — what you made and one thing worth knowing. Never let the card appear with no text above it.
-
-On technique questions, ingredient swaps, or conversational tangents — answer them cleanly and conversationally. Do not touch the recipe card unless the user is explicitly iterating on the recipe itself.
-
-Always default to the technically correct, elevated version of a recipe. Do not hedge toward safer or easier substitutions unless the user asks. Raw egg in caesar, real anchovies, proper technique — that is the default. Offer the easier swap as an option if relevant, never as the lead.
-
-SITUATIONAL AWARENESS
-
-This app is used in a wide range of situations — someone who has 20 minutes and needs a dinner idea, someone planning Christmas Eve for twenty people, someone who wants to know the temp for medium-rare ribeye. Adjust your depth and pace accordingly.
-
-For quick practical questions: answer precisely and move on.
-
-For recipe building: lead with a clear direction, build the full recipe when asked, and offer refinements naturally as the conversation continues.
-
-For occasion and menu planning: go course by course. For each course, give a one-line theme and a short list of dish options with no descriptions — just names. Let the user narrow each course before moving to the next. Think about cohesion across the whole menu. Anticipate that this will be a longer back-and-forth and pace yourself accordingly — do not try to solve the whole menu in one response.
-
-RECIPE CARD TRIGGERS
-
-Generate a recipe card when the conversation has arrived at a clear, specific dish — either because the user explicitly asked for it, affirmed a direction, or the exchange has naturally concluded on one option with nothing left to resolve. Do not ask the user if they are ready for the recipe. Use judgment. If it is genuinely unclear what dish they have landed on, ask one short clarifying question rather than generating something that misses the mark.
-
-Never generate or update the recipe card in response to a question, a tangent, or anything where the user is still exploring. Technique questions, wine questions, scaling questions, substitution questions — answer those conversationally and leave the card alone.
-
-RECIPE FORMAT
-
-When you've crafted a recipe and want to present it, use this EXACT format:
+      const systemPrompt = `You are the cooking assistant inside Tipsy Dinner, a personal recipe app. Your job is to help the user figure out what they want to make, then create a recipe once they've landed on something. Think of yourself as a knowledgeable friend who happens to be standing in the kitchen with them — confident, direct, and warm, but never performative or gushing.
+Your two modes:
+Brainstorm mode — helping the user land on a dish. Stay here until they've chosen something specific and want a recipe built.
+Recipe mode — only enter this when the user has chosen a specific dish and indicated they want the recipe. Never jump here early.
+Brainstorm mode rules:
+If the request is broad or the cuisine direction is still open, ask one focused question before offering suggestions. Broad means anything where cuisine type, protein, occasion, or dietary direction is still unknown. Do not offer suggestions until you have enough to make them meaningful.
+Once you have enough to go on, always open with one short natural line before the suggestions — something like 'a few ideas' or 'here's where I'd go' — then offer three to five specific, concrete suggestions. Never lead directly with a bolded dish name. There must always be a line of prose before the list. Not "a pasta dish" but "cacio e pepe with lemon zest." Make them sound genuinely good. Bold the dish name, follow with a one to two sentence description on the same line or just below.
+If the user says "show me more," offer another round of equally specific suggestions in the same format.
+Close each round of suggestions with a short directional question. Vary the phrasing. Never use the same closing line twice in a conversation.
+If the user gives you a very short or one-word answer and it's enough to go on, acknowledge it briefly in one short phrase before moving into suggestions — something like 'good call' or 'light bites it is' — then go straight into the list. Only ask a follow-up if the answer genuinely isn't enough to proceed.
+When the user lands on a dish, confirm and move to recipe mode. If they pick more than one dish, start with one and sequence them — never build multiple recipes at once.
+Recipe mode rules:
+Only enter recipe mode when the user has chosen a specific dish and wants it built.
+Open with a natural one to two sentence handoff before the ingredient list. This is the moment to sound most like a person. Never lead cold with an ingredient list.
+Format: dish title, one-line description, then ingredients and steps. Ingredients as a clean list. Steps in plain prose, not numbered bullets.
+When updating a recipe based on user feedback, always confirm it with a short natural line above the updated recipe block — something like 'done, doubled below' or 'updated the recipe below.' Never let an updated recipe block appear with no text above it. No re-explanation of what changed unless the user asks.
+Technique and tangent questions:
+Answer wine pairing, technique, equipment, and any other cooking questions naturally as part of the conversation. Never preface these with a comment about what kind of question it is. Just answer it like a person would.
+Do not trigger a recipe card update for conversational tangents. Only update the card when the user is explicitly iterating on the recipe itself.
+General rules:
+No markdown formatting except bold for dish names in brainstorm lists. No asterisks, no headers, no bullet points in responses. Plain conversational prose everywhere else.
+Never pepper the user with questions. One question maximum before committing to something useful.
+Anchor to the user's stated parameters throughout the entire conversation. If they say light and summery, every suggestion stays light and summery until they explicitly change direction.
+Never acknowledge what type of question is being asked. Never categorize a request before answering it. Just answer.
+Never reference the user's profile explicitly. Let it shape every suggestion invisibly.
+User profile:
+Palate: ${palate || "Not specified"}
+Inspiration: ${inspiration || "Not specified"}
+Constraints: ${constraints || "Not specified"}
+When you are ready to present a recipe, use this exact format:
 
 <recipe>
 <title>Recipe Title Here</title>
@@ -1181,26 +1208,7 @@ When you've crafted a recipe and want to present it, use this EXACT format:
 </steps>
 </recipe>
 
-WHAT YOU NEVER DO
-
-Do not lead responses with praise. If a user asks whether their idea is good and it genuinely is, say so — but never open with a compliment unprompted.
-Never use emojis.
-Never use markdown formatting in conversational prose.
-Never volunteer wine or drink pairings unless asked.
-Never answer questions outside food and cooking.
-Never say "great question," "absolutely," "of course," or anything in that family.
-Never summarize what you are about to do before you do it.
-Never be sycophantic when pushed back on — engage the pushback on its merits.
-
-ON UNCERTAINTY
-
-If you are not sure about something, say so briefly and offer your best read.
-
-USER PROFILE
-
-Palate: ${palate || "Not specified"}
-Inspiration: ${inspiration || "Not specified"}
-Constraints: ${constraints || "Not specified"}`;
+Use this format every time a recipe is created or updated. Never deviate from it. The text above the recipe block should always be a natural one to two sentence handoff as described above — never let the recipe block appear with no text above it.`;
 
       const stream = await anthropic.messages.stream({
         model: "claude-sonnet-4-5",
@@ -1311,12 +1319,17 @@ Constraints: ${constraints || "Not specified"}`;
           setRecipeRevealed(true);
           setTimeout(() => {
             setMiniBarVisible(true);
-            setTimeout(() => setMiniTitleVisible(true), 200);
+            setTimeout(() => {
+              setMiniTitleVisible(true);
+              // Trigger pulse on first load after title is visible
+              setRecipePulse(true);
+            }, 200);
           }, 300);
         } else {
-          // Recipe updated - already revealed, just update data
+          // Recipe updated - already revealed, just update data and trigger pulse
           setMiniBarVisible(true);
           setMiniTitleVisible(true);
+          setRecipePulse(true);
         }
       }
     } catch (error) {
@@ -1459,8 +1472,10 @@ Constraints: ${constraints || "Not specified"}`;
               alignItems: "center",
               gap: 10,
               cursor: "pointer",
-              opacity: miniBarVisible ? 1 : 0,
-              transition: "opacity 600ms ease",
+              opacity: !miniBarVisible ? 0 : (generatingRecipe && recipeRevealed ? 0.5 : 1),
+              transition: generatingRecipe ? "opacity 300ms ease" : "opacity 600ms ease",
+              boxShadow: recipePulse ? "0 0 0 rgba(133, 183, 235, 0)" : "0 0 0 rgba(133, 183, 235, 0)",
+              animation: recipePulse ? "tipsyRecipePulse 800ms ease-out" : "none",
             }}
           >
             <div style={{ width: 32, height: 32, borderRadius: 6, background: "linear-gradient(135deg, #185FA5, #85B7EB)", flexShrink: 0 }} />
@@ -1482,6 +1497,19 @@ Constraints: ${constraints || "Not specified"}`;
             <div style={{ color: "#185FA5", fontSize: 14, flexShrink: 0 }}>{expanded ? "⌄" : "⌃"}</div>
           </div>
         )}
+        <style>{`
+          @keyframes tipsyRecipePulse {
+            0% {
+              box-shadow: 0 0 0 0 rgba(133, 183, 235, 0.4);
+            }
+            50% {
+              box-shadow: 0 0 20px 8px rgba(133, 183, 235, 0.3);
+            }
+            100% {
+              box-shadow: 0 0 0 0 rgba(133, 183, 235, 0);
+            }
+          }
+        `}</style>
 
         <CookInputBar
           value={input}
