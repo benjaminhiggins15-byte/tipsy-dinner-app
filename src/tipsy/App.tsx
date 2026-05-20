@@ -10,6 +10,7 @@ import MenuInterior from "./MenuInterior";
 import RecipePicker from "./RecipePicker";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 import Anthropic from "@anthropic-ai/sdk";
+import watermarkSquare from "../Logos/watermark_square.png";
 import {
   IconChefHat,
   IconBook,
@@ -55,9 +56,9 @@ const S: Record<string, CSSProperties> = {
   phone: {
     width: 320,
     height: 640,
-    background: "#EEF4F8",
+    background: "#233C00",
     borderRadius: 32,
-    border: "0.5px solid #B5D4F4",
+    border: "none",
     overflow: "hidden",
     display: "flex",
     flexDirection: "column",
@@ -483,7 +484,7 @@ export default function App() {
         {showOnboarding === null ? null : showOnboarding ? (
           <Onboarding onComplete={() => setShowOnboarding(false)} />
         ) : (
-        <>
+        <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative", background: "#233C00" }}>
           <ScreenStage
             current={current}
             transition={transition}
@@ -498,7 +499,7 @@ export default function App() {
             finishSaveRecipe={finishSaveRecipe}
           />
           <BottomTabBar activeTab={activeTab} onTabClick={switchToTab} />
-        </>
+        </div>
         )}
       </div>
       <button
@@ -603,14 +604,16 @@ function ScreenStage({
     height: "100%",
     display: "flex",
     flexDirection: "column",
-    background: "#EEF4F8",
+    background: "#233C00",
     willChange: "transform",
   };
 
   if (!transition) {
     return (
-      <div style={{ ...layerBase, position: "relative", height: "100%", paddingBottom: 64 }}>
-        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe)}
+      <div style={{ ...layerBase, position: "relative", height: "100%", paddingBottom: 64, background: "#182800" }}>
+        <div style={{ ...layerBase, position: "relative", height: "100%" }}>
+          {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe)}
+        </div>
       </div>
     );
   }
@@ -645,24 +648,24 @@ function ScreenStage({
   const toIsTabRoot = transition.toIsTabRoot ?? isTabRoot;
 
   return (
-    <>
+    <div style={{ position: "relative", height: "100%", background: "#182800" }}>
       <div style={{ ...layerBase, transform: fromTransform, transition: transitionStyle, zIndex: fromZ, pointerEvents: "none", paddingBottom: 64 }}>
         {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe)}
       </div>
       <div style={{ ...layerBase, transform: toTransform, transition: transitionStyle, zIndex: toZ, pointerEvents: "none", paddingBottom: 64 }}>
         {renderScreen(to, push, back, toIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe)}
       </div>
-    </>
+    </div>
   );
 }
 
 /* ---------------- Bottom Tab Bar ---------------- */
 function BottomTabBar({ activeTab, onTabClick }: { activeTab: TabId; onTabClick: (tab: TabId) => void }) {
   const tabs: { id: TabId; icon: React.ReactNode; label: string }[] = [
-    { id: "build", icon: <IconChefHat size={20} stroke={1.5} />, label: "Build" },
-    { id: "recipes", icon: <IconBook size={20} stroke={1.5} />, label: "Recipes" },
-    { id: "menus", icon: <IconLayoutList size={20} stroke={1.5} />, label: "Menus" },
-    { id: "profile", icon: <IconUser size={20} stroke={1.5} />, label: "Profile" },
+    { id: "build", icon: <IconChefHat size={22} stroke={1.5} />, label: "Build" },
+    { id: "recipes", icon: <IconBook size={22} stroke={1.5} />, label: "Recipes" },
+    { id: "menus", icon: <IconLayoutList size={22} stroke={1.5} />, label: "Menus" },
+    { id: "profile", icon: <IconUser size={22} stroke={1.5} />, label: "Profile" },
   ];
 
   return (
@@ -672,10 +675,11 @@ function BottomTabBar({ activeTab, onTabClick }: { activeTab: TabId; onTabClick:
         bottom: 0,
         left: 0,
         right: 0,
-        height: 64,
-        background: "#EEF4F8",
-        borderTop: "0.5px solid #85B7EB",
+        background: "#182800",
         display: "flex",
+        alignItems: "center",
+        justifyContent: "space-around",
+        padding: "0 8px 6px",
         paddingBottom: "env(safe-area-inset-bottom)",
         zIndex: 100,
       }}
@@ -691,27 +695,39 @@ function BottomTabBar({ activeTab, onTabClick }: { activeTab: TabId; onTabClick:
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              justifyContent: "center",
               gap: 4,
               background: "transparent",
               border: "none",
               cursor: "pointer",
-              padding: "8px 0",
-              color: isActive ? "#0C447C" : "#85B7EB",
+              padding: "6px 0 6px",
+              color: isActive ? "#FEE7C0" : "rgba(254,231,192,0.25)",
+              position: "relative",
             }}
           >
             {tab.icon}
             <span
               style={{
-                fontFamily: "'DM Sans', sans-serif",
+                fontFamily: "Inter, sans-serif",
                 fontSize: 10,
+                fontWeight: 500,
+                letterSpacing: "0.06em",
                 textTransform: "uppercase",
-                letterSpacing: "0.08em",
-                fontWeight: isActive ? 500 : 400,
               }}
             >
               {tab.label}
             </span>
+            {isActive && (
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: 2,
+                  width: 4,
+                  height: 4,
+                  borderRadius: "50%",
+                  background: "#FEE7C0",
+                }}
+              />
+            )}
           </button>
         );
       })}
@@ -1397,50 +1413,361 @@ Use this format every time a recipe is created or updated. Never deviate from it
   };
 
   const isEmpty = messages.length === 0;
-  const placeholder = isEmpty ? "What are we making tonight?" : "";
+  const placeholder = isEmpty ? "pour a glass — what are we cooking?" : "";
+
+  const handleChipClick = (text: string) => {
+    if (typing) return;
+    // Directly send the chip text as a message
+    const userText = text.trim();
+    const userMsg: Msg = { id: ++idRef.current, role: "user", text: userText };
+    setMessages((m) => [...m, userMsg]);
+    setTyping(true);
+    setGeneratingRecipe(false);
+
+    const updatedHistory = [...conversationHistory, { role: "user" as const, content: userText }];
+    setConversationHistory(updatedHistory);
+
+    const palate = typeof window !== "undefined" ? localStorage.getItem("tipsyDinnerPalate") || "" : "";
+    const inspiration = typeof window !== "undefined" ? localStorage.getItem("tipsyDinnerInspiration") || "" : "";
+    const constraints = typeof window !== "undefined" ? localStorage.getItem("tipsyDinnerConstraints") || "" : "";
+
+    (async () => {
+      try {
+        const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+        if (!apiKey) throw new Error("API key not found");
+
+        const anthropic = new Anthropic({
+          apiKey,
+          dangerouslyAllowBrowser: true,
+        });
+
+        const systemPrompt = `You are the cooking assistant inside Tipsy Dinner, a personal recipe app. Your job is to help the user figure out what they want to make, then create a recipe once they've landed on something. Think of yourself as a knowledgeable friend who happens to be standing in the kitchen with them — confident, direct, and warm, but never performative or gushing.
+Your two modes:
+Brainstorm mode — helping the user land on a dish. Stay here until they've chosen something specific and want a recipe built.
+Recipe mode — only enter this when the user has chosen a specific dish and indicated they want the recipe. Never jump here early.
+Brainstorm mode rules:
+If the request is broad or the cuisine direction is still open, ask one focused question before offering suggestions. Broad means anything where cuisine type, protein, occasion, or dietary direction is still unknown. Do not offer suggestions until you have enough to make them meaningful.
+Once you have enough to go on, always open with one short natural line before the suggestions — something like 'a few ideas' or 'here's where I'd go' — then offer three to five specific, concrete suggestions. Never lead directly with a bolded dish name. There must always be a line of prose before the list. Not "a pasta dish" but "cacio e pepe with lemon zest." Make them sound genuinely good. Bold the dish name, follow with a one to two sentence description on the same line or just below.
+If the user says "show me more," offer another round of equally specific suggestions in the same format.
+Close each round of suggestions with a short directional question. Vary the phrasing. Never use the same closing line twice in a conversation.
+If the user gives you a very short or one-word answer and it's enough to go on, acknowledge it briefly in one short phrase before moving into suggestions — something like 'good call' or 'light bites it is' — then go straight into the list. Only ask a follow-up if the answer genuinely isn't enough to proceed.
+When the user lands on a dish, confirm and move to recipe mode. If they pick more than one dish, start with one and sequence them — never build multiple recipes at once.
+Recipe mode rules:
+Only enter recipe mode when the user has chosen a specific dish and wants it built.
+Open with a natural one to two sentence handoff before the ingredient list. This is the moment to sound most like a person. Never lead cold with an ingredient list.
+Format: dish title, one-line description, then ingredients and steps. Ingredients as a clean list. Steps in plain prose, not numbered bullets.
+When updating a recipe based on user feedback, always confirm it with a short natural line above the updated recipe block — something like 'done, doubled below' or 'updated the recipe below.' Never let an updated recipe block appear with no text above it. No re-explanation of what changed unless the user asks.
+Technique and tangent questions:
+Answer wine pairing, technique, equipment, and any other cooking questions naturally as part of the conversation. Never preface these with a comment about what kind of question it is. Just answer it like a person would.
+Do not trigger a recipe card update for conversational tangents. Only update the card when the user is explicitly iterating on the recipe itself.
+General rules:
+No markdown formatting except bold for dish names in brainstorm lists. No asterisks, no headers, no bullet points in responses. Plain conversational prose everywhere else.
+Never pepper the user with questions. One question maximum before committing to something useful.
+Anchor to the user's stated parameters throughout the entire conversation. If they say light and summery, every suggestion stays light and summery until they explicitly change direction.
+Never acknowledge what type of question is being asked. Never categorize a request before answering it. Just answer.
+Never reference the user's profile explicitly. Let it shape every suggestion invisibly.
+User profile:
+Palate: ${palate || "Not specified"}
+Inspiration: ${inspiration || "Not specified"}
+Constraints: ${constraints || "Not specified"}
+When you are ready to present a recipe, use this exact format:
+
+<recipe>
+<title>Recipe Title Here</title>
+<description>One-sentence description</description>
+<ingredients>
+<item><name>Ingredient name</name><qty>Amount</qty></item>
+<item><name>Another ingredient</name><qty>Amount</qty></item>
+</ingredients>
+<steps>
+<step>First step instructions</step>
+<step>Second step instructions</step>
+</steps>
+</recipe>
+
+Use this format every time a recipe is created or updated. Never deviate from it. The text above the recipe block should always be a natural one to two sentence handoff as described above — never let the recipe block appear with no text above it.`;
+
+        const stream = await anthropic.messages.stream({
+          model: "claude-sonnet-4-5",
+          max_tokens: 2048,
+          system: systemPrompt,
+          messages: updatedHistory,
+        });
+
+        setTyping(false);
+        const aiMessageId = ++idRef.current;
+        setMessages((m) => [...m, { id: aiMessageId, role: "ai", text: "" }]);
+
+        let fullText = "";
+
+        for await (const chunk of stream) {
+          if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
+            fullText += chunk.delta.text;
+
+            if (!generatingRecipe && fullText.includes("<recipe>")) {
+              setGeneratingRecipe(true);
+            }
+
+            let displayText = fullText;
+            displayText = displayText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "");
+            const recipeStartIndex = displayText.indexOf("<recipe>");
+            if (recipeStartIndex !== -1) {
+              displayText = displayText.substring(0, recipeStartIndex);
+            }
+            displayText = displayText.trim();
+
+            setMessages((m) => m.map(msg =>
+              msg.id === aiMessageId ? { ...msg, text: displayText } : msg
+            ));
+          }
+        }
+
+        if (!fullText) {
+          throw new Error("Empty response from API");
+        }
+
+        const recipeMatch = fullText.match(/<recipe>([\s\S]*?)<\/recipe>/);
+        let parsedRecipe = null;
+
+        if (recipeMatch) {
+          const recipeXml = recipeMatch[1];
+
+          const titleMatch = recipeXml.match(/<title>(.*?)<\/title>/);
+          const descMatch = recipeXml.match(/<description>(.*?)<\/description>/);
+          const ingredientsMatch = recipeXml.match(/<ingredients>([\s\S]*?)<\/ingredients>/);
+          const stepsMatch = recipeXml.match(/<steps>([\s\S]*?)<\/steps>/);
+
+          const ingredients: { name: string; qty: string }[] = [];
+          if (ingredientsMatch) {
+            const itemMatches = [
+              ...ingredientsMatch[1].matchAll(
+                /<item>[\s\S]*?<name>(.*?)<\/name>[\s\S]*?<qty>(.*?)<\/qty>[\s\S]*?<\/item>/g
+              ),
+            ];
+            for (const match of itemMatches) {
+              ingredients.push({ name: match[1].trim(), qty: match[2].trim() });
+            }
+          }
+
+          const steps: string[] = [];
+          if (stepsMatch) {
+            const stepMatches = [...stepsMatch[1].matchAll(/<step>(.*?)<\/step>/g)];
+            for (const match of stepMatches) {
+              steps.push(match[1].trim());
+            }
+          }
+
+          if (titleMatch && descMatch && ingredients.length > 0 && steps.length > 0) {
+            parsedRecipe = {
+              title: titleMatch[1].trim(),
+              description: descMatch[1].trim(),
+              ingredients,
+              steps,
+            };
+          }
+        }
+
+        const displayText = fullText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "").trim();
+        setMessages((m) => m.map(msg =>
+          msg.id === aiMessageId ? { ...msg, text: displayText || "..." } : msg
+        ));
+
+        setConversationHistory([...updatedHistory, { role: "assistant", content: fullText }]);
+
+        if (parsedRecipe) {
+          setCurrentRecipe(parsedRecipe);
+          setGeneratingRecipe(false);
+
+          if (!recipeRevealed) {
+            setRecipeRevealed(true);
+            setTimeout(() => {
+              setMiniBarVisible(true);
+              setTimeout(() => {
+                setMiniTitleVisible(true);
+                setRecipePulse(true);
+              }, 200);
+            }, 300);
+          } else {
+            setMiniBarVisible(true);
+            setMiniTitleVisible(true);
+            setRecipePulse(true);
+          }
+        }
+      } catch (error) {
+        console.error("Error sending message:", error);
+        setTyping(false);
+        setGeneratingRecipe(false);
+        setMessages((m) => [
+          ...m,
+          {
+            id: ++idRef.current,
+            role: "ai",
+            text: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
+          },
+        ]);
+      }
+    })();
+  };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative" }}>
-      {/* Header - Create a recipe button (only when empty) */}
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative", background: "#233C00" }}>
+      {/* Gradient background */}
+      <div style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 420,
+        background: "linear-gradient(180deg, #3a6010 0%, #2E4E08 35%, #233C00 100%)",
+        zIndex: 0,
+        pointerEvents: "none",
+      }} />
+
+      {/* Header - Logo and Write your own button (only when empty) */}
       {!expanded && isEmpty && (
-        <div style={{ padding: "32px 24px 12px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 12, position: "absolute", top: 0, right: 0, zIndex: 10 }}>
+        <div style={{ height: 52, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px", flexShrink: 0, position: "relative", zIndex: 1 }}>
+          <div style={{ background: "transparent", border: "none", padding: 0, display: "flex", alignItems: "center" }}>
+            <img
+              src={watermarkSquare}
+              alt="Tipsy Dinner"
+              style={{
+                height: 36,
+                width: "auto",
+                display: "block",
+                border: "none",
+                background: "none",
+              }}
+            />
+          </div>
           <button
             onClick={() => push({ name: "addown" })}
             style={{
-              display: "inline-flex", alignItems: "center", gap: 6,
-              padding: "6px 12px",
-              background: "#E6F1FB",
-              border: "0.5px solid #85B7EB",
-              borderRadius: 999,
-              color: "#185FA5",
-              fontFamily: "'DM Sans', sans-serif",
               fontSize: 11,
-              letterSpacing: "0.08em",
+              fontWeight: 500,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              color: "rgba(254,231,192,0.6)",
+              border: "1px solid rgba(254,231,192,0.2)",
+              borderRadius: 20,
+              padding: "7px 14px",
+              background: "transparent",
               cursor: "pointer",
+              fontFamily: "Inter, sans-serif",
             }}
           >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 20h9" />
-              <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
-            </svg>
-            Create a recipe
+            Write your own
           </button>
         </div>
       )}
 
       {/* Body */}
       {isEmpty ? (
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "48px 32px 80px", textAlign: "center" }}>
-          <div style={{ fontSize: 11, letterSpacing: "0.18em", color: "#185FA5", textTransform: "uppercase", marginBottom: 16, fontFamily: "'DM Sans', sans-serif" }}>
-            welcome back
+        <>
+          {/* Hero text */}
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 32px 20px", position: "relative", zIndex: 1 }}>
+            <div style={{
+              fontFamily: "Lazydog, sans-serif",
+              fontStyle: "normal",
+              fontSize: 32,
+              fontWeight: 400,
+              color: "#FEE7C0",
+              textTransform: "uppercase",
+              lineHeight: 1.1,
+              textAlign: "center",
+            }}>
+              what's on<br />the menu?
+            </div>
           </div>
-          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 44, fontWeight: 400, color: "#042C53", letterSpacing: "-0.5px", lineHeight: 1.1, textAlign: "center", marginBottom: 20 }}>
-            Tipsy<br />Dinner
+
+          {/* Prompt chips and divider */}
+          <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", gap: 10, padding: "0 20px 16px", position: "relative", zIndex: 1 }}>
+            <button
+              onClick={() => handleChipClick("something impressive for a dinner party")}
+              style={{
+                width: "100%",
+                fontFamily: "Fraunces, serif",
+                fontStyle: "italic",
+                fontWeight: 400,
+                fontSize: 14,
+                color: "rgba(254,231,192,0.85)",
+                background: "rgba(254,231,192,0.06)",
+                border: "1px solid rgba(254,231,192,0.14)",
+                borderRadius: 12,
+                padding: "13px 18px",
+                lineHeight: 1,
+                cursor: "pointer",
+                textAlign: "left",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              something impressive for a dinner party
+            </button>
+            <button
+              onClick={() => handleChipClick("a weeknight dinner, nothing too fussy")}
+              style={{
+                width: "100%",
+                fontFamily: "Fraunces, serif",
+                fontStyle: "italic",
+                fontWeight: 400,
+                fontSize: 14,
+                color: "rgba(254,231,192,0.85)",
+                background: "rgba(254,231,192,0.06)",
+                border: "1px solid rgba(254,231,192,0.14)",
+                borderRadius: 12,
+                padding: "13px 18px",
+                lineHeight: 1,
+                cursor: "pointer",
+                textAlign: "left",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              a weeknight dinner, nothing too fussy
+            </button>
+            <button
+              onClick={() => handleChipClick("we've got a bottle open — build around it")}
+              style={{
+                width: "100%",
+                fontFamily: "Fraunces, serif",
+                fontStyle: "italic",
+                fontWeight: 400,
+                fontSize: 14,
+                color: "rgba(254,231,192,0.85)",
+                background: "rgba(254,231,192,0.06)",
+                border: "1px solid rgba(254,231,192,0.14)",
+                borderRadius: 12,
+                padding: "13px 18px",
+                lineHeight: 1,
+                cursor: "pointer",
+                textAlign: "left",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              we've got a bottle open — build around it
+            </button>
+
+            {/* Divider - text only, no lines */}
+            <div style={{
+              fontFamily: "Inter, sans-serif",
+              fontSize: 11,
+              fontWeight: 500,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              color: "rgba(254,231,192,0.28)",
+              textAlign: "center",
+              padding: "2px 0",
+            }}>
+              or just type
+            </div>
           </div>
-          <div style={{ width: 32, height: 1, background: "#85B7EB" }} />
-        </div>
+        </>
       ) : (
-        <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "48px 14px 10px", display: "flex", flexDirection: "column", gap: 16 }}>
+        <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "48px 14px 10px", display: "flex", flexDirection: "column", gap: 16, position: "relative", zIndex: 1 }}>
           {messages.map((m) => (
             <ChatBubble key={m.id} role={m.role} text={m.text} />
           ))}
@@ -1465,48 +1792,70 @@ Use this format every time a recipe is created or updated. Never deviate from it
           <div
             onClick={() => setExpanded((v) => !v)}
             style={{
-              background: "#E6F1FB",
-              borderTop: "0.5px solid #85B7EB",
-              padding: "8px 14px",
+              background: "#182800",
+              padding: "10px 16px",
               display: "flex",
               alignItems: "center",
               gap: 10,
               cursor: "pointer",
               opacity: !miniBarVisible ? 0 : (generatingRecipe && recipeRevealed ? 0.5 : 1),
               transition: generatingRecipe ? "opacity 300ms ease" : "opacity 600ms ease",
-              boxShadow: recipePulse ? "0 0 0 rgba(133, 183, 235, 0)" : "0 0 0 rgba(133, 183, 235, 0)",
+              boxShadow: recipePulse ? "0 0 0 rgba(42, 78, 90, 0)" : "0 0 0 rgba(42, 78, 90, 0)",
               animation: recipePulse ? "tipsyRecipePulse 800ms ease-out" : "none",
             }}
           >
-            <div style={{ width: 32, height: 32, borderRadius: 6, background: "linear-gradient(135deg, #185FA5, #85B7EB)", flexShrink: 0 }} />
+            <img
+              src={watermarkSquare}
+              alt=""
+              style={{
+                width: 28,
+                height: 28,
+                flexShrink: 0,
+                display: "block",
+                border: "none",
+                background: "none",
+              }}
+            />
             <div style={{
               flex: 1, overflow: "hidden",
               opacity: miniTitleVisible ? 1 : 0,
               transition: "opacity 150ms ease",
             }}>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, textTransform: "uppercase", letterSpacing: "0.1em", color: "#185FA5", opacity: 0.7 }}>
-                In progress
+              <div style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: 10,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "rgba(254,231,192,0.5)",
+                fontWeight: 500,
+              }}>
+                Recipe ready
               </div>
               <div style={{
-                fontFamily: "'Playfair Display', serif", fontSize: 12, color: "#042C53",
-                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                fontFamily: "Inter, sans-serif",
+                fontSize: 14,
+                color: "#FEE7C0",
+                fontWeight: 500,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
               }}>
                 {currentRecipe.title}
               </div>
             </div>
-            <div style={{ color: "#185FA5", fontSize: 14, flexShrink: 0 }}>{expanded ? "⌄" : "⌃"}</div>
+            <div style={{ color: "#FEE7C0", fontSize: 14, flexShrink: 0, opacity: 0.6 }}>{expanded ? "⌄" : "⌃"}</div>
           </div>
         )}
         <style>{`
           @keyframes tipsyRecipePulse {
             0% {
-              box-shadow: 0 0 0 0 rgba(133, 183, 235, 0.4);
+              box-shadow: 0 0 0 0 rgba(42, 78, 90, 0.4);
             }
             50% {
-              box-shadow: 0 0 20px 8px rgba(133, 183, 235, 0.3);
+              box-shadow: 0 0 20px 8px rgba(42, 78, 90, 0.3);
             }
             100% {
-              box-shadow: 0 0 0 0 rgba(133, 183, 235, 0);
+              box-shadow: 0 0 0 0 rgba(42, 78, 90, 0);
             }
           }
         `}</style>
@@ -1581,17 +1930,17 @@ function ChatBubble({ role, text }: { role: "user" | "ai"; text: string }) {
   };
 
   if (isUser) {
-    // User messages keep bubble styling
+    // User messages - cream bubble with green text
     return (
       <div
         style={{
           alignSelf: "flex-end",
-          background: "#042C53",
-          color: "#EEF4F8",
-          fontFamily: "'DM Sans', sans-serif",
-          fontSize: 13,
-          padding: "10px 14px",
-          borderRadius: "14px 14px 3px 14px",
+          background: "#FEE7C0",
+          color: "#233C00",
+          fontFamily: "Inter, sans-serif",
+          fontSize: 15,
+          padding: "12px 16px",
+          borderRadius: "18px 18px 4px 18px",
           maxWidth: "78%",
           lineHeight: 1.5,
           animation: "tipsyChatIn 300ms ease",
@@ -1603,16 +1952,19 @@ function ChatBubble({ role, text }: { role: "user" | "ai"; text: string }) {
     );
   }
 
-  // AI messages - no bubble, plain text with markdown
+  // AI messages - no bubble, Fraunces italic cream text on green
   return (
     <div
       style={{
         alignSelf: "flex-start",
-        color: "#042C53",
-        fontFamily: "'DM Sans', sans-serif",
-        fontSize: 13,
+        color: "#FEE7C0",
+        fontFamily: "Fraunces, serif",
+        fontStyle: "italic",
+        fontWeight: 300,
+        fontSize: 16,
         maxWidth: "82%",
         lineHeight: 1.5,
+        padding: "4px 0",
         animation: "tipsyChatIn 300ms ease",
       }}
     >
@@ -1626,19 +1978,19 @@ function TypingBubble() {
   return (
     <div style={{
       alignSelf: "flex-start",
-      background: "#D8E9F7",
-      padding: "12px 14px",
-      borderRadius: "14px 14px 14px 3px",
       display: "flex",
       gap: 4,
       alignItems: "center",
+      padding: "4px 0",
     }}>
       {[0, 1, 2].map((i) => (
         <span
           key={i}
           style={{
-            width: 5, height: 5, borderRadius: "50%",
-            background: "#185FA5",
+            width: 5,
+            height: 5,
+            borderRadius: "50%",
+            background: "rgba(254,231,192,0.5)",
             display: "inline-block",
             animation: `tipsyDot 1.2s ease-in-out ${i * 0.2}s infinite`,
           }}
@@ -1662,8 +2014,10 @@ function RecipeGeneratingIndicator() {
         <span
           key={i}
           style={{
-            width: 4, height: 4, borderRadius: "50%",
-            background: "#85B7EB",
+            width: 4,
+            height: 4,
+            borderRadius: "50%",
+            background: "rgba(254,231,192,0.5)",
             display: "inline-block",
             animation: `tipsyRecipeDot 1.4s ease-in-out ${i * 0.25}s infinite`,
           }}
@@ -1690,53 +2044,72 @@ function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
   }, [value]);
 
   return (
-    <div style={{ padding: "10px 14px 16px", flexShrink: 0, background: "#EEF4F8", display: "flex", alignItems: "flex-end", gap: 8 }}>
-      <textarea
-        ref={textareaRef}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            onSend();
+    <div style={{ padding: "10px 16px 14px", flexShrink: 0, background: "#182800", position: "relative", zIndex: 1, margin: 0, border: "none", boxShadow: "none" }}>
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        background: "rgba(254,231,192,0.07)",
+        border: "1px solid rgba(254,231,192,0.12)",
+        borderRadius: 26,
+        padding: "10px 16px",
+        gap: 10,
+      }}>
+        <textarea
+          ref={textareaRef}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              onSend();
+            }
+          }}
+          placeholder={placeholder}
+          rows={1}
+          className="tipsy-input"
+          style={{
+            flex: 1,
+            background: "transparent",
+            border: "none",
+            outline: "none",
+            fontFamily: "Inter, sans-serif",
+            fontSize: 15,
+            color: "#FEE7C0",
+            resize: "none",
+            overflow: "hidden",
+            maxHeight: "1.4em",
+            lineHeight: 1.4,
+            padding: 0,
+          }}
+        />
+        <style>{`
+          .tipsy-input::placeholder {
+            color: rgba(254,231,192,0.3);
           }
-        }}
-        placeholder={placeholder}
-        rows={1}
-        style={{
-          flex: 1,
-          background: "#fff",
-          border: "0.5px solid #85B7EB",
-          borderRadius: 16,
-          padding: "9px 14px",
-          outline: "none",
-          fontFamily: "'DM Sans', sans-serif",
-          fontSize: 13,
-          color: "#042C53",
-          resize: "none",
-          overflowY: "auto",
-          maxHeight: 100,
-          lineHeight: 1.5,
-        }}
-      />
-      <button
-        onClick={onSend}
-        disabled={disabled}
-        aria-label="Send"
-        style={{
-          width: 32, height: 32, borderRadius: "50%",
-          background: "#0C447C", border: "none",
-          cursor: disabled ? "default" : "pointer",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          color: "#fff", flexShrink: 0,
-          opacity: disabled ? 0.5 : 1,
-        }}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M5 12h14" />
-          <path d="M13 5l7 7-7 7" />
-        </svg>
-      </button>
+        `}</style>
+        <button
+          onClick={onSend}
+          disabled={disabled}
+          aria-label="Send"
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: "50%",
+            background: "rgba(254,231,192,0.1)",
+            border: "none",
+            cursor: disabled ? "default" : "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+            opacity: disabled ? 0.5 : 1,
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="rgba(254,231,192,0.4)" stroke="none">
+            <path d="M2 12L22 2L15 22L11 13L2 12Z" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }
@@ -1794,7 +2167,7 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
           right: 0,
           bottom: 0,
           height: shown ? "100%" : 0,
-          background: "#E6F1FB",
+          background: "#2E4E08",
           transition: "height 350ms cubic-bezier(0.22, 1, 0.36, 1)",
           display: "flex", flexDirection: "column",
           overflow: "hidden",
@@ -1804,16 +2177,19 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
         opacity: contentVisible ? 1 : 0,
         transition: "opacity 200ms ease",
         display: "flex", flexDirection: "column", height: "100%",
-        background: "#EEF4F8",
+        background: "#233C00",
       }}>
       {/* Sheet header */}
-      <div style={{ padding: "20px 16px 12px", flexShrink: 0, display: "grid", gridTemplateColumns: "32px 1fr 32px", alignItems: "center", background: "#EEF4F8" }}>
+      <div style={{ padding: "20px 16px 12px", flexShrink: 0, display: "grid", gridTemplateColumns: "32px 1fr 32px", alignItems: "center", background: "#233C00" }}>
         <span />
         <div style={{
           textAlign: "center",
-          fontFamily: "'DM Sans', sans-serif", fontSize: 10,
-          textTransform: "uppercase", letterSpacing: "0.1em",
-          color: "#185FA5", opacity: 0.7,
+          fontFamily: "Inter, sans-serif",
+          fontSize: 10,
+          textTransform: "uppercase",
+          letterSpacing: "0.1em",
+          color: "rgba(254,231,192,0.5)",
+          fontWeight: 500,
         }}>
           Recipe Preview
         </div>
@@ -1823,22 +2199,44 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
       {/* Scrollable content */}
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto" }}>
         {/* Hero section - scrolls normally */}
-        <div style={{ height: 120, background: "linear-gradient(135deg, #042C53 0%, #185FA5 50%, #85B7EB 100%)" }} />
+        <div style={{ height: 120, background: "linear-gradient(180deg, #3a6010 0%, #2E4E08 100%)" }} />
         <div style={{ padding: "16px 20px 14px" }}>
-          <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, textTransform: "uppercase", letterSpacing: "0.14em", color: "#185FA5", marginBottom: 6 }}>
-            Seafood
+          <div style={{
+            fontFamily: "Inter, sans-serif",
+            fontSize: 9,
+            textTransform: "uppercase",
+            letterSpacing: "0.14em",
+            color: "rgba(254,231,192,0.5)",
+            marginBottom: 6,
+            fontWeight: 500,
+          }}>
+            Recipe
           </div>
-          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, color: "#042C53", lineHeight: 1.3, marginBottom: 8 }}>
+          <div style={{
+            fontFamily: "Lazydog, sans-serif",
+            fontSize: 20,
+            color: "#FEE7C0",
+            lineHeight: 1.3,
+            marginBottom: 8,
+            textTransform: "uppercase",
+          }}>
             {recipe.title}
           </div>
-          <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#185FA5", opacity: 0.8, lineHeight: 1.5 }}>
+          <div style={{
+            fontFamily: "Fraunces, serif",
+            fontStyle: "italic",
+            fontWeight: 300,
+            fontSize: 14,
+            color: "rgba(254,231,192,0.75)",
+            lineHeight: 1.5,
+          }}>
             {recipe.description}
           </div>
         </div>
-        <div style={{ borderTop: "0.5px solid #85B7EB" }} />
+        <div style={{ borderTop: "1px solid rgba(254,231,192,0.12)" }} />
 
         {/* Sticky Tabs - stick to top when scrolled */}
-        <div style={{ display: "flex", position: "sticky", top: 0, zIndex: 10, background: "#EEF4F8" }}>
+        <div style={{ display: "flex", position: "sticky", top: 0, zIndex: 10, background: "#233C00" }}>
           {(["ingredients", "steps"] as const).map((t) => {
             const active = tab === t;
             return (
@@ -1848,14 +2246,15 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
                 style={{
                   flex: 1,
                   padding: "11px 0",
-                  background: active ? "#0C447C" : "#E6F1FB",
-                  color: active ? "#EEF4F8" : "#185FA5",
+                  background: active ? "#2E4E08" : "rgba(254,231,192,0.06)",
+                  color: active ? "#FEE7C0" : "rgba(254,231,192,0.5)",
                   border: "none",
                   cursor: "pointer",
-                  fontFamily: "'DM Sans', sans-serif",
+                  fontFamily: "Inter, sans-serif",
                   fontSize: 11,
                   textTransform: "uppercase",
                   letterSpacing: "0.1em",
+                  fontWeight: 500,
                 }}
               >
                 {t}
@@ -1868,24 +2267,49 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
         <div style={{ display: tab === "ingredients" ? "block" : "none" }}>
           {recipe.ingredients.map((item, i) => (
             <div key={i} style={{
-              display: "flex", justifyContent: "space-between", alignItems: "center",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
               padding: "10px 20px",
-              borderBottom: "0.5px solid #85B7EB",
+              borderBottom: "1px solid rgba(254,231,192,0.08)",
             }}>
-              <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#042C53" }}>{item.name}</span>
-              <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#185FA5" }}>{item.qty}</span>
+              <span style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: 13,
+                color: "#FEE7C0",
+              }}>{item.name}</span>
+              <span style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: 13,
+                color: "rgba(254,231,192,0.6)",
+              }}>{item.qty}</span>
             </div>
           ))}
         </div>
         <div style={{ display: tab === "steps" ? "block" : "none" }}>
           {recipe.steps.map((s, i) => (
             <div key={i} style={{
-              display: "flex", gap: 14, alignItems: "flex-start",
+              display: "flex",
+              gap: 14,
+              alignItems: "flex-start",
               padding: "12px 20px",
-              borderBottom: "0.5px solid #85B7EB",
+              borderBottom: "1px solid rgba(254,231,192,0.08)",
             }}>
-              <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#85B7EB", lineHeight: 1, flexShrink: 0, minWidth: 18 }}>{i + 1}</span>
-              <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#042C53", lineHeight: 1.6 }}>{s}</span>
+              <span style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: 20,
+                color: "rgba(254,231,192,0.4)",
+                lineHeight: 1,
+                flexShrink: 0,
+                minWidth: 18,
+                fontWeight: 500,
+              }}>{i + 1}</span>
+              <span style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: 13,
+                color: "#FEE7C0",
+                lineHeight: 1.6,
+              }}>{s}</span>
             </div>
           ))}
         </div>
@@ -1895,17 +2319,18 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
           style={{
             display: "block",
             width: "calc(100% - 32px)",
-            margin: "12px 16px",
+            margin: "16px 16px",
             padding: "12px 0",
-            background: "#0C447C",
-            color: "#EEF4F8",
+            background: "#FEE7C0",
+            color: "#233C00",
             border: "none",
             borderRadius: 100,
-            fontFamily: "'DM Sans', sans-serif",
-            fontSize: 11,
+            fontFamily: "Inter, sans-serif",
+            fontSize: 12,
             textTransform: "uppercase",
             letterSpacing: "0.1em",
             cursor: "pointer",
+            fontWeight: 500,
           }}
         >
           Save
