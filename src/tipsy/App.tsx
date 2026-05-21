@@ -965,125 +965,260 @@ function RecipeCard({
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       <div style={{ flex: 1, overflowY: "auto" }}>
-        {/* Photo - scrolls away */}
-        <div style={{
-          width: "100%", height: 200,
-          background: "linear-gradient(160deg, #C8DFF0 0%, #A8C5DC 100%)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          position: "relative",
-        }}>
-          <button
-            onClick={back}
-            aria-label="Back"
-            style={{
-              position: "absolute", top: 16, left: 16, width: 32, height: 32,
-              background: "rgba(238,244,248,0.85)", borderRadius: "50%",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              cursor: "pointer", border: "none", color: "#042C53",
-            }}
-          >
-            <BackArrow />
-          </button>
-          {editable && (
+        {/* Hero */}
+        <div style={{ padding: "4px 24px 20px", flexShrink: 0 }}>
+          {/* Top row - back and actions */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
             <button
-              onClick={() => push({ name: "addown", editRecipe: recipe, editCategoryLabel: categoryLabel })}
-              aria-label="Edit"
-              style={{
-                position: "absolute", top: 16, right: 16, width: 32, height: 32,
-                background: "rgba(238,244,248,0.85)", borderRadius: "50%",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                cursor: "pointer", border: "none", color: "#042C53",
-              }}
+              onClick={back}
+              aria-label="Back"
+              style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 20h9" />
-                <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.6)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="15 18 9 12 15 6" />
               </svg>
             </button>
-          )}
-          <p style={{ fontSize: 11, letterSpacing: "0.12em", color: "#185FA5", textTransform: "uppercase", opacity: 0.7, margin: 0 }}>
-            photo coming soon
-          </p>
-        </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+              <button
+                aria-label="Share"
+                style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="18" cy="5" r="3" />
+                  <circle cx="6" cy="12" r="3" />
+                  <circle cx="18" cy="19" r="3" />
+                  <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                  <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+                </svg>
+              </button>
+              {editable && (
+                <button
+                  onClick={() => push({ name: "addown", editRecipe: recipe, editCategoryLabel: categoryLabel })}
+                  aria-label="Edit"
+                  style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                    <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
 
-        {/* Title and description - scroll away */}
-        <div style={{ padding: "20px 24px 16px" }}>
-          <div style={{ fontSize: 11, letterSpacing: "0.14em", color: "#185FA5", textTransform: "uppercase", marginBottom: 6 }}>
+          {/* Category label */}
+          <div style={{
+            fontFamily: "Inter, sans-serif",
+            fontSize: 11,
+            fontWeight: 500,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            color: "rgba(35,60,0,0.35)",
+            marginBottom: 6,
+          }}>
             {recipe.category}
           </div>
-          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 24, fontWeight: 400, color: "#042C53", marginBottom: 8, lineHeight: 1.2 }}>
+
+          {/* Title */}
+          <div style={{
+            fontFamily: "Lazydog, sans-serif",
+            fontStyle: "normal",
+            fontSize: 28,
+            fontWeight: 700,
+            letterSpacing: "0.04em",
+            textTransform: "uppercase",
+            color: "#233C00",
+            lineHeight: 1.1,
+            marginBottom: 8,
+          }}>
             {recipe.title}
           </div>
-          <div style={{ fontSize: 13, color: "#185FA5", lineHeight: 1.5 }}>
+
+          {/* Description */}
+          <div style={{
+            fontFamily: "Fraunces, serif",
+            fontStyle: "italic",
+            fontWeight: 300,
+            fontSize: 15,
+            color: "rgba(35,60,0,0.55)",
+            lineHeight: 1.5,
+            marginBottom: 18,
+          }}>
             {recipe.description}
           </div>
+
+          {/* Meta row */}
           {recipe.yield && (
-            <div style={{ fontSize: 11, letterSpacing: "0.08em", color: "#85B7EB", marginTop: 10 }}>
-              {recipe.yield}
+            <div style={{ display: "flex", gap: 24 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <div style={{
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 10,
+                  fontWeight: 500,
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                  color: "rgba(35,60,0,0.3)",
+                }}>
+                  Yield
+                </div>
+                <div style={{
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 14,
+                  fontWeight: 500,
+                  color: "#233C00",
+                }}>
+                  {recipe.yield}
+                </div>
+              </div>
             </div>
           )}
         </div>
 
-        {/* Sticky tab bar */}
-        <div style={{ position: "sticky", top: 0, zIndex: 10, display: "flex", borderBottom: "0.5px solid #85B7EB", background: "#EEF4F8" }}>
-          <TabButton active={tab === "ingredients"} onClick={() => setTab("ingredients")}>Ingredients</TabButton>
-          <TabButton active={tab === "steps"} onClick={() => setTab("steps")} withBorder>Steps</TabButton>
+        {/* Tabs - left-aligned with underlines */}
+        <div style={{
+          display: "flex",
+          padding: "20px 24px 0",
+          flexShrink: 0,
+          gap: 28,
+          borderBottom: "1px solid rgba(35,60,0,0.08)",
+          position: "sticky",
+          top: 0,
+          zIndex: 10,
+          background: "#FAF7F2",
+        }}>
+          <button
+            onClick={() => setTab("ingredients")}
+            style={{
+              paddingBottom: 12,
+              fontFamily: "Inter, sans-serif",
+              fontSize: 11,
+              fontWeight: 500,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              color: tab === "ingredients" ? "#233C00" : "rgba(35,60,0,0.3)",
+              position: "relative",
+              cursor: "pointer",
+              background: "transparent",
+              border: "none",
+            }}
+          >
+            Ingredients
+            {tab === "ingredients" && (
+              <div style={{
+                position: "absolute",
+                bottom: -1,
+                left: 0,
+                right: 0,
+                height: 1.5,
+                background: "#233C00",
+                borderRadius: 2,
+              }} />
+            )}
+          </button>
+          <button
+            onClick={() => setTab("steps")}
+            style={{
+              paddingBottom: 12,
+              fontFamily: "Inter, sans-serif",
+              fontSize: 11,
+              fontWeight: 500,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              color: tab === "steps" ? "#233C00" : "rgba(35,60,0,0.3)",
+              position: "relative",
+              cursor: "pointer",
+              background: "transparent",
+              border: "none",
+            }}
+          >
+            Steps
+            {tab === "steps" && (
+              <div style={{
+                position: "absolute",
+                bottom: -1,
+                left: 0,
+                right: 0,
+                height: 1.5,
+                background: "#233C00",
+                borderRadius: 2,
+              }} />
+            )}
+          </button>
         </div>
 
-        {/* Tab content - both rendered, only one visible */}
-        <div style={{ padding: "20px 24px" }}>
+        {/* Tab content */}
+        <div style={{ paddingTop: 4 }}>
           <div style={{ display: tab === "ingredients" ? "block" : "none" }}>
             {ingredients.map((i, idx) => (
               <div key={idx} style={{
-                display: "flex", justifyContent: "space-between", alignItems: "baseline",
-                borderBottom: idx === ingredients.length - 1 ? "none" : "0.5px solid #B5D4F4",
-                paddingBottom: 10, marginBottom: idx === ingredients.length - 1 ? 0 : 12,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "12px 24px",
+                borderBottom: idx === ingredients.length - 1 ? "none" : "1px dotted rgba(35,60,0,0.1)",
               }}>
-                <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 15, color: "#042C53" }}>{i.name}</span>
-                <span style={{ fontSize: 12, color: "#185FA5", whiteSpace: "nowrap", marginLeft: 12 }}>{i.qty}</span>
+                <span style={{
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 15,
+                  fontWeight: 400,
+                  color: "#233C00",
+                }}>{i.name}</span>
+                <span style={{
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 14,
+                  fontWeight: 500,
+                  fontVariantNumeric: "tabular-nums",
+                  color: "rgba(35,60,0,0.4)",
+                }}>{i.qty}</span>
               </div>
             ))}
             {ingredients.length === 0 && (
-              <p style={{ fontSize: 13, color: "#185FA5" }}>No ingredients yet.</p>
+              <p style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: 13,
+                color: "rgba(35,60,0,0.4)",
+                padding: "20px 24px",
+              }}>No ingredients yet.</p>
             )}
           </div>
-          <div style={{ display: tab === "steps" ? "block" : "none" }}>
+          <div style={{ display: tab === "steps" ? "block" : "none", padding: "20px 24px" }}>
             {steps.map((s, idx) => (
               <div key={idx} style={{
-                display: "flex", gap: 14, alignItems: "flex-start",
-                marginBottom: idx === steps.length - 1 ? 0 : 16,
+                display: "flex",
+                gap: 14,
+                alignItems: "flex-start",
+                marginBottom: idx === steps.length - 1 ? 0 : 20,
               }}>
-                <span style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, color: "#85B7EB", flexShrink: 0, lineHeight: 1.4 }}>
+                <span style={{
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 18,
+                  fontWeight: 500,
+                  color: "rgba(35,60,0,0.3)",
+                  flexShrink: 0,
+                  lineHeight: 1.4,
+                }}>
                   {idx + 1}
                 </span>
-                <p style={{ fontSize: 14, color: "#042C53", lineHeight: 1.6, margin: 0 }}>{s}</p>
+                <p style={{
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 14,
+                  color: "#233C00",
+                  lineHeight: 1.6,
+                  margin: 0,
+                }}>{s}</p>
               </div>
             ))}
             {steps.length === 0 && (
-              <p style={{ fontSize: 13, color: "#185FA5" }}>No steps yet.</p>
+              <p style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: 13,
+                color: "rgba(35,60,0,0.4)",
+              }}>No steps yet.</p>
             )}
           </div>
         </div>
       </div>
     </div>
-  );
-}
-
-function TabButton({ active, onClick, withBorder, children }: { active: boolean; onClick: () => void; withBorder?: boolean; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        flex: 1, padding: 12, border: "none", cursor: "pointer",
-        fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase",
-        fontWeight: 500, fontFamily: "'DM Sans', sans-serif",
-        background: active ? "#0C447C" : "#E6F1FB",
-        color: active ? "#E6F1FB" : "#185FA5",
-        borderLeft: withBorder ? "0.5px solid #85B7EB" : undefined,
-      }}
-    >
-      {children}
-    </button>
   );
 }
 
