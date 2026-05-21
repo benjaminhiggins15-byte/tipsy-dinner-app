@@ -56,7 +56,7 @@ const S: Record<string, CSSProperties> = {
   phone: {
     width: 320,
     height: 640,
-    background: "#233C00",
+    background: "#FAF7F2",
     borderRadius: 32,
     border: "none",
     overflow: "hidden",
@@ -484,7 +484,7 @@ export default function App() {
         {showOnboarding === null ? null : showOnboarding ? (
           <Onboarding onComplete={() => setShowOnboarding(false)} />
         ) : (
-        <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative", background: "#233C00" }}>
+        <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative", background: "#FAF7F2" }}>
           <ScreenStage
             current={current}
             transition={transition}
@@ -604,13 +604,13 @@ function ScreenStage({
     height: "100%",
     display: "flex",
     flexDirection: "column",
-    background: "#233C00",
+    background: "#FAF7F2",
     willChange: "transform",
   };
 
   if (!transition) {
     return (
-      <div style={{ ...layerBase, position: "relative", height: "100%", paddingBottom: 64, background: "#182800" }}>
+      <div style={{ ...layerBase, position: "relative", height: "100%", paddingBottom: 64, background: "#FAF7F2" }}>
         <div style={{ ...layerBase, position: "relative", height: "100%" }}>
           {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe)}
         </div>
@@ -648,7 +648,7 @@ function ScreenStage({
   const toIsTabRoot = transition.toIsTabRoot ?? isTabRoot;
 
   return (
-    <div style={{ position: "relative", height: "100%", background: "#182800" }}>
+    <div style={{ position: "relative", height: "100%", background: "#FAF7F2" }}>
       <div style={{ ...layerBase, transform: fromTransform, transition: transitionStyle, zIndex: fromZ, pointerEvents: "none", paddingBottom: 64 }}>
         {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe)}
       </div>
@@ -675,7 +675,8 @@ function BottomTabBar({ activeTab, onTabClick }: { activeTab: TabId; onTabClick:
         bottom: 0,
         left: 0,
         right: 0,
-        background: "#182800",
+        background: "#FAF7F2",
+        borderTop: "1px solid rgba(35,60,0,0.08)",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-around",
@@ -700,7 +701,7 @@ function BottomTabBar({ activeTab, onTabClick }: { activeTab: TabId; onTabClick:
               border: "none",
               cursor: "pointer",
               padding: "6px 0 6px",
-              color: isActive ? "#FEE7C0" : "rgba(254,231,192,0.25)",
+              color: isActive ? "#233C00" : "rgba(35,60,0,0.25)",
               position: "relative",
             }}
           >
@@ -724,7 +725,7 @@ function BottomTabBar({ activeTab, onTabClick }: { activeTab: TabId; onTabClick:
                   width: 4,
                   height: 4,
                   borderRadius: "50%",
-                  background: "#FEE7C0",
+                  background: "#233C00",
                 }}
               />
             )}
@@ -1413,7 +1414,7 @@ Use this format every time a recipe is created or updated. Never deviate from it
   };
 
   const isEmpty = messages.length === 0;
-  const placeholder = isEmpty ? "pour a glass — what are we cooking?" : "";
+  const placeholder = isEmpty ? "pour a glass — what are we cooking?" : "ask anything…";
 
   const handleChipClick = (text: string) => {
     if (typing) return;
@@ -1610,21 +1611,9 @@ Use this format every time a recipe is created or updated. Never deviate from it
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative", background: "#233C00" }}>
-      {/* Gradient background */}
-      <div style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        height: 420,
-        background: "linear-gradient(180deg, #3a6010 0%, #2E4E08 35%, #233C00 100%)",
-        zIndex: 0,
-        pointerEvents: "none",
-      }} />
-
-      {/* Header - Logo and Write your own button (only when empty) */}
-      {!expanded && isEmpty && (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative", background: "#FAF7F2" }}>
+      {/* Header - Logo (and Write your own button when empty) */}
+      {!expanded && (
         <div style={{ height: 52, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px", flexShrink: 0, position: "relative", zIndex: 1 }}>
           <div style={{ background: "transparent", border: "none", padding: 0, display: "flex", alignItems: "center" }}>
             <img
@@ -1639,24 +1628,26 @@ Use this format every time a recipe is created or updated. Never deviate from it
               }}
             />
           </div>
-          <button
-            onClick={() => push({ name: "addown" })}
-            style={{
-              fontSize: 11,
-              fontWeight: 500,
-              letterSpacing: "0.06em",
-              textTransform: "uppercase",
-              color: "rgba(254,231,192,0.6)",
-              border: "1px solid rgba(254,231,192,0.2)",
-              borderRadius: 20,
-              padding: "7px 14px",
-              background: "transparent",
-              cursor: "pointer",
-              fontFamily: "Inter, sans-serif",
-            }}
-          >
-            Write your own
-          </button>
+          {isEmpty && (
+            <button
+              onClick={() => push({ name: "addown" })}
+              style={{
+                fontSize: 11,
+                fontWeight: 500,
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                color: "rgba(35,60,0,0.6)",
+                border: "1px solid rgba(35,60,0,0.2)",
+                borderRadius: 20,
+                padding: "7px 14px",
+                background: "transparent",
+                cursor: "pointer",
+                fontFamily: "Inter, sans-serif",
+              }}
+            >
+              Write your own
+            </button>
+          )}
         </div>
       )}
 
@@ -1670,7 +1661,7 @@ Use this format every time a recipe is created or updated. Never deviate from it
               fontStyle: "normal",
               fontSize: 32,
               fontWeight: 400,
-              color: "#FEE7C0",
+              color: "#233C00",
               textTransform: "uppercase",
               lineHeight: 1.1,
               textAlign: "center",
@@ -1689,9 +1680,9 @@ Use this format every time a recipe is created or updated. Never deviate from it
                 fontStyle: "italic",
                 fontWeight: 400,
                 fontSize: 14,
-                color: "rgba(254,231,192,0.85)",
-                background: "rgba(254,231,192,0.06)",
-                border: "1px solid rgba(254,231,192,0.14)",
+                color: "rgba(35,60,0,0.75)",
+                background: "rgba(35,60,0,0.05)",
+                border: "1px solid rgba(35,60,0,0.1)",
                 borderRadius: 12,
                 padding: "13px 18px",
                 lineHeight: 1,
@@ -1712,9 +1703,9 @@ Use this format every time a recipe is created or updated. Never deviate from it
                 fontStyle: "italic",
                 fontWeight: 400,
                 fontSize: 14,
-                color: "rgba(254,231,192,0.85)",
-                background: "rgba(254,231,192,0.06)",
-                border: "1px solid rgba(254,231,192,0.14)",
+                color: "rgba(35,60,0,0.75)",
+                background: "rgba(35,60,0,0.05)",
+                border: "1px solid rgba(35,60,0,0.1)",
                 borderRadius: 12,
                 padding: "13px 18px",
                 lineHeight: 1,
@@ -1735,9 +1726,9 @@ Use this format every time a recipe is created or updated. Never deviate from it
                 fontStyle: "italic",
                 fontWeight: 400,
                 fontSize: 14,
-                color: "rgba(254,231,192,0.85)",
-                background: "rgba(254,231,192,0.06)",
-                border: "1px solid rgba(254,231,192,0.14)",
+                color: "rgba(35,60,0,0.75)",
+                background: "rgba(35,60,0,0.05)",
+                border: "1px solid rgba(35,60,0,0.1)",
                 borderRadius: 12,
                 padding: "13px 18px",
                 lineHeight: 1,
@@ -1758,7 +1749,7 @@ Use this format every time a recipe is created or updated. Never deviate from it
               fontWeight: 500,
               letterSpacing: "0.1em",
               textTransform: "uppercase",
-              color: "rgba(254,231,192,0.28)",
+              color: "rgba(35,60,0,0.25)",
               textAlign: "center",
               padding: "2px 0",
             }}>
@@ -1767,7 +1758,7 @@ Use this format every time a recipe is created or updated. Never deviate from it
           </div>
         </>
       ) : (
-        <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "48px 14px 10px", display: "flex", flexDirection: "column", gap: 16, position: "relative", zIndex: 1 }}>
+        <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "48px 20px 12px", display: "flex", flexDirection: "column", gap: 20, position: "relative", zIndex: 1 }}>
           {messages.map((m) => (
             <ChatBubble key={m.id} role={m.role} text={m.text} />
           ))}
@@ -1792,11 +1783,12 @@ Use this format every time a recipe is created or updated. Never deviate from it
           <div
             onClick={() => setExpanded((v) => !v)}
             style={{
-              background: "#182800",
-              padding: "10px 16px",
+              background: "#FAF7F2",
+              borderTop: "1px solid rgba(35,60,0,0.08)",
+              padding: "12px 20px",
               display: "flex",
               alignItems: "center",
-              gap: 10,
+              gap: 12,
               cursor: "pointer",
               opacity: !miniBarVisible ? 0 : (generatingRecipe && recipeRevealed ? 0.5 : 1),
               transition: generatingRecipe ? "opacity 300ms ease" : "opacity 600ms ease",
@@ -1808,8 +1800,8 @@ Use this format every time a recipe is created or updated. Never deviate from it
               src={watermarkSquare}
               alt=""
               style={{
-                width: 28,
-                height: 28,
+                width: 40,
+                height: 40,
                 flexShrink: 0,
                 display: "block",
                 border: "none",
@@ -1826,15 +1818,15 @@ Use this format every time a recipe is created or updated. Never deviate from it
                 fontSize: 10,
                 textTransform: "uppercase",
                 letterSpacing: "0.08em",
-                color: "rgba(254,231,192,0.5)",
+                color: "rgba(35,60,0,0.35)",
                 fontWeight: 500,
               }}>
                 Recipe ready
               </div>
               <div style={{
                 fontFamily: "Inter, sans-serif",
-                fontSize: 14,
-                color: "#FEE7C0",
+                fontSize: 15,
+                color: "#233C00",
                 fontWeight: 500,
                 whiteSpace: "nowrap",
                 overflow: "hidden",
@@ -1843,7 +1835,11 @@ Use this format every time a recipe is created or updated. Never deviate from it
                 {currentRecipe.title}
               </div>
             </div>
-            <div style={{ color: "#FEE7C0", fontSize: 14, flexShrink: 0, opacity: 0.6 }}>{expanded ? "⌄" : "⌃"}</div>
+            <div style={{ color: "rgba(35,60,0,0.35)", fontSize: 18, flexShrink: 0, lineHeight: 1 }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points={expanded ? "6 9 12 15 18 9" : "18 15 12 9 6 15"} />
+              </svg>
+            </div>
           </div>
         )}
         <style>{`
@@ -1930,19 +1926,19 @@ function ChatBubble({ role, text }: { role: "user" | "ai"; text: string }) {
   };
 
   if (isUser) {
-    // User messages - cream bubble with green text
+    // User messages - green bubble with cream text
     return (
       <div
         style={{
           alignSelf: "flex-end",
-          background: "#FEE7C0",
-          color: "#233C00",
+          background: "#233C00",
+          color: "#FEE7C0",
           fontFamily: "Inter, sans-serif",
           fontSize: 15,
-          padding: "12px 16px",
+          padding: "11px 16px",
           borderRadius: "18px 18px 4px 18px",
-          maxWidth: "78%",
-          lineHeight: 1.5,
+          maxWidth: "72%",
+          lineHeight: 1.4,
           animation: "tipsyChatIn 300ms ease",
         }}
       >
@@ -1952,18 +1948,18 @@ function ChatBubble({ role, text }: { role: "user" | "ai"; text: string }) {
     );
   }
 
-  // AI messages - no bubble, Fraunces italic cream text on green
+  // AI messages - no bubble, Fraunces italic green text on cream
   return (
     <div
       style={{
         alignSelf: "flex-start",
-        color: "#FEE7C0",
+        color: "#233C00",
         fontFamily: "Fraunces, serif",
         fontStyle: "italic",
         fontWeight: 300,
         fontSize: 16,
-        maxWidth: "82%",
-        lineHeight: 1.5,
+        maxWidth: "88%",
+        lineHeight: 1.55,
         padding: "4px 0",
         animation: "tipsyChatIn 300ms ease",
       }}
@@ -1990,7 +1986,7 @@ function TypingBubble() {
             width: 5,
             height: 5,
             borderRadius: "50%",
-            background: "rgba(254,231,192,0.5)",
+            background: "rgba(35,60,0,0.5)",
             display: "inline-block",
             animation: `tipsyDot 1.2s ease-in-out ${i * 0.2}s infinite`,
           }}
@@ -2017,7 +2013,7 @@ function RecipeGeneratingIndicator() {
             width: 4,
             height: 4,
             borderRadius: "50%",
-            background: "rgba(254,231,192,0.5)",
+            background: "rgba(35,60,0,0.5)",
             display: "inline-block",
             animation: `tipsyRecipeDot 1.4s ease-in-out ${i * 0.25}s infinite`,
           }}
@@ -2044,12 +2040,12 @@ function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
   }, [value]);
 
   return (
-    <div style={{ padding: "10px 16px 14px", flexShrink: 0, background: "#182800", position: "relative", zIndex: 1, margin: 0, border: "none", boxShadow: "none" }}>
+    <div style={{ padding: "8px 16px 12px", flexShrink: 0, background: "#FAF7F2", borderTop: "1px solid rgba(35,60,0,0.08)", position: "relative", zIndex: 1, margin: 0, boxShadow: "none" }}>
       <div style={{
         display: "flex",
         alignItems: "center",
-        background: "rgba(254,231,192,0.07)",
-        border: "1px solid rgba(254,231,192,0.12)",
+        background: "rgba(35,60,0,0.05)",
+        border: "1px solid rgba(35,60,0,0.1)",
         borderRadius: 26,
         padding: "10px 16px",
         gap: 10,
@@ -2074,7 +2070,7 @@ function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
             outline: "none",
             fontFamily: "Inter, sans-serif",
             fontSize: 15,
-            color: "#FEE7C0",
+            color: "#233C00",
             resize: "none",
             overflow: "hidden",
             maxHeight: "1.4em",
@@ -2084,7 +2080,7 @@ function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
         />
         <style>{`
           .tipsy-input::placeholder {
-            color: rgba(254,231,192,0.3);
+            color: rgba(35,60,0,0.3);
           }
         `}</style>
         <button
@@ -2095,7 +2091,7 @@ function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
             width: 32,
             height: 32,
             borderRadius: "50%",
-            background: "rgba(254,231,192,0.1)",
+            background: value.trim() ? "#1E3A42" : "rgba(35,60,0,0.08)",
             border: "none",
             cursor: disabled ? "default" : "pointer",
             display: "flex",
@@ -2105,7 +2101,7 @@ function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
             opacity: disabled ? 0.5 : 1,
           }}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="rgba(254,231,192,0.4)" stroke="none">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill={value.trim() ? "#FEE7C0" : "rgba(35,60,0,0.3)"} stroke="none">
             <path d="M2 12L22 2L15 22L11 13L2 12Z" />
           </svg>
         </button>
@@ -2167,7 +2163,7 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
           right: 0,
           bottom: 0,
           height: shown ? "100%" : 0,
-          background: "#2E4E08",
+          background: "#FAF7F2",
           transition: "height 350ms cubic-bezier(0.22, 1, 0.36, 1)",
           display: "flex", flexDirection: "column",
           overflow: "hidden",
@@ -2177,10 +2173,10 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
         opacity: contentVisible ? 1 : 0,
         transition: "opacity 200ms ease",
         display: "flex", flexDirection: "column", height: "100%",
-        background: "#233C00",
+        background: "#FAF7F2",
       }}>
       {/* Sheet header */}
-      <div style={{ padding: "20px 16px 12px", flexShrink: 0, display: "grid", gridTemplateColumns: "32px 1fr 32px", alignItems: "center", background: "#233C00" }}>
+      <div style={{ padding: "20px 16px 12px", flexShrink: 0, display: "grid", gridTemplateColumns: "32px 1fr 32px", alignItems: "center", background: "#FAF7F2" }}>
         <span />
         <div style={{
           textAlign: "center",
@@ -2188,7 +2184,7 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
           fontSize: 10,
           textTransform: "uppercase",
           letterSpacing: "0.1em",
-          color: "rgba(254,231,192,0.5)",
+          color: "rgba(35,60,0,0.5)",
           fontWeight: 500,
         }}>
           Recipe Preview
@@ -2199,14 +2195,14 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
       {/* Scrollable content */}
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto" }}>
         {/* Hero section - scrolls normally */}
-        <div style={{ height: 120, background: "linear-gradient(180deg, #3a6010 0%, #2E4E08 100%)" }} />
+        <div style={{ height: 120, background: "#FAF7F2" }} />
         <div style={{ padding: "16px 20px 14px" }}>
           <div style={{
             fontFamily: "Inter, sans-serif",
             fontSize: 9,
             textTransform: "uppercase",
             letterSpacing: "0.14em",
-            color: "rgba(254,231,192,0.5)",
+            color: "rgba(35,60,0,0.5)",
             marginBottom: 6,
             fontWeight: 500,
           }}>
@@ -2215,7 +2211,7 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
           <div style={{
             fontFamily: "Lazydog, sans-serif",
             fontSize: 20,
-            color: "#FEE7C0",
+            color: "#233C00",
             lineHeight: 1.3,
             marginBottom: 8,
             textTransform: "uppercase",
@@ -2227,16 +2223,16 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
             fontStyle: "italic",
             fontWeight: 300,
             fontSize: 14,
-            color: "rgba(254,231,192,0.75)",
+            color: "rgba(35,60,0,0.75)",
             lineHeight: 1.5,
           }}>
             {recipe.description}
           </div>
         </div>
-        <div style={{ borderTop: "1px solid rgba(254,231,192,0.12)" }} />
+        <div style={{ borderTop: "1px solid rgba(35,60,0,0.12)" }} />
 
         {/* Sticky Tabs - stick to top when scrolled */}
-        <div style={{ display: "flex", position: "sticky", top: 0, zIndex: 10, background: "#233C00" }}>
+        <div style={{ display: "flex", position: "sticky", top: 0, zIndex: 10, background: "#FAF7F2" }}>
           {(["ingredients", "steps"] as const).map((t) => {
             const active = tab === t;
             return (
@@ -2246,8 +2242,8 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
                 style={{
                   flex: 1,
                   padding: "11px 0",
-                  background: active ? "#2E4E08" : "rgba(254,231,192,0.06)",
-                  color: active ? "#FEE7C0" : "rgba(254,231,192,0.5)",
+                  background: active ? "rgba(35,60,0,0.08)" : "rgba(35,60,0,0.03)",
+                  color: active ? "#233C00" : "rgba(35,60,0,0.5)",
                   border: "none",
                   cursor: "pointer",
                   fontFamily: "Inter, sans-serif",
@@ -2271,17 +2267,17 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
               justifyContent: "space-between",
               alignItems: "center",
               padding: "10px 20px",
-              borderBottom: "1px solid rgba(254,231,192,0.08)",
+              borderBottom: "1px solid rgba(35,60,0,0.08)",
             }}>
               <span style={{
                 fontFamily: "Inter, sans-serif",
                 fontSize: 13,
-                color: "#FEE7C0",
+                color: "#233C00",
               }}>{item.name}</span>
               <span style={{
                 fontFamily: "Inter, sans-serif",
                 fontSize: 13,
-                color: "rgba(254,231,192,0.6)",
+                color: "rgba(35,60,0,0.6)",
               }}>{item.qty}</span>
             </div>
           ))}
@@ -2293,12 +2289,12 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
               gap: 14,
               alignItems: "flex-start",
               padding: "12px 20px",
-              borderBottom: "1px solid rgba(254,231,192,0.08)",
+              borderBottom: "1px solid rgba(35,60,0,0.08)",
             }}>
               <span style={{
                 fontFamily: "Inter, sans-serif",
                 fontSize: 20,
-                color: "rgba(254,231,192,0.4)",
+                color: "rgba(35,60,0,0.4)",
                 lineHeight: 1,
                 flexShrink: 0,
                 minWidth: 18,
@@ -2307,7 +2303,7 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
               <span style={{
                 fontFamily: "Inter, sans-serif",
                 fontSize: 13,
-                color: "#FEE7C0",
+                color: "#233C00",
                 lineHeight: 1.6,
               }}>{s}</span>
             </div>

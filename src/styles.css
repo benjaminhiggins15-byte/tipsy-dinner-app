@@ -17,9 +17,9 @@ html, body, #root {
 }
 
 body {
-  background: #233C00;
+  background: #FAF7F2;
   font-family: 'Inter', system-ui, sans-serif;
-  color: #FEE7C0;
+  color: #233C00;
   -webkit-font-smoothing: antialiased;
 }
 
