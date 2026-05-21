@@ -739,84 +739,86 @@ function BottomTabBar({ activeTab, onTabClick }: { activeTab: TabId; onTabClick:
 /* ---------------- Categories ---------------- */
 function Categories({ push, back, isTabRoot }: { push: (s: Screen) => void; back: () => void; isTabRoot: boolean }) {
   const cats = getAllCategories();
+  const recipeCount = (catKey: string) => {
+    const recipes = getRecipesForCategory(catKey, "");
+    return recipes.length;
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ padding: "32px 24px 16px", flexShrink: 0, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
-        <div>
-          {!isTabRoot && (
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-              <button
-                onClick={back}
-                aria-label="Back"
-                style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "#185FA5", display: "flex", alignItems: "center" }}
-              >
-                <BackArrow />
-              </button>
-            </div>
-          )}
-          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 400, color: "#042C53", marginTop: isTabRoot ? 6 : 0 }}>
-            Recipes
-          </div>
+      {/* Header */}
+      <div style={{ height: 56, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px", flexShrink: 0 }}>
+        <div style={{ fontFamily: "Inter, sans-serif", fontSize: 13, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase", color: "#233C00" }}>
+          Recipes
         </div>
         <button
           onClick={() => push({ name: "newcategory" })}
+          aria-label="New category"
           style={{
-            display: "inline-flex", alignItems: "center", gap: 6,
-            padding: "6px 12px",
-            background: "#E6F1FB",
-            border: "0.5px solid #85B7EB",
-            borderRadius: 999,
-            color: "#185FA5",
-            fontFamily: "'DM Sans', sans-serif",
-            fontSize: 11,
-            letterSpacing: "0.08em",
+            width: 32, height: 32, borderRadius: "50%",
+            border: "1px solid rgba(35,60,0,0.25)",
+            background: "transparent",
+            display: "flex", alignItems: "center", justifyContent: "center",
             cursor: "pointer",
-            marginTop: 4,
           }}
         >
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 5v14" />
-            <path d="M5 12h14" />
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.7)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
-          New
         </button>
       </div>
-      <div style={{ flex: 1, overflowY: "auto", padding: "0 24px 24px" }}>
-        {cats.length === 0 ? (
-          <div style={{
-            display: "flex", alignItems: "center", justifyContent: "center",
-            padding: "48px 16px",
-          }}>
-            <p style={{
-              fontFamily: "'DM Sans', sans-serif", fontSize: 13,
-              color: "#185FA5", margin: 0, textAlign: "center",
-            }}>
-              Add your first category to get started.
-            </p>
+
+      {/* Grid */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "8px 20px 16px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gridAutoRows: "160px", gap: 12 }}>
+          {cats.map((c) => {
+            const count = recipeCount(c.key);
+            return (
+              <div
+                key={c.key}
+                onClick={() => push({ name: "recipes", categoryKey: c.key, categoryLabel: c.label })}
+                style={{
+                  background: "rgba(35,60,0,0.06)",
+                  border: "1px solid rgba(35,60,0,0.1)",
+                  borderRadius: 16,
+                  display: "flex", flexDirection: "column",
+                  justifyContent: "space-between",
+                  padding: 16,
+                  cursor: "pointer",
+                }}
+              >
+                <div style={{ fontSize: 28, lineHeight: 1 }}>
+                  <IconBook size={28} stroke={1.5} color="rgba(35,60,0,0.2)" />
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <div style={{ fontFamily: "Inter, sans-serif", fontSize: 11, fontWeight: 400, color: "rgba(35,60,0,0.4)" }}>
+                    {count} {count === 1 ? "recipe" : "recipes"}
+                  </div>
+                  <div style={{ fontFamily: "Lazydog, sans-serif", fontSize: 15, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#233C00", lineHeight: 1.15 }}>
+                    {c.label}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          {/* New category card */}
+          <div
+            onClick={() => push({ name: "newcategory" })}
+            style={{
+              background: "rgba(35,60,0,0.04)",
+              border: "1px dashed rgba(35,60,0,0.2)",
+              borderRadius: 16,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer",
+            }}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.25)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
           </div>
-        ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
-          {cats.map((c) => (
-            <div
-              key={c.key}
-              onClick={() => push({ name: "recipes", categoryKey: c.key, categoryLabel: c.label })}
-              style={{
-                position: "relative",
-                borderRadius: 16,
-                overflow: "hidden",
-                aspectRatio: "1 / 1",
-                cursor: "pointer",
-                background: c.gradient,
-              }}
-            >
-              <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(4,44,83,0.8) 0%, rgba(4,44,83,0.05) 55%)" }} />
-              <p style={{ position: "absolute", bottom: 14, left: 14, fontFamily: "'Playfair Display', serif", fontSize: 17, color: "#fff", margin: 0 }}>
-                {c.label}
-              </p>
-            </div>
-          ))}
         </div>
-        )}
       </div>
     </div>
   );
