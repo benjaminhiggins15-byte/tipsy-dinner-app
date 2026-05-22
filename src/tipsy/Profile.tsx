@@ -29,10 +29,10 @@ export function Avatar({ size = 28, onClick }: { size?: number; onClick?: () => 
       onClick={onClick}
       style={{
         width: size, height: size, borderRadius: "50%",
-        background: "#185FA5", color: "#FFFFFF",
+        background: "#233C00", color: "#FAF7F2",
         border: "none", cursor: onClick ? "pointer" : "default",
         display: "flex", alignItems: "center", justifyContent: "center",
-        fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 500,
+        fontFamily: "'Inter', sans-serif", fontSize: 12, fontWeight: 500,
         padding: 0, lineHeight: 1,
       }}
     >
@@ -42,33 +42,31 @@ export function Avatar({ size = 28, onClick }: { size?: number; onClick?: () => 
 }
 
 const sectionLabel: CSSProperties = {
-  fontFamily: "'DM Sans', sans-serif",
+  fontFamily: "'Inter', sans-serif",
   fontSize: 10,
   fontWeight: 500,
-  letterSpacing: "0.12em",
+  letterSpacing: "0.1em",
   textTransform: "uppercase",
-  color: "#185FA5",
-  opacity: 0.7,
-  background: "#E6F1FB",
+  color: "rgba(35,60,0,0.35)",
   padding: "16px 20px 8px",
 };
 
 const rowStyle: CSSProperties = {
   display: "flex", alignItems: "center", justifyContent: "space-between",
-  background: "#EEF4F8", padding: "14px 20px",
-  borderBottom: "0.5px solid #85B7EB",
+  background: "transparent", padding: "14px 20px",
+  borderBottom: "1px solid rgba(35,60,0,0.06)",
   cursor: "pointer", border: "none", width: "100%", textAlign: "left",
 };
 
 const titleStyle: CSSProperties = {
-  fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: "#042C53",
+  fontFamily: "'Inter', sans-serif", fontSize: 15, fontWeight: 500, color: "#233C00",
 };
 const subStyle: CSSProperties = {
-  fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#185FA5",
-  opacity: 0.7, marginTop: 2,
+  fontFamily: "'Inter', sans-serif", fontSize: 13, fontWeight: 400, color: "rgba(35,60,0,0.45)",
+  marginTop: 2,
 };
 const chevStyle: CSSProperties = {
-  color: "#85B7EB", fontSize: 18, fontFamily: "'DM Sans', sans-serif",
+  color: "rgba(35,60,0,0.2)", fontSize: 18, fontFamily: "'Inter', sans-serif",
 };
 
 function trim30(s: string) {
@@ -99,19 +97,19 @@ const FIELD_META: Record<FieldKey, { label: string; multiline: boolean }> = {
 
 export default function Profile({ back, openEdit, isTabRoot = false }: { back: () => void; openEdit: (k: FieldKey) => void; isTabRoot?: boolean }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#EEF4F8" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#FAF7F2" }}>
       <div style={{
         display: "grid", gridTemplateColumns: "44px 1fr 44px", alignItems: "center",
         padding: "20px 16px 14px",
       }}>
         {!isTabRoot ? (
-          <button onClick={back} style={{ background: "none", border: "none", cursor: "pointer", color: "#185FA5", fontSize: 22, padding: 0, textAlign: "left" }}>
+          <button onClick={back} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(35,60,0,0.6)", fontSize: 22, padding: 0, textAlign: "left" }}>
             ‹
           </button>
         ) : (
           <div />
         )}
-        <div style={{ textAlign: "center", fontFamily: "'Playfair Display', serif", fontSize: 20, color: "#042C53" }}>
+        <div style={{ textAlign: "center", fontFamily: "'Lazydog', sans-serif", fontSize: 20, textTransform: "uppercase", color: "#233C00" }}>
           Profile
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -141,25 +139,25 @@ export function ProfileEdit({ fieldKey, back }: { fieldKey: FieldKey; back: () =
   const [val, setVal] = useState(read(storageKey));
   const inputBase: CSSProperties = {
     width: "100%",
-    background: "#D8E9F7",
-    border: "1px solid #85B7EB",
+    background: "rgba(35,60,0,0.05)",
+    border: "1px solid rgba(35,60,0,0.12)",
     borderRadius: 12,
     padding: "12px 14px",
-    fontFamily: "'DM Sans', sans-serif",
+    fontFamily: "'Inter', sans-serif",
     fontSize: 13,
-    color: "#042C53",
+    color: "#233C00",
     outline: "none",
     lineHeight: 1.6,
     boxSizing: "border-box",
   };
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#EEF4F8" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#FAF7F2" }}>
       <div style={{
         display: "grid", gridTemplateColumns: "44px 1fr 44px", alignItems: "center",
         padding: "20px 16px 14px",
       }}>
-        <button onClick={back} style={{ background: "none", border: "none", cursor: "pointer", color: "#185FA5", fontSize: 22, padding: 0, textAlign: "left" }}>‹</button>
-        <div style={{ textAlign: "center", fontFamily: "'Playfair Display', serif", fontSize: 20, color: "#042C53" }}>
+        <button onClick={back} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(35,60,0,0.6)", fontSize: 22, padding: 0, textAlign: "left" }}>‹</button>
+        <div style={{ textAlign: "center", fontFamily: "'Lazydog', sans-serif", fontSize: 20, textTransform: "uppercase", color: "#233C00" }}>
           {meta.label}
         </div>
         <div />
@@ -186,9 +184,9 @@ export function ProfileEdit({ fieldKey, back }: { fieldKey: FieldKey; back: () =
             back();
           }}
           style={{
-            background: "#0C447C", color: "#EEF4F8", border: "none",
+            background: "#233C00", color: "#FAF7F2", border: "none",
             borderRadius: 100, padding: "14px 0",
-            fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 500,
+            fontFamily: "'Inter', sans-serif", fontSize: 12, fontWeight: 500,
             letterSpacing: "0.12em", textTransform: "uppercase",
             width: "100%", cursor: "pointer",
           }}

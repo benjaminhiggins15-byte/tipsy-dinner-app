@@ -3,23 +3,22 @@ import { useState, useEffect, type CSSProperties } from "react";
 type Props = { onComplete: () => void };
 
 const labelStyle: CSSProperties = {
-  fontFamily: "'DM Sans', sans-serif",
-  fontSize: 11,
+  fontFamily: "'Inter', sans-serif",
+  fontSize: 10,
   fontWeight: 500,
-  letterSpacing: "0.14em",
+  letterSpacing: "0.1em",
   textTransform: "uppercase",
-  color: "#185FA5",
-  opacity: 0.75,
+  color: "rgba(35,60,0,0.35)",
   textAlign: "center",
 };
 
 const btnStyle: CSSProperties = {
-  background: "#0C447C",
-  color: "#EEF4F8",
+  background: "#233C00",
+  color: "#FAF7F2",
   border: "none",
-  borderRadius: 100,
+  borderRadius: 14,
   padding: "14px 0",
-  fontFamily: "'DM Sans', sans-serif",
+  fontFamily: "'Inter', sans-serif",
   fontSize: 12,
   fontWeight: 500,
   letterSpacing: "0.12em",
@@ -36,26 +35,27 @@ function QuestionScreen({
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: "44px 24px 28px" }}>
       <div style={{ marginBottom: 14 }}>
-        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#042C53", lineHeight: 1.3, marginBottom: 8 }}>
+        <div style={{ fontFamily: "'Lazydog', sans-serif", fontSize: 22, color: "#233C00", textTransform: "uppercase", lineHeight: 1.3, marginBottom: 8 }}>
           {question}
         </div>
-        <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#185FA5", opacity: 0.75, fontStyle: "italic", lineHeight: 1.5 }}>
+        <div style={{ fontFamily: "'Fraunces', serif", fontSize: 12, color: "rgba(35,60,0,0.55)", fontWeight: 300, fontStyle: "italic", lineHeight: 1.5 }}>
           {hint}
         </div>
       </div>
       <textarea
         value={val}
         onChange={(e) => setVal(e.target.value)}
+        placeholder="Type here..."
         style={{
           height: "40%",
           width: "100%",
-          background: "#D8E9F7",
-          border: "1px solid #85B7EB",
+          background: "rgba(35,60,0,0.05)",
+          border: "1px solid rgba(35,60,0,0.1)",
           borderRadius: 12,
           padding: "12px 14px",
-          fontFamily: "'DM Sans', sans-serif",
+          fontFamily: "'Inter', sans-serif",
           fontSize: 13,
-          color: "#042C53",
+          color: "#233C00",
           resize: "none",
           lineHeight: 1.6,
           marginBottom: 16,
@@ -82,13 +82,12 @@ function Welcome({ onNext }: { onNext: () => void }) {
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const fieldLabel: CSSProperties = {
-    fontFamily: "'DM Sans', sans-serif",
+    fontFamily: "'Inter', sans-serif",
     fontSize: 10,
     fontWeight: 500,
-    letterSpacing: "0.12em",
+    letterSpacing: "0.1em",
     textTransform: "uppercase",
-    color: "#185FA5",
-    opacity: 0.75,
+    color: "rgba(35,60,0,0.35)",
     marginBottom: 6,
   };
   const fieldInput: CSSProperties = {
@@ -96,25 +95,25 @@ function Welcome({ onNext }: { onNext: () => void }) {
     height: 32,
     background: "transparent",
     border: "none",
-    borderBottom: "1px solid #85B7EB",
+    borderBottom: "1px solid rgba(35,60,0,0.2)",
     borderRadius: 0,
-    fontFamily: "'DM Sans', sans-serif",
+    fontFamily: "'Inter', sans-serif",
     fontSize: 14,
-    color: "#042C53",
+    color: "#233C00",
     outline: "none",
     padding: "0 2px",
   };
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: "56px 28px 28px" }}>
       <div style={{ textAlign: "center" }}>
-        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 34, color: "#042C53", lineHeight: 1.1 }}>
+        <div style={{ fontFamily: "'Lazydog', sans-serif", fontSize: 34, color: "#233C00", textTransform: "uppercase", lineHeight: 1.1 }}>
           Tipsy Dinner
         </div>
-        <div style={{ fontFamily: "'Playfair Display', serif", fontStyle: "italic", fontSize: 13, color: "#185FA5", marginTop: 6, opacity: 0.85 }}>
+        <div style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", fontWeight: 300, fontSize: 13, color: "rgba(35,60,0,0.55)", marginTop: 6 }}>
           your personal kitchen HQ
         </div>
       </div>
-      <div style={{ height: 0.5, background: "#85B7EB", opacity: 0.5, margin: "26px 0 22px" }} />
+      <div style={{ height: 1, background: "rgba(35,60,0,0.2)", margin: "26px 0 22px" }} />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 18 }}>
         <div>
           <div style={fieldLabel}>Name</div>
@@ -154,17 +153,17 @@ function Loader({ onDone }: { onDone: () => void }) {
     <div style={{ display: "flex", flexDirection: "column", height: "100%", alignItems: "center", justifyContent: "center", gap: 28, padding: 32 }}>
       <style>{`@keyframes tipsyPulse {0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(1.08);opacity:1}}`}</style>
       <div style={{
-        width: 96, height: 96, background: "#D8E9F7", borderRadius: "50%",
+        width: 96, height: 96, background: "rgba(35,60,0,0.1)", borderRadius: "50%",
         display: "flex", alignItems: "center", justifyContent: "center",
         animation: "tipsyPulse 2.4s ease-in-out infinite",
       }}>
-        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#185FA5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#233C00" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M6 13.5c-1.66 0-3-1.34-3-3 0-1.5 1.1-2.74 2.55-2.96A3.5 3.5 0 0 1 12 6a3.5 3.5 0 0 1 6.45 1.54A3 3 0 0 1 21 10.5c0 1.66-1.34 3-3 3" />
           <path d="M6 13.5h12V19a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2v-5.5z" />
           <path d="M9 17h.01M12 17h.01M15 17h.01" />
         </svg>
       </div>
-      <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: "#185FA5", letterSpacing: "0.06em", opacity: 0.85, textAlign: "center" }}>
+      <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: "rgba(35,60,0,0.45)", letterSpacing: "0.06em", textAlign: "center" }}>
         Setting up your kitchen...
       </div>
     </div>
@@ -174,6 +173,27 @@ function Loader({ onDone }: { onDone: () => void }) {
 export default function Onboarding({ onComplete }: Props) {
   const [step, setStep] = useState(1);
   const [transition, setTransition] = useState<{ from: number; to: number } | null>(null);
+
+  // Global styles for inputs and placeholders
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.textContent = `
+      input::placeholder, textarea::placeholder {
+        color: rgba(35,60,0,0.3);
+        opacity: 1;
+      }
+      input:focus {
+        border-bottom-color: #233C00 !important;
+      }
+      textarea:focus {
+        border-color: #233C00 !important;
+      }
+    `;
+    document.head.appendChild(style);
+    return () => {
+      document.head.removeChild(style);
+    };
+  }, []);
   const next = () => {
     setStep((s) => {
       const to = s + 1;
@@ -220,7 +240,7 @@ export default function Onboarding({ onComplete }: Props) {
 
   const layerBase: CSSProperties = {
     position: "absolute", inset: 0, height: "100%",
-    display: "flex", flexDirection: "column", background: "#EEF4F8",
+    display: "flex", flexDirection: "column", background: "#FAF7F2",
     willChange: "transform",
   };
 
@@ -233,7 +253,7 @@ export default function Onboarding({ onComplete }: Props) {
   const transitionStyle = phase === "start" ? "none" : `transform ${DURATION}ms ${EASE}`;
 
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", background: "#EEF4F8" }}>
+    <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", background: "#FAF7F2" }}>
       <div style={{ ...layerBase, transform: fromTransform, transition: transitionStyle, zIndex: 1, pointerEvents: "none" }}>
         {renderStep(transition.from)}
       </div>
