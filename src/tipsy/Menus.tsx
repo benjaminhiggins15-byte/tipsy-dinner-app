@@ -97,19 +97,7 @@ export default function Menus({ occasionId, occasionName, back, push }: Props) {
   const occasion = findOccasion(occasionId);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg, position: "relative" }}>
-      {/* Gradient background */}
-      <div style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        height: 420,
-        background: "linear-gradient(180deg, #3a6010 0%, #2E4E08 35%, #233C00 100%)",
-        zIndex: 0,
-        pointerEvents: "none",
-      }} />
-
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#FAF7F2" }}>
       {/* Header */}
       <div style={{
         padding: "16px 24px",
@@ -117,8 +105,6 @@ export default function Menus({ occasionId, occasionName, back, push }: Props) {
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        position: "relative",
-        zIndex: 1,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button
@@ -183,7 +169,7 @@ export default function Menus({ occasionId, occasionName, back, push }: Props) {
       </div>
 
       {/* Body - Menu Cards */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "8px 20px 16px", display: "flex", flexDirection: "column", gap: 12, position: "relative", zIndex: 1 }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: "8px 20px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
         {menus.length === 0 ? (
           <div style={{
             display: "flex",
