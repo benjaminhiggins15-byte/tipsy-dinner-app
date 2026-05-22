@@ -29,20 +29,40 @@ type Props = {
 };
 
 const C = {
-  bg: "#EEF4F8",
-  accent: "#E6F1FB",
-  border: "#85B7EB",
-  borderLight: "#C5DCF4",
-  navy: "#042C53",
-  midBlue: "#185FA5",
-  btnBlue: "#0C447C",
-  muted: "#5A7FA3",
-  white: "#ffffff",
-  stepMuted: "#B5D4F4",
+  bg: "#FAF7F2",
+  inputBg: "rgba(35,60,0,0.05)",
+  inputBorder: "rgba(35,60,0,0.1)",
+  inputBorderActive: "rgba(35,60,0,0.3)",
+  text: "#233C00",
+  textMuted: "rgba(35,60,0,0.35)",
+  textLight: "rgba(35,60,0,0.6)",
+  textVeryLight: "rgba(35,60,0,0.4)",
+  textRemove: "rgba(35,60,0,0.2)",
+  textDivider: "rgba(35,60,0,0.25)",
+  dividerLine: "rgba(35,60,0,0.08)",
+  progressTrack: "rgba(35,60,0,0.1)",
+  progressFill: "#233C00",
+  nextBtnBg: "#233C00",
+  nextBtnText: "#FAF7F2",
+  saveBtnBg: "#233C00",
+  saveBtnText: "#FAF7F2",
+  sheetHandle: "rgba(35,60,0,0.15)",
+  chipBg: "rgba(35,60,0,0.05)",
+  chipBorder: "rgba(35,60,0,0.1)",
+  chipSelected: "rgba(35,60,0,0.1)",
+  chipBorderSelected: "rgba(35,60,0,0.35)",
+  menuBtnBg: "rgba(35,60,0,0.04)",
+  menuBtnBorder: "rgba(35,60,0,0.1)",
+  menuBtnText: "rgba(35,60,0,0.7)",
+  stepNumBg: "rgba(35,60,0,0.06)",
+  stepNumBorder: "rgba(35,60,0,0.1)",
+  stepNumText: "rgba(35,60,0,0.4)",
+  error: "#c0392b",
 };
 
-const fontSerif = "'Playfair Display', serif";
-const fontSans = "'DM Sans', sans-serif";
+const fontSerif = "Fraunces, serif";
+const fontSans = "Inter, sans-serif";
+const fontDisplay = "Lazydog, sans-serif";
 
 // Tray category gradients (per reference)
 const trayGradients: Record<string, string> = {
@@ -234,50 +254,72 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg, position: "relative" }}>
-      {/* Header */}
+      {/* Top Bar */}
       <div style={{
-        background: C.white, borderBottom: `1px solid ${C.borderLight}`,
-        padding: "0 16px", height: 50,
+        height: 52,
         display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "0 24px",
         position: "relative", flexShrink: 0,
       }}>
         <button onClick={onHeaderBack} aria-label="Back" style={{
           background: "none", border: "none", cursor: "pointer",
-          color: C.midBlue,
           display: "flex", alignItems: "center", padding: 0,
         }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M19 12H5" /><path d="M12 19l-7-7 7-7" />
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.6)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 18 9 12 15 6" />
           </svg>
         </button>
-        <div style={{
-          fontFamily: fontSerif, fontSize: 16, color: C.navy,
-          position: "absolute", left: "50%", transform: "translateX(-50%)",
-        }}>Tipsy Dinner</div>
-        <div style={{ width: 50 }} />
+        <span style={{
+          fontFamily: fontSans,
+          fontSize: 11,
+          fontWeight: 500,
+          letterSpacing: "0.1em",
+          textTransform: "uppercase",
+          color: C.textMuted,
+        }}>
+          Step {step} of 5
+        </span>
+        {step >= 1 && step <= 3 && (
+          <button onClick={() => {
+            if (step === 1) tryAdvance1();
+            else if (step === 2) tryAdvance2();
+            else if (step === 3) tryAdvance3();
+          }} style={{
+            fontFamily: fontSans,
+            fontSize: 12,
+            fontWeight: 500,
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+            color: C.nextBtnText,
+            background: C.nextBtnBg,
+            borderRadius: 20,
+            padding: "8px 16px",
+            border: "none",
+            cursor: "pointer",
+          }}>
+            Next
+          </button>
+        )}
+        {step === 4 && <div style={{ width: 70 }} />}
       </div>
 
       {/* Progress */}
       {step >= 1 && step <= 3 && (
-        <div style={{ background: C.white, borderBottom: `1px solid ${C.borderLight}`, padding: "10px 16px 12px", flexShrink: 0 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-            <span style={{ fontFamily: fontSans, fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", color: C.muted }}>Adding a recipe</span>
-            <span style={{ fontFamily: fontSans, fontSize: 9, letterSpacing: "0.05em", color: C.muted }}>Step {step} of 3</span>
-          </div>
-          <div style={{ display: "flex", gap: 4 }}>
-            {[1, 2, 3].map((p) => (
-              <div key={p} style={{
-                height: 3, flex: 1, borderRadius: 2,
-                background: p < step ? C.btnBlue : p === step ? C.midBlue : C.borderLight,
-                transition: "background 0.35s ease",
-              }} />
-            ))}
+        <div style={{ padding: "0 24px 20px", flexShrink: 0 }}>
+          <div style={{ height: 2, background: C.progressTrack, borderRadius: 2, overflow: "hidden" }}>
+            <div style={{
+              height: "100%",
+              background: C.progressFill,
+              borderRadius: 2,
+              width: `${step * 20}%`,
+              transition: "width 0.35s ease",
+            }} />
           </div>
         </div>
       )}
 
       {/* Body */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "20px 16px 28px" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: "0 24px 28px" }}>
         <ScreenWrap key={step}>
           {step === 1 && (
             <>
@@ -297,7 +339,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
               <PrimaryBtn onClick={tryAdvance1}>Continue to Ingredients →</PrimaryBtn>
               {isEdit && (
                 <button onClick={() => setShowDelete(true)} style={{
-                  width: "100%", background: "transparent", color: "#B85C5C",
+                  width: "100%", background: "transparent", color: C.error,
                   border: "none", padding: "12px",
                   fontFamily: fontSans, fontSize: 12, fontWeight: 600,
                   letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer",
@@ -321,20 +363,24 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                       return (
                         <div key={i} ref={editRowRef}>
                           <ListItem>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 90px", gap: 8, flex: 1 }}>
-                              <EditInput
-                                value={editing.name}
-                                onChange={(v) => setEditing({ ...editing, name: v })}
-                                placeholder="Ingredient"
-                                autoFocus
-                                onEnter={confirmEditIngredient}
-                              />
-                              <EditInput
-                                value={editing.qty}
-                                onChange={(v) => setEditing({ ...editing, qty: v })}
-                                placeholder="Qty"
-                                onEnter={confirmEditIngredient}
-                              />
+                            <div style={{ display: "flex", gap: 10, flex: 1, alignItems: "center" }}>
+                              <div style={{ width: 80, flexShrink: 0 }}>
+                                <EditInput
+                                  value={editing.qty}
+                                  onChange={(v) => setEditing({ ...editing, qty: v })}
+                                  placeholder="Qty"
+                                  onEnter={confirmEditIngredient}
+                                />
+                              </div>
+                              <div style={{ flex: 1 }}>
+                                <EditInput
+                                  value={editing.name}
+                                  onChange={(v) => setEditing({ ...editing, name: v })}
+                                  placeholder="Ingredient"
+                                  autoFocus
+                                  onEnter={confirmEditIngredient}
+                                />
+                              </div>
                             </div>
                             <ConfirmBtn onClick={confirmEditIngredient} />
                           </ListItem>
@@ -343,12 +389,47 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                     }
                     return (
                       <ListItem key={i}>
+                        <div style={{ width: 80, flexShrink: 0 }}>
+                          <input
+                            value={it.qty}
+                            readOnly
+                            onClick={() => startEditIngredient(i)}
+                            style={{
+                              width: "100%",
+                              background: C.inputBg,
+                              border: `1px solid ${C.inputBorder}`,
+                              borderRadius: 10,
+                              padding: 12,
+                              fontSize: 14,
+                              fontWeight: 500,
+                              fontFamily: fontSans,
+                              color: C.textVeryLight,
+                              textAlign: "center",
+                              fontVariantNumeric: "tabular-nums",
+                              cursor: "pointer",
+                            }}
+                          />
+                        </div>
                         <div
                           onClick={() => startEditIngredient(i)}
-                          style={{ flex: 1, display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}
+                          style={{ flex: 1, cursor: "pointer" }}
                         >
-                          <span style={{ flex: 1, fontSize: 13, color: C.navy, lineHeight: 1.4 }}>{it.name}</span>
-                          <span style={{ fontSize: 12, color: C.muted, textAlign: "right", minWidth: 60 }}>{it.qty}</span>
+                          <input
+                            value={it.name}
+                            readOnly
+                            style={{
+                              width: "100%",
+                              background: C.inputBg,
+                              border: `1px solid ${C.inputBorder}`,
+                              borderRadius: 10,
+                              padding: "12px 14px",
+                              fontSize: 15,
+                              fontWeight: 400,
+                              fontFamily: fontSans,
+                              color: C.text,
+                              cursor: "pointer",
+                            }}
+                          />
                         </div>
                         <DelBtn onClick={() => removeIngredient(i)} />
                       </ListItem>
@@ -357,23 +438,42 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                 </div>
               )}
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 110px", gap: 8, marginBottom: 8 }}>
-                <TextInput
-                  value={ingName}
-                  onChange={(v) => { setIngName(v); if (v.trim()) setIngErr(false); }}
-                  placeholder="Ingredient"
-                  onEnter={() => {
-                    const el = document.getElementById("qty-input") as HTMLInputElement | null;
-                    el?.focus();
-                  }}
-                />
-                <TextInput
-                  id="qty-input"
-                  value={ingQty}
-                  onChange={setIngQty}
-                  placeholder="Qty"
-                  onEnter={addIngredient}
-                />
+              <div style={{ display: "flex", gap: 10, marginBottom: 8 }}>
+                <div style={{ width: 80, flexShrink: 0 }}>
+                  <input
+                    id="qty-input"
+                    type="text"
+                    value={ingQty}
+                    onChange={(e) => setIngQty(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addIngredient(); } }}
+                    placeholder="Qty"
+                    style={{
+                      width: "100%",
+                      background: C.inputBg,
+                      border: `1px solid ${C.inputBorder}`,
+                      borderRadius: 10,
+                      padding: 12,
+                      fontSize: 14,
+                      fontWeight: 500,
+                      fontFamily: fontSans,
+                      color: C.textVeryLight,
+                      textAlign: "center",
+                      fontVariantNumeric: "tabular-nums",
+                      outline: "none",
+                    }}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <TextInput
+                    value={ingName}
+                    onChange={(v) => { setIngName(v); if (v.trim()) setIngErr(false); }}
+                    placeholder="Ingredient"
+                    onEnter={() => {
+                      const el = document.getElementById("qty-input") as HTMLInputElement | null;
+                      el?.focus();
+                    }}
+                  />
+                </div>
               </div>
               {ingErr && <ValMsg>Please enter an ingredient name.</ValMsg>}
 
@@ -398,7 +498,24 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                       return (
                         <div key={i} ref={editRowRef}>
                           <ListItem>
-                            <span style={{ fontFamily: fontSerif, fontSize: 14, color: C.stepMuted, minWidth: 18, textAlign: "center" }}>{i + 1}</span>
+                            <div style={{
+                              width: 28,
+                              height: 28,
+                              borderRadius: "50%",
+                              background: C.stepNumBg,
+                              border: `1px solid ${C.stepNumBorder}`,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                            }}>
+                              <span style={{
+                                fontFamily: fontSans,
+                                fontSize: 11,
+                                fontWeight: 500,
+                                color: C.stepNumText,
+                              }}>{i + 1}</span>
+                            </div>
                             <div style={{ flex: 1 }}>
                               <EditInput
                                 value={editing.text}
@@ -415,11 +532,44 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                     }
                     return (
                       <ListItem key={i}>
-                        <span style={{ fontFamily: fontSerif, fontSize: 14, color: C.stepMuted, minWidth: 18, textAlign: "center" }}>{i + 1}</span>
-                        <span
-                          onClick={() => startEditStep(i)}
-                          style={{ flex: 1, fontSize: 13, color: C.navy, lineHeight: 1.4, cursor: "pointer" }}
-                        >{s}</span>
+                        <div style={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: "50%",
+                          background: C.stepNumBg,
+                          border: `1px solid ${C.stepNumBorder}`,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          flexShrink: 0,
+                        }}>
+                          <span style={{
+                            fontFamily: fontSans,
+                            fontSize: 11,
+                            fontWeight: 500,
+                            color: C.stepNumText,
+                          }}>{i + 1}</span>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <input
+                            value={s}
+                            readOnly
+                            onClick={() => startEditStep(i)}
+                            style={{
+                              width: "100%",
+                              background: C.inputBg,
+                              border: `1px solid ${C.inputBorder}`,
+                              borderRadius: 10,
+                              padding: "12px 14px",
+                              fontSize: 14,
+                              fontWeight: 400,
+                              fontFamily: fontSans,
+                              color: C.text,
+                              lineHeight: 1.5,
+                              cursor: "pointer",
+                            }}
+                          />
+                        </div>
                         <DelBtn onClick={() => removeStep(i)} />
                       </ListItem>
                     );
@@ -462,11 +612,11 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
             <>
               <div style={{
                 display: "flex", alignItems: "center", gap: 8,
-                background: "#e8f5ef", border: "1px solid #a8d9bf",
+                background: "rgba(35,60,0,0.06)", border: "1px solid rgba(35,60,0,0.14)",
                 borderRadius: 10, padding: "10px 14px", marginBottom: 16,
               }}>
-                <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#1a6e4a" }} />
-                <span style={{ fontFamily: fontSans, fontSize: 12, color: "#1a6e4a", fontWeight: 500 }}>
+                <div style={{ width: 7, height: 7, borderRadius: "50%", background: C.text }} />
+                <span style={{ fontFamily: fontSans, fontSize: 12, color: C.text, fontWeight: 500 }}>
                   Saved to {savedCategory.label}
                 </span>
               </div>
@@ -516,7 +666,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
         <div
           onClick={() => setShowDelete(false)}
           style={{
-            position: "absolute", inset: 0, background: "rgba(4,44,83,0.55)",
+            position: "absolute", inset: 0, background: "rgba(35,60,0,0.55)",
             display: "flex", alignItems: "center", justifyContent: "center",
             zIndex: 30, padding: 24,
           }}
@@ -526,21 +676,30 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
             style={{
               background: C.bg, borderRadius: 16, padding: "24px 20px",
               width: "100%", maxWidth: 280, display: "flex", flexDirection: "column",
-              gap: 8, border: `0.5px solid ${C.border}`,
+              gap: 8, border: `1px solid ${C.inputBorder}`,
             }}
           >
-            <div style={{ fontFamily: fontSerif, fontSize: 20, color: C.navy, fontWeight: 400, textAlign: "center" }}>
+            <div style={{
+              fontFamily: fontDisplay,
+              fontStyle: "normal",
+              fontSize: 20,
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.04em",
+              color: C.text,
+              textAlign: "center",
+            }}>
               Delete this recipe?
             </div>
-            <div style={{ fontFamily: fontSans, fontSize: 13, color: C.midBlue, textAlign: "center", marginBottom: 12 }}>
+            <div style={{ fontFamily: fontSans, fontSize: 13, color: C.textLight, textAlign: "center", marginBottom: 12 }}>
               This can't be undone.
             </div>
             <button
               onClick={() => setShowDelete(false)}
               style={{
                 width: "100%", padding: "12px", borderRadius: 10,
-                background: "transparent", border: `0.5px solid ${C.border}`,
-                color: C.midBlue, fontFamily: fontSans,
+                background: "transparent", border: `1px solid ${C.inputBorder}`,
+                color: C.textLight, fontFamily: fontSans,
                 fontSize: 13, fontWeight: 500, cursor: "pointer",
               }}
             >
@@ -556,8 +715,8 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
               }}
               style={{
                 width: "100%", padding: "12px", borderRadius: 10,
-                background: "#B85C5C", border: "none",
-                color: "#fff", fontFamily: fontSans,
+                background: C.error, border: "none",
+                color: C.bg, fontFamily: fontSans,
                 fontSize: 13, fontWeight: 500, cursor: "pointer",
               }}
             >
@@ -577,28 +736,28 @@ function ScreenWrap({ children }: { children: React.ReactNode }) {
 }
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
-  return <div style={{ fontFamily: fontSans, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: C.muted, marginBottom: 6 }}>{children}</div>;
+  return <div style={{ fontFamily: fontSans, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: C.textMuted, marginBottom: 6 }}>{children}</div>;
 }
 function Title({ children }: { children: React.ReactNode }) {
-  return <div style={{ fontFamily: fontSerif, fontSize: 22, fontWeight: 500, color: C.navy, marginBottom: 4, lineHeight: 1.25 }}>{children}</div>;
+  return <div style={{ fontFamily: fontDisplay, fontStyle: "normal", fontSize: 26, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: C.text, marginBottom: 4, lineHeight: 1.1 }}>{children}</div>;
 }
 function Sub({ children }: { children: React.ReactNode }) {
-  return <div style={{ fontFamily: fontSans, fontSize: 12, color: C.muted, lineHeight: 1.5, marginBottom: 20 }}>{children}</div>;
+  return <div style={{ fontFamily: fontSans, fontSize: 12, color: C.textLight, lineHeight: 1.5, marginBottom: 20 }}>{children}</div>;
 }
 function Field({ children }: { children: React.ReactNode }) {
   return <div style={{ marginBottom: 18 }}>{children}</div>;
 }
 function Label({ children }: { children: React.ReactNode }) {
-  return <label style={{ display: "block", fontFamily: fontSans, fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: C.muted, marginBottom: 6 }}>{children}</label>;
+  return <label style={{ display: "block", fontFamily: fontSans, fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: C.textMuted, marginBottom: 6 }}>{children}</label>;
 }
 function ValMsg({ children }: { children: React.ReactNode }) {
-  return <div style={{ fontFamily: fontSans, fontSize: 11, color: "#c0392b", marginTop: 5 }}>{children}</div>;
+  return <div style={{ fontFamily: fontSans, fontSize: 11, color: C.error, marginTop: 5 }}>{children}</div>;
 }
 
 const inputStyleBase: CSSProperties = {
-  width: "100%", background: C.white, border: `1px solid ${C.borderLight}`,
-  borderRadius: 10, padding: "11px 14px",
-  fontFamily: fontSans, fontSize: 13, color: C.navy,
+  width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`,
+  borderRadius: 10, padding: "14px 16px",
+  fontFamily: fontSans, fontSize: 16, fontWeight: 400, color: C.text, lineHeight: 1.4,
   outline: "none", WebkitAppearance: "none",
 };
 
@@ -621,8 +780,7 @@ function TextInput({
       placeholder={placeholder}
       style={{
         ...inputStyleBase,
-        borderColor: focused ? C.border : C.borderLight,
-        boxShadow: focused ? "0 0 0 3px rgba(133,183,235,0.18)" : "none",
+        borderColor: focused ? C.inputBorderActive : C.inputBorder,
       }}
     />
   );
@@ -639,9 +797,15 @@ function TextArea({ value, onChange, placeholder }: { value: string; onChange: (
       placeholder={placeholder}
       rows={3}
       style={{
-        ...inputStyleBase, resize: "none", lineHeight: 1.55,
-        borderColor: focused ? C.border : C.borderLight,
-        boxShadow: focused ? "0 0 0 3px rgba(133,183,235,0.18)" : "none",
+        ...inputStyleBase,
+        fontFamily: fontSerif,
+        fontStyle: "italic",
+        fontWeight: 300,
+        fontSize: 15,
+        resize: "none",
+        lineHeight: 1.5,
+        minHeight: 80,
+        borderColor: focused ? C.inputBorderActive : C.inputBorder,
       }}
     />
   );
@@ -650,9 +814,9 @@ function TextArea({ value, onChange, placeholder }: { value: string; onChange: (
 function PrimaryBtn({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
   return (
     <button onClick={onClick} style={{
-      width: "100%", background: C.btnBlue, color: C.white, border: "none",
+      width: "100%", background: C.nextBtnBg, color: C.nextBtnText, border: "none",
       borderRadius: 12, padding: "14px",
-      fontFamily: fontSans, fontSize: 12, fontWeight: 600,
+      fontFamily: fontSans, fontSize: 12, fontWeight: 500,
       letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer",
       marginTop: 8,
     }}>{children}</button>
@@ -662,8 +826,8 @@ function PrimaryBtn({ children, onClick }: { children: React.ReactNode; onClick:
 function GhostBtn({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
   return (
     <button onClick={onClick} style={{
-      width: "100%", background: "none", color: C.muted,
-      border: `1px solid ${C.borderLight}`, borderRadius: 12, padding: "12px",
+      width: "100%", background: "none", color: C.textLight,
+      border: `1px solid ${C.inputBorder}`, borderRadius: 12, padding: "12px",
       fontFamily: fontSans, fontSize: 12, fontWeight: 500,
       letterSpacing: "0.08em", textTransform: "uppercase", cursor: "pointer",
       marginTop: 8,
@@ -675,17 +839,15 @@ function AddBtn({ children, onClick }: { children: React.ReactNode; onClick: () 
   return (
     <button onClick={onClick} style={{
       display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
-      fontFamily: fontSans, fontSize: 12, fontWeight: 500, letterSpacing: "0.04em",
-      color: C.midBlue, background: "none",
-      border: `1.5px dashed ${C.border}`, borderRadius: 10,
-      padding: "10px 14px", cursor: "pointer", width: "100%", marginTop: 4,
+      fontFamily: fontSans, fontSize: 13, fontWeight: 500,
+      color: C.textMuted, background: "none",
+      border: "none",
+      padding: "4px 0", cursor: "pointer", width: "100%", marginTop: 4,
     }}>
-      <span style={{
-        width: 16, height: 16, borderRadius: "50%",
-        background: C.accent, border: `1.5px solid ${C.border}`,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: 12, lineHeight: 1, color: C.midBlue,
-      }}>+</span>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19" />
+        <line x1="5" y1="12" x2="19" y2="12" />
+      </svg>
       {children}
     </button>
   );
@@ -695,7 +857,7 @@ function ListItem({ children }: { children: React.ReactNode }) {
   return (
     <div style={{
       display: "flex", alignItems: "center",
-      background: C.white, border: `1px solid ${C.borderLight}`,
+      background: C.inputBg, border: `1px solid ${C.inputBorder}`,
       borderRadius: 10, padding: "10px 12px", marginBottom: 6, gap: 10,
       animation: "tipsy-fadeup 0.2s ease",
     }}>{children}</div>
@@ -705,9 +867,15 @@ function ListItem({ children }: { children: React.ReactNode }) {
 function DelBtn({ onClick }: { onClick: () => void }) {
   return (
     <button onClick={onClick} aria-label="Remove" style={{
-      background: "none", border: "none", color: C.border, cursor: "pointer",
-      fontSize: 15, padding: "0 0 0 4px", lineHeight: 1,
-    }}>×</button>
+      background: "none", border: "none", cursor: "pointer",
+      width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center",
+      flexShrink: 0, padding: 0,
+    }}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.textRemove} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="18" y1="6" x2="6" y2="18" />
+        <line x1="6" y1="6" x2="18" y2="18" />
+      </svg>
+    </button>
   );
 }
 
@@ -730,9 +898,9 @@ function EditInput({
       placeholder={placeholder}
       style={{
         ...inputStyleBase,
-        padding: "8px 10px",
-        fontSize: 13,
-        borderColor: focused ? C.border : C.borderLight,
+        padding: "12px 14px",
+        fontSize: 15,
+        borderColor: focused ? C.inputBorderActive : C.inputBorder,
       }}
     />
   );
@@ -745,7 +913,7 @@ function ConfirmBtn({ onClick }: { onClick: () => void }) {
       onMouseDown={(e) => e.preventDefault()}
       aria-label="Confirm"
       style={{
-        background: C.btnBlue, border: "none", color: C.white, cursor: "pointer",
+        background: C.nextBtnBg, border: "none", color: C.nextBtnText, cursor: "pointer",
         width: 28, height: 28, borderRadius: 8,
         display: "flex", alignItems: "center", justifyContent: "center",
         flexShrink: 0, padding: 0,
@@ -761,9 +929,9 @@ function ConfirmBtn({ onClick }: { onClick: () => void }) {
 function browseActionStyle(primary: boolean): CSSProperties {
   return {
     flex: 1,
-    background: primary ? C.btnBlue : "none",
-    border: `1px solid ${primary ? C.btnBlue : C.borderLight}`,
-    color: primary ? C.white : C.midBlue,
+    background: primary ? C.text : "none",
+    border: `1px solid ${primary ? C.text : "rgba(35,60,0,0.1)"}`,
+    color: primary ? C.bg : C.text,
     borderRadius: 12, padding: "12px",
     fontFamily: fontSans, fontSize: 10, fontWeight: 600,
     letterSpacing: "0.1em", textTransform: "uppercase",
@@ -779,40 +947,28 @@ function PreviewCard({
   const steps = recipe.steps ?? [];
   return (
     <div style={{
-      background: C.white, border: `1px solid ${C.borderLight}`,
+      background: C.bg, border: `1px solid rgba(35,60,0,0.1)`,
       borderRadius: 16, overflow: "hidden", marginBottom: 16,
     }}>
-      <div style={{
-        width: "100%", height: 140,
-        background: "linear-gradient(145deg, #E6F1FB 0%, #C5DCF4 100%)",
-        position: "relative",
-      }}>
-        <div style={{
-          position: "absolute", top: 12, left: 14,
-          fontFamily: fontSans, fontSize: 9, letterSpacing: "0.14em",
-          textTransform: "uppercase", color: C.midBlue,
-          background: "rgba(255,255,255,0.85)",
-          padding: "3px 8px", borderRadius: 20, fontWeight: 600,
-        }}>photo coming soon</div>
-      </div>
-      <div style={{ padding: "16px 18px" }}>
-        <div style={{ fontFamily: fontSerif, fontSize: 19, fontWeight: 500, color: C.navy, marginBottom: 4, lineHeight: 1.25 }}>
+      <div style={{ padding: "20px 18px 16px" }}>
+        <div style={{ fontFamily: fontDisplay, fontSize: 28, textTransform: "uppercase", color: C.text, marginBottom: 6, lineHeight: 1.2 }}>
           {recipe.title}
         </div>
-        <div style={{ fontFamily: fontSans, fontSize: 12, color: C.muted, lineHeight: 1.55, marginBottom: 14 }}>
+        <div style={{ fontFamily: fontSerif, fontStyle: "italic", fontSize: 14, color: "rgba(35,60,0,0.55)", lineHeight: 1.5, marginBottom: 16 }}>
           {recipe.description}
         </div>
-        <div style={{ display: "flex", borderBottom: `1px solid ${C.borderLight}`, marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: 24, borderBottom: `1px solid rgba(35,60,0,0.08)`, marginBottom: 12 }}>
           {(["ingredients", "steps"] as const).map((t) => {
             const active = tab === t;
             return (
               <button key={t} onClick={() => setTab(t)} style={{
-                flex: 1, padding: "8px 0",
-                fontFamily: fontSans, fontSize: 10, letterSpacing: "0.1em",
-                textTransform: "uppercase", fontWeight: 600,
-                color: active ? C.navy : C.muted,
+                padding: "10px 0",
+                fontFamily: fontSans, fontSize: 11, letterSpacing: "0.08em",
+                textTransform: "uppercase", fontWeight: 500,
+                color: active ? C.text : "rgba(35,60,0,0.3)",
                 background: "none", border: "none",
-                borderBottom: `2px solid ${active ? C.btnBlue : "transparent"}`,
+                borderBottom: active ? `1.5px solid ${C.text}` : "none",
+                marginBottom: active ? -1 : 0,
                 cursor: "pointer",
               }}>{t}</button>
             );
@@ -820,28 +976,36 @@ function PreviewCard({
         </div>
         {tab === "ingredients" && (
           ingredients.length === 0
-            ? <div style={{ fontFamily: fontSans, fontSize: 12, color: C.stepMuted, fontStyle: "italic", textAlign: "center", padding: 14 }}>No ingredients added.</div>
+            ? <div style={{ fontFamily: fontSans, fontSize: 12, color: "rgba(35,60,0,0.35)", fontStyle: "italic", textAlign: "center", padding: 14 }}>No ingredients added.</div>
             : ingredients.map((it, i) => (
                 <div key={i} style={{
                   display: "flex", justifyContent: "space-between", alignItems: "center",
-                  padding: "9px 0", fontFamily: fontSans, fontSize: 13,
-                  borderBottom: i === ingredients.length - 1 ? "none" : `1px solid ${C.borderLight}`,
+                  padding: "10px 0", fontFamily: fontSans, fontSize: 15,
+                  borderBottom: i === ingredients.length - 1 ? "none" : "1px dotted rgba(35,60,0,0.1)",
                 }}>
-                  <span style={{ color: C.navy }}>{it.name}</span>
-                  <span style={{ color: C.muted, fontSize: 12 }}>{it.qty}</span>
+                  <span style={{ color: C.text }}>{it.name}</span>
+                  <span style={{ color: "rgba(35,60,0,0.45)", fontSize: 14, fontVariantNumeric: "tabular-nums" }}>{it.qty}</span>
                 </div>
               ))
         )}
         {tab === "steps" && (
           steps.length === 0
-            ? <div style={{ fontFamily: fontSans, fontSize: 12, color: C.stepMuted, fontStyle: "italic", textAlign: "center", padding: 14 }}>No steps added.</div>
+            ? <div style={{ fontFamily: fontSans, fontSize: 12, color: "rgba(35,60,0,0.35)", fontStyle: "italic", textAlign: "center", padding: 14 }}>No steps added.</div>
             : steps.map((s, i) => (
                 <div key={i} style={{
                   display: "flex", gap: 14, padding: "12px 0", alignItems: "flex-start",
-                  borderBottom: i === steps.length - 1 ? "none" : `1px solid ${C.borderLight}`,
+                  borderBottom: i === steps.length - 1 ? "none" : "1px dotted rgba(35,60,0,0.1)",
                 }}>
-                  <span style={{ fontFamily: fontSerif, fontSize: 22, color: C.stepMuted, lineHeight: 1, minWidth: 22, paddingTop: 2 }}>{i + 1}</span>
-                  <span style={{ fontFamily: fontSans, fontSize: 13, color: C.navy, lineHeight: 1.55, flex: 1 }}>{s}</span>
+                  <div style={{
+                    width: 28, height: 28, minWidth: 28,
+                    borderRadius: "50%",
+                    background: "rgba(35,60,0,0.06)",
+                    border: "1px solid rgba(35,60,0,0.1)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontFamily: fontSans, fontSize: 11, fontWeight: 500,
+                    color: "rgba(35,60,0,0.45)",
+                  }}>{i + 1}</div>
+                  <span style={{ fontFamily: fontSans, fontSize: 14, color: C.text, lineHeight: 1.5, flex: 1, paddingTop: 3 }}>{s}</span>
                 </div>
               ))
         )}

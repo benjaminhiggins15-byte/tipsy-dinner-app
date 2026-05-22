@@ -26,19 +26,25 @@ import {
 } from "@tabler/icons-react";
 
 const C = {
-  bg: "#EEF4F8",
-  accent: "#E6F1FB",
-  border: "#85B7EB",
-  borderLight: "#C5DCF4",
-  navy: "#042C53",
-  midBlue: "#185FA5",
-  btnBlue: "#0C447C",
-  muted: "#5A7FA3",
-  white: "#ffffff",
+  bg: "#FAF7F2",
+  text: "#233C00",
+  textMuted: "rgba(35,60,0,0.35)",
+  textLight: "rgba(35,60,0,0.6)",
+  textMedium: "rgba(35,60,0,0.7)",
+  chipBg: "rgba(35,60,0,0.05)",
+  chipBorder: "rgba(35,60,0,0.1)",
+  chipSelected: "rgba(35,60,0,0.1)",
+  chipBorderSelected: "rgba(35,60,0,0.35)",
+  divider: "rgba(35,60,0,0.08)",
+  menuBtnBg: "rgba(35,60,0,0.04)",
+  menuBtnBorder: "rgba(35,60,0,0.1)",
+  ctaBg: "#233C00",
+  ctaText: "#FAF7F2",
+  handle: "rgba(35,60,0,0.15)",
 };
 
-const fontSerif = "'Playfair Display', serif";
-const fontSans = "'DM Sans', sans-serif";
+const fontSerif = "'Fraunces', serif";
+const fontSans = "'Inter', sans-serif";
 
 // Helper to get icon component by name
 function getIconComponentByName(iconName: string) {
@@ -158,7 +164,7 @@ export default function SaveRecipeFlow({ onClose, onPick, onNew, initialSelected
       style={{
         position: "absolute",
         inset: 0,
-        background: "rgba(4, 44, 83, 0.38)",
+        background: "rgba(35, 60, 0, 0.35)",
         zIndex: 80,
         display: "flex",
         alignItems: "flex-end",
@@ -169,8 +175,8 @@ export default function SaveRecipeFlow({ onClose, onPick, onNew, initialSelected
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: C.white,
-          borderRadius: "20px 20px 0 0",
+          background: C.bg,
+          borderRadius: "24px 24px 0 0",
           padding: "16px 0 24px",
           width: "100%",
           maxHeight: "80vh",
@@ -180,7 +186,7 @@ export default function SaveRecipeFlow({ onClose, onPick, onNew, initialSelected
           overflow: "hidden",
         }}
       >
-        <div style={{ width: 32, height: 4, borderRadius: 2, background: C.borderLight, margin: "0 auto 14px" }} />
+        <div style={{ width: 36, height: 4, borderRadius: 2, background: C.handle, margin: "0 auto 14px" }} />
 
         <div style={getStepStyle(1)}>
           {step === 1 && (
@@ -248,13 +254,13 @@ function SaveStep1({ cats, selectedCategory, onSelectCategory, onNew, onYes, onS
     <>
       {/* Step indicator */}
       <div style={{ display: "flex", gap: 6, justifyContent: "center", marginBottom: 12 }}>
-        <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.midBlue }} />
-        <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.borderLight }} />
+        <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.text }} />
+        <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.chipBorder }} />
       </div>
 
-      <div style={{ padding: "0 18px 14px", borderBottom: `1px solid ${C.borderLight}` }}>
-        <div style={{ fontFamily: fontSerif, fontSize: 17, color: C.navy, marginBottom: 2 }}>Where does it live?</div>
-        <div style={{ fontFamily: fontSans, fontSize: 12, color: C.muted }}>Swipe to find the right category.</div>
+      <div style={{ padding: "0 18px 14px", borderBottom: `1px solid ${C.divider}` }}>
+        <div style={{ fontFamily: fontSans, fontSize: 11, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", color: C.textMuted, marginBottom: 6 }}>Pick a category</div>
+        <div style={{ fontFamily: fontSerif, fontStyle: "italic", fontSize: 13, color: C.text }}>Swipe to find the right category.</div>
       </div>
 
       <div style={{ overflowX: "auto", padding: "14px 18px 4px", display: "flex", gap: 10, scrollbarWidth: "none" }}>
@@ -267,12 +273,12 @@ function SaveStep1({ cats, selectedCategory, onSelectCategory, onNew, onYes, onS
         >
           <div style={{
             width: 96, height: 70, borderRadius: 12,
-            background: C.accent, border: `1px solid ${C.border}`,
+            background: C.chipBg, border: `1px solid ${C.chipBorder}`,
             display: "flex", alignItems: "center", justifyContent: "center",
-            color: C.midBlue, fontSize: 32, fontWeight: 300, lineHeight: 1,
+            color: C.textLight, fontSize: 32, fontWeight: 300, lineHeight: 1,
             boxSizing: "border-box",
           }}>+</div>
-          <div style={{ fontFamily: fontSans, fontSize: 11, fontWeight: 500, color: C.navy, padding: "6px 4px 2px" }}>New category</div>
+          <div style={{ fontFamily: fontSans, fontSize: 11, fontWeight: 500, color: C.text, padding: "6px 4px 2px" }}>New category</div>
         </button>
         {cats.map((c) => {
           const isSelected = selectedCategory?.key === c.key;
@@ -283,7 +289,7 @@ function SaveStep1({ cats, selectedCategory, onSelectCategory, onNew, onYes, onS
               style={{
                 flexShrink: 0, width: 96, cursor: "pointer",
                 borderRadius: 12, overflow: "hidden",
-                border: isSelected ? `2px solid ${C.btnBlue}` : "2px solid transparent",
+                border: isSelected ? `2px solid ${C.text}` : "2px solid transparent",
                 background: "none", padding: 0, textAlign: "left",
               }}
             >
@@ -292,7 +298,7 @@ function SaveStep1({ cats, selectedCategory, onSelectCategory, onNew, onYes, onS
                 display: "flex", alignItems: "center", justifyContent: "center",
                 background: c.gradient,
               }}>
-                <div style={{ position: "absolute", inset: 0, background: "rgba(4, 44, 83, 0.22)" }} />
+                <div style={{ position: "absolute", inset: 0, background: "rgba(35, 60, 0, 0.15)" }} />
                 <div style={{
                   position: "absolute", bottom: 6, left: 0, right: 0, textAlign: "center",
                   fontFamily: fontSans, fontSize: 9, fontWeight: 700, letterSpacing: "0.12em",
@@ -300,59 +306,43 @@ function SaveStep1({ cats, selectedCategory, onSelectCategory, onNew, onYes, onS
                   textShadow: "0 1px 3px rgba(0,0,0,0.3)",
                 }}>{c.label}</div>
               </div>
-              <div style={{ fontFamily: fontSans, fontSize: 11, fontWeight: 500, color: C.navy, padding: "6px 4px 2px" }}>{c.label}</div>
+              <div style={{ fontFamily: fontSans, fontSize: 11, fontWeight: 500, color: C.text, padding: "6px 4px 2px" }}>{c.label}</div>
             </button>
           );
         })}
       </div>
 
       {/* Add to menu question */}
-      <div style={{ padding: "20px 18px 16px" }}>
-        <div style={{ fontFamily: fontSans, fontSize: 13, fontWeight: 500, color: C.navy, marginBottom: 10 }}>
-          Add to a menu?
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            onClick={onYes}
-            disabled={!selectedCategory}
-            style={{
-              flex: 1,
-              padding: "10px",
-              background: selectedCategory ? C.navy : C.borderLight,
-              color: C.white,
-              border: "none",
-              borderRadius: 8,
-              fontFamily: fontSans,
-              fontSize: 12,
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              cursor: selectedCategory ? "pointer" : "not-allowed",
-            }}
-          >
-            Yes
-          </button>
-          <button
-            onClick={onSkip}
-            disabled={!selectedCategory}
-            style={{
-              flex: 1,
-              padding: "10px",
-              background: "transparent",
-              color: selectedCategory ? C.midBlue : C.borderLight,
-              border: `1px solid ${selectedCategory ? C.border : C.borderLight}`,
-              borderRadius: 8,
-              fontFamily: fontSans,
-              fontSize: 12,
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              cursor: selectedCategory ? "pointer" : "not-allowed",
-            }}
-          >
-            Skip
-          </button>
-        </div>
+      <div style={{ padding: "20px 18px 8px" }}>
+        <button
+          onClick={onYes}
+          disabled={!selectedCategory}
+          style={{
+            width: "100%",
+            padding: "12px 16px",
+            background: C.menuBtnBg,
+            border: `1px solid ${C.menuBtnBorder}`,
+            borderRadius: 12,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            cursor: selectedCategory ? "pointer" : "not-allowed",
+            opacity: selectedCategory ? 1 : 0.4,
+          }}
+        >
+          <span style={{ fontFamily: fontSans, fontSize: 14, fontWeight: 500, color: C.textMedium }}>
+            Add to a menu
+          </span>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: C.textLight }}>
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </button>
+      </div>
+
+      <div style={{ padding: "0 18px", margin: "12px 0", display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ flex: 1, height: 1, background: C.divider }} />
+        <span style={{ fontFamily: fontSans, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: C.textMuted }}>or</span>
+        <div style={{ flex: 1, height: 1, background: C.divider }} />
       </div>
 
       {/* Save button */}
@@ -361,21 +351,21 @@ function SaveStep1({ cats, selectedCategory, onSelectCategory, onNew, onYes, onS
         disabled={!selectedCategory}
         style={{
           width: "calc(100% - 36px)",
-          margin: "8px 18px 0",
+          margin: "0 18px",
           padding: "14px",
-          background: selectedCategory ? C.accent : "#F5F5F5",
-          border: `1px solid ${selectedCategory ? C.border : "#E0E0E0"}`,
-          borderRadius: 12,
-          color: selectedCategory ? C.midBlue : C.borderLight,
+          background: selectedCategory ? C.ctaBg : C.chipBg,
+          border: "none",
+          borderRadius: 14,
+          color: selectedCategory ? C.ctaText : C.textMuted,
           fontFamily: fontSans,
           fontSize: 12,
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: "0.08em",
+          fontWeight: 500,
+          textTransform: "lowercase",
+          letterSpacing: "0.02em",
           cursor: selectedCategory ? "pointer" : "not-allowed",
         }}
       >
-        Save
+        save recipe for now
       </button>
     </>
   );
@@ -407,13 +397,13 @@ function SaveStep2({ occasions, selectedOccasion, setSelectedOccasion, selectedM
     <>
       {/* Step indicator */}
       <div style={{ display: "flex", gap: 6, justifyContent: "center", marginBottom: 12 }}>
-        <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.midBlue }} />
-        <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.midBlue }} />
+        <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.text }} />
+        <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.text }} />
       </div>
 
-      <div style={{ padding: "0 18px 14px", borderBottom: `1px solid ${C.borderLight}` }}>
-        <div style={{ fontFamily: fontSerif, fontSize: 17, color: C.navy, marginBottom: 2 }}>Which menu?</div>
-        <div style={{ fontFamily: fontSerif, fontStyle: "italic", fontSize: 12, color: C.muted }}>pick an occasion and course</div>
+      <div style={{ padding: "0 18px 14px", borderBottom: `1px solid ${C.divider}` }}>
+        <div style={{ fontFamily: fontSans, fontSize: 11, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", color: C.textMuted, marginBottom: 6 }}>Add to a menu</div>
+        <div style={{ fontFamily: fontSerif, fontStyle: "italic", fontSize: 13, color: C.text }}>pick an occasion and course</div>
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px", maxHeight: "50vh" }}>
@@ -436,8 +426,8 @@ function SaveStep2({ occasions, selectedOccasion, setSelectedOccasion, selectedM
                   alignItems: "center",
                   gap: 12,
                   padding: "12px",
-                  background: isSelected ? C.accent : "transparent",
-                  border: `1px solid ${isSelected ? C.border : "transparent"}`,
+                  background: isSelected ? C.chipSelected : "transparent",
+                  border: `1px solid ${isSelected ? C.chipBorderSelected : "transparent"}`,
                   borderRadius: 10,
                   cursor: "pointer",
                   marginBottom: 8,
@@ -448,20 +438,20 @@ function SaveStep2({ occasions, selectedOccasion, setSelectedOccasion, selectedM
                   width: 32,
                   height: 32,
                   borderRadius: "50%",
-                  background: C.accent,
-                  border: `0.5px solid ${C.border}`,
+                  background: C.chipBg,
+                  border: `1px solid ${C.chipBorder}`,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   flexShrink: 0,
                 }}>
-                  <IconComponent size={18} color={C.midBlue} />
+                  <IconComponent size={18} color={C.textLight} />
                 </div>
                 <span style={{
                   fontFamily: fontSans,
                   fontSize: 14,
                   fontWeight: 500,
-                  color: C.navy,
+                  color: C.text,
                 }}>
                   {occasion.name}
                 </span>
@@ -476,10 +466,10 @@ function SaveStep2({ occasions, selectedOccasion, setSelectedOccasion, selectedM
             <div style={{
               fontFamily: fontSans,
               fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: "0.1em",
+              fontWeight: 500,
+              letterSpacing: "0.08em",
               textTransform: "uppercase",
-              color: C.muted,
+              color: C.textMuted,
               marginBottom: 8,
             }}>
               Menu
@@ -496,15 +486,15 @@ function SaveStep2({ occasions, selectedOccasion, setSelectedOccasion, selectedM
                   style={{
                     width: "100%",
                     padding: "10px 12px",
-                    background: isSelected ? C.accent : "transparent",
-                    border: `1px solid ${isSelected ? C.border : C.borderLight}`,
+                    background: isSelected ? C.chipSelected : "transparent",
+                    border: `1px solid ${isSelected ? C.chipBorderSelected : C.chipBorder}`,
                     borderRadius: 8,
                     cursor: "pointer",
                     marginBottom: 6,
                     textAlign: "left",
                     fontFamily: fontSans,
                     fontSize: 13,
-                    color: C.navy,
+                    color: C.text,
                   }}
                 >
                   {menu.title}
@@ -520,10 +510,10 @@ function SaveStep2({ occasions, selectedOccasion, setSelectedOccasion, selectedM
             <div style={{
               fontFamily: fontSans,
               fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: "0.1em",
+              fontWeight: 500,
+              letterSpacing: "0.08em",
               textTransform: "uppercase",
-              color: C.muted,
+              color: C.textMuted,
               marginBottom: 8,
             }}>
               Course
@@ -537,9 +527,9 @@ function SaveStep2({ occasions, selectedOccasion, setSelectedOccasion, selectedM
                     onClick={() => setSelectedSection(section)}
                     style={{
                       padding: "8px 14px",
-                      background: isSelected ? C.navy : C.accent,
-                      color: isSelected ? C.white : C.midBlue,
-                      border: "none",
+                      background: isSelected ? C.chipSelected : C.chipBg,
+                      color: isSelected ? C.text : C.textLight,
+                      border: `1px solid ${isSelected ? C.chipBorderSelected : C.chipBorder}`,
                       borderRadius: 20,
                       fontFamily: fontSans,
                       fontSize: 11,
@@ -559,13 +549,13 @@ function SaveStep2({ occasions, selectedOccasion, setSelectedOccasion, selectedM
       </div>
 
       {/* Bottom actions */}
-      <div style={{ padding: "12px 18px", display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `1px solid ${C.borderLight}` }}>
+      <div style={{ padding: "12px 18px", display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `1px solid ${C.divider}` }}>
         <button
           onClick={onBack}
           style={{
             background: "transparent",
             border: "none",
-            color: C.midBlue,
+            color: C.textLight,
             fontFamily: fontSans,
             fontSize: 12,
             fontWeight: 500,
@@ -579,20 +569,20 @@ function SaveStep2({ occasions, selectedOccasion, setSelectedOccasion, selectedM
           onClick={onSave}
           disabled={!selectedSection}
           style={{
-            padding: "10px 24px",
-            background: selectedSection ? C.accent : "#F5F5F5",
-            border: `1px solid ${selectedSection ? C.border : "#E0E0E0"}`,
-            borderRadius: 12,
-            color: selectedSection ? C.midBlue : C.borderLight,
+            padding: "12px 24px",
+            background: selectedSection ? C.ctaBg : C.chipBg,
+            border: "none",
+            borderRadius: 14,
+            color: selectedSection ? C.ctaText : C.textMuted,
             fontFamily: fontSans,
             fontSize: 12,
-            fontWeight: 600,
-            textTransform: "uppercase",
-            letterSpacing: "0.08em",
+            fontWeight: 500,
+            textTransform: "lowercase",
+            letterSpacing: "0.02em",
             cursor: selectedSection ? "pointer" : "not-allowed",
           }}
         >
-          Save
+          save recipe for now
         </button>
       </div>
     </>
@@ -620,13 +610,13 @@ function SaveStep3({ categoryLabel, menuName, sectionLabel, onDone }: {
         width: 64,
         height: 64,
         borderRadius: "50%",
-        background: C.accent,
-        border: `2px solid ${C.border}`,
+        background: C.chipBg,
+        border: `2px solid ${C.chipBorder}`,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
       }}>
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={C.midBlue} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={C.text} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
           <path d="M20 6L9 17l-5-5" />
         </svg>
       </div>
@@ -635,9 +625,9 @@ function SaveStep3({ categoryLabel, menuName, sectionLabel, onDone }: {
       <div style={{ textAlign: "center" }}>
         <div style={{
           fontFamily: fontSerif,
-          fontSize: 20,
-          fontWeight: 500,
-          color: C.navy,
+          fontStyle: "italic",
+          fontSize: 18,
+          color: C.text,
           marginBottom: 6,
         }}>
           Saved to {categoryLabel}{menuName ? ` + ${menuName}` : ""}
@@ -647,7 +637,7 @@ function SaveStep3({ categoryLabel, menuName, sectionLabel, onDone }: {
             fontFamily: fontSerif,
             fontStyle: "italic",
             fontSize: 14,
-            color: C.muted,
+            color: C.textLight,
           }}>
             added to {SECTION_LABELS[sectionLabel]}
           </div>
@@ -658,21 +648,21 @@ function SaveStep3({ categoryLabel, menuName, sectionLabel, onDone }: {
       <button
         onClick={onDone}
         style={{
-          padding: "12px 32px",
-          background: C.btnBlue,
-          color: C.white,
+          padding: "14px 32px",
+          background: C.ctaBg,
+          color: C.ctaText,
           border: "none",
-          borderRadius: 12,
+          borderRadius: 14,
           fontFamily: fontSans,
           fontSize: 12,
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: "0.08em",
+          fontWeight: 500,
+          textTransform: "lowercase",
+          letterSpacing: "0.02em",
           cursor: "pointer",
           marginTop: 8,
         }}
       >
-        Done
+        done
       </button>
     </div>
   );
