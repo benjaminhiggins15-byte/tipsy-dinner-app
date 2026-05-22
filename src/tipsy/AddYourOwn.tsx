@@ -395,18 +395,21 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                             readOnly
                             onClick={() => startEditIngredient(i)}
                             style={{
-                              width: "100%",
+                              width: 80,
+                              minWidth: 80,
+                              maxWidth: 80,
                               background: C.inputBg,
                               border: `1px solid ${C.inputBorder}`,
                               borderRadius: 10,
-                              padding: 12,
-                              fontSize: 14,
+                              padding: "12px 14px",
+                              fontSize: 15,
                               fontWeight: 500,
                               fontFamily: fontSans,
                               color: C.textVeryLight,
                               textAlign: "center",
                               fontVariantNumeric: "tabular-nums",
                               cursor: "pointer",
+                              boxSizing: "border-box",
                             }}
                           />
                         </div>
@@ -448,18 +451,21 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addIngredient(); } }}
                     placeholder="Qty"
                     style={{
-                      width: "100%",
+                      width: 80,
+                      minWidth: 80,
+                      maxWidth: 80,
                       background: C.inputBg,
                       border: `1px solid ${C.inputBorder}`,
                       borderRadius: 10,
-                      padding: 12,
-                      fontSize: 14,
+                      padding: "12px 14px",
+                      fontSize: 15,
                       fontWeight: 500,
                       fontFamily: fontSans,
                       color: C.textVeryLight,
                       textAlign: "center",
                       fontVariantNumeric: "tabular-nums",
                       outline: "none",
+                      boxSizing: "border-box",
                     }}
                   />
                 </div>
@@ -595,16 +601,39 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
 
           {step === 4 && (
             <>
-              <Eyebrow>Almost there</Eyebrow>
-              <Title>Here's your recipe</Title>
-              <Sub>This is exactly how it will appear in Explore.</Sub>
+              <div style={{ fontFamily: fontSans, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(35,60,0,0.35)", marginBottom: 16 }}>Looking good.</div>
               <PreviewCard recipe={previewRecipe} tab={tab} setTab={setTab} />
-              {isEdit ? (
-                <PrimaryBtn onClick={saveEdit}>Save changes</PrimaryBtn>
-              ) : (
-                <PrimaryBtn onClick={() => setTrayOpen(true)}>Save</PrimaryBtn>
-              )}
-              <GhostBtn onClick={() => setStep(3)}>← Edit recipe</GhostBtn>
+              <div style={{ display: "flex", justifyContent: "center", marginTop: 20 }}>
+                {isEdit ? (
+                  <button onClick={saveEdit} style={{
+                    padding: "12px 28px",
+                    background: C.nextBtnBg,
+                    color: C.nextBtnText,
+                    border: "none",
+                    borderRadius: 20,
+                    fontFamily: fontSans,
+                    fontSize: 12,
+                    fontWeight: 500,
+                    letterSpacing: "0.02em",
+                    textTransform: "lowercase",
+                    cursor: "pointer",
+                  }}>Save</button>
+                ) : (
+                  <button onClick={() => setTrayOpen(true)} style={{
+                    padding: "12px 28px",
+                    background: C.nextBtnBg,
+                    color: C.nextBtnText,
+                    border: "none",
+                    borderRadius: 20,
+                    fontFamily: fontSans,
+                    fontSize: 12,
+                    fontWeight: 500,
+                    letterSpacing: "0.02em",
+                    textTransform: "lowercase",
+                    cursor: "pointer",
+                  }}>Save</button>
+                )}
+              </div>
             </>
           )}
 
@@ -756,8 +785,8 @@ function ValMsg({ children }: { children: React.ReactNode }) {
 
 const inputStyleBase: CSSProperties = {
   width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`,
-  borderRadius: 10, padding: "14px 16px",
-  fontFamily: fontSans, fontSize: 16, fontWeight: 400, color: C.text, lineHeight: 1.4,
+  borderRadius: 10, padding: "12px 14px",
+  fontFamily: fontSans, fontSize: 15, fontWeight: 400, color: C.text, lineHeight: 1.4,
   outline: "none", WebkitAppearance: "none",
 };
 
@@ -946,11 +975,7 @@ function PreviewCard({
   const ingredients = recipe.ingredients ?? [];
   const steps = recipe.steps ?? [];
   return (
-    <div style={{
-      background: C.bg, border: `1px solid rgba(35,60,0,0.1)`,
-      borderRadius: 16, overflow: "hidden", marginBottom: 16,
-    }}>
-      <div style={{ padding: "20px 18px 16px" }}>
+    <div style={{ marginBottom: 20 }}>
         <div style={{ fontFamily: fontDisplay, fontSize: 28, textTransform: "uppercase", color: C.text, marginBottom: 6, lineHeight: 1.2 }}>
           {recipe.title}
         </div>
@@ -1009,7 +1034,6 @@ function PreviewCard({
                 </div>
               ))
         )}
-      </div>
     </div>
   );
 }

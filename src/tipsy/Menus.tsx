@@ -29,19 +29,21 @@ import {
 } from "@tabler/icons-react";
 
 const C = {
-  bg: "#EEF4F8",
-  accentBg: "#E6F1FB",
-  borderLight: "#C5DCF4",
-  border: "#85B7EB",
-  navy: "#042C53",
-  midBlue: "#185FA5",
-  btnBlue: "#0C447C",
-  muted: "#5A7FA3",
-  white: "#ffffff",
+  bg: "#FAF7F2",
+  text: "#233C00",
+  textMuted: "rgba(35,60,0,0.35)",
+  textLight: "rgba(35,60,0,0.6)",
+  cardBg: "rgba(35,60,0,0.05)",
+  cardBorder: "rgba(35,60,0,0.1)",
+  photoBg: "rgba(35,60,0,0.06)",
+  photoLabel: "rgba(35,60,0,0.25)",
+  descText: "rgba(35,60,0,0.45)",
+  actionIcon: "rgba(35,60,0,0.2)",
+  plusBorder: "rgba(35,60,0,0.2)",
 };
 
-const fontSerif = "'Playfair Display', serif";
-const fontSans = "'DM Sans', sans-serif";
+const fontSerif = "'Fraunces', serif";
+const fontSans = "'Inter', sans-serif";
 
 // Curated icon set for occasions
 const ICON_OPTIONS = [
@@ -95,88 +97,93 @@ export default function Menus({ occasionId, occasionName, back, push }: Props) {
   const occasion = findOccasion(occasionId);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg, position: "relative" }}>
+      {/* Gradient background */}
+      <div style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 420,
+        background: "linear-gradient(180deg, #3a6010 0%, #2E4E08 35%, #233C00 100%)",
+        zIndex: 0,
+        pointerEvents: "none",
+      }} />
+
       {/* Header */}
       <div style={{
-        padding: "32px 24px 16px",
+        padding: "16px 24px",
         flexShrink: 0,
         display: "flex",
-        alignItems: "flex-start",
+        alignItems: "center",
         justifyContent: "space-between",
-        gap: 12,
+        position: "relative",
+        zIndex: 1,
       }}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-            <button
-              onClick={back}
-              aria-label="Back"
-              style={{
-                background: "transparent",
-                border: "none",
-                padding: 0,
-                cursor: "pointer",
-                color: C.midBlue,
-                display: "flex",
-                alignItems: "center",
-              }}
-            >
-              <BackArrow />
-            </button>
-          </div>
-          <div style={{ fontFamily: fontSerif, fontSize: 28, fontWeight: 400, color: C.navy }}>
-            {occasionName}
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button
-            onClick={() => setEditingOccasion(true)}
-            aria-label="Edit occasion"
+            onClick={back}
+            aria-label="Back"
             style={{
-              width: 32,
-              height: 32,
-              background: C.accentBg,
-              borderRadius: "50%",
+              background: "transparent",
+              border: "none",
+              padding: 0,
+              cursor: "pointer",
+              color: C.textLight,
               display: "flex",
               alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-              border: `0.5px solid ${C.border}`,
-              color: C.midBlue,
-              flexShrink: 0,
             }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 20h9" />
-              <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
             </svg>
           </button>
-          <button
-            onClick={() => setShowCreate(true)}
-            aria-label="New menu"
-            style={{
-              width: 32,
-              height: 32,
-              background: C.accentBg,
-              borderRadius: "50%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-              border: `0.5px solid ${C.border}`,
-              color: C.midBlue,
-              flexShrink: 0,
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 5v14" />
-              <path d="M5 12h14" />
-            </svg>
-          </button>
+          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            <div style={{
+              fontFamily: fontSans,
+              fontSize: 13,
+              fontWeight: 500,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              color: C.text,
+            }}>
+              {occasionName}
+            </div>
+            <div style={{
+              fontFamily: fontSans,
+              fontSize: 11,
+              color: C.textMuted,
+            }}>
+              {menus.length} {menus.length === 1 ? "menu" : "menus"}
+            </div>
+          </div>
         </div>
+        <button
+          onClick={() => setShowCreate(true)}
+          aria-label="New menu"
+          style={{
+            width: 32,
+            height: 32,
+            background: "transparent",
+            borderRadius: "50%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            border: `1px solid ${C.plusBorder}`,
+            color: C.textLight,
+            flexShrink: 0,
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 5v14" />
+            <path d="M5 12h14" />
+          </svg>
+        </button>
       </div>
 
-      {/* Body - Full-width rows */}
-      <div style={{ flex: 1, overflowY: "auto" }}>
+      {/* Body - Menu Cards */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "8px 20px 16px", display: "flex", flexDirection: "column", gap: 12, position: "relative", zIndex: 1 }}>
         {menus.length === 0 ? (
           <div style={{
             display: "flex",
@@ -185,9 +192,10 @@ export default function Menus({ occasionId, occasionName, back, push }: Props) {
             padding: "48px 24px",
           }}>
             <p style={{
-              fontFamily: fontSans,
-              fontSize: 13,
-              color: C.midBlue,
+              fontFamily: fontSerif,
+              fontStyle: "italic",
+              fontSize: 14,
+              color: C.textLight,
               margin: 0,
               textAlign: "center",
             }}>
@@ -199,82 +207,128 @@ export default function Menus({ occasionId, occasionName, back, push }: Props) {
             <div
               key={menu.id}
               style={{
-                width: "100%",
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: "16px 24px",
-                background: C.bg,
-                borderBottom: `0.5px solid ${C.border}`,
+                borderRadius: 16,
+                overflow: "hidden",
+                flexShrink: 0,
+                background: C.cardBg,
+                border: `1px solid ${C.cardBorder}`,
+                cursor: "pointer",
               }}
             >
-              <button
-                onClick={() => push(menu)}
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "flex-start",
-                  gap: 6,
-                  background: "transparent",
-                  border: "none",
-                  padding: 0,
-                  cursor: "pointer",
-                  textAlign: "left",
-                }}
-              >
-                <div style={{
+              {/* Photo placeholder */}
+              <div style={{
+                height: 130,
+                background: C.photoBg,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}>
+                <span style={{
                   fontFamily: fontSans,
-                  fontSize: 14,
+                  fontSize: 10,
                   fontWeight: 500,
-                  color: C.navy,
-                  width: "100%",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                  color: C.photoLabel,
                 }}>
-                  {menu.title}
-                </div>
-                {menu.description && (
+                  add a photo
+                </span>
+              </div>
+              {/* Card body */}
+              <div style={{
+                padding: "12px 16px 14px",
+                display: "flex",
+                alignItems: "flex-start",
+                justifyContent: "space-between",
+                gap: 10,
+              }}>
+                <button
+                  onClick={() => push(menu)}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    gap: 3,
+                    background: "transparent",
+                    border: "none",
+                    padding: 0,
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
                   <div style={{
-                    fontFamily: fontSerif,
-                    fontStyle: "italic",
-                    fontSize: 13,
-                    color: C.midBlue,
-                    lineHeight: 1.4,
+                    fontFamily: fontSans,
+                    fontSize: 15,
+                    fontWeight: 500,
+                    color: C.text,
                     width: "100%",
-                    display: "-webkit-box",
-                    WebkitLineClamp: 2,
-                    WebkitBoxOrient: "vertical",
                     overflow: "hidden",
-                  } as CSSProperties}>
-                    {menu.description}
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}>
+                    {menu.title}
                   </div>
-                )}
-              </button>
-              <button
-                onClick={() => setEditingMenu(menu)}
-                aria-label="Edit menu"
-                style={{
-                  width: 28,
-                  height: 28,
-                  background: "transparent",
-                  border: "none",
-                  borderRadius: "50%",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: "pointer",
-                  color: C.midBlue,
-                  flexShrink: 0,
-                }}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 20h9" />
-                  <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
-                </svg>
-              </button>
+                  {menu.description && (
+                    <div style={{
+                      fontFamily: fontSerif,
+                      fontStyle: "italic",
+                      fontWeight: 300,
+                      fontSize: 13,
+                      color: C.descText,
+                      lineHeight: 1.4,
+                      width: "100%",
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
+                      overflow: "hidden",
+                    } as CSSProperties}>
+                      {menu.description}
+                    </div>
+                  )}
+                </button>
+                <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0, paddingTop: 2 }}>
+                  <button
+                    onClick={() => setEditingMenu(menu)}
+                    aria-label="Edit menu"
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      padding: 0,
+                      cursor: "pointer",
+                      color: C.actionIcon,
+                    }}
+                  >
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                      <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (window.confirm(`Delete ${menu.title}?`)) {
+                        deleteMenu(menu.id);
+                        refreshMenus();
+                      }
+                    }}
+                    aria-label="Delete menu"
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      padding: 0,
+                      cursor: "pointer",
+                      color: C.actionIcon,
+                    }}
+                  >
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                      <path d="M10 11v6M14 11v6" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
             </div>
           ))
         )}

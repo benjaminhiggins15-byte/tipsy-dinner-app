@@ -3,6 +3,7 @@ import {
   findMenu,
   updateMenu,
   getRecipesForMenuSection,
+  removeRecipeFromMenuSection,
   findCustomCategory,
   type Menu,
   type MenuSection,
@@ -11,19 +12,23 @@ import {
 } from "./data";
 
 const C = {
-  bg: "#EEF4F8",
-  accentBg: "#E6F1FB",
-  borderLight: "#C5DCF4",
-  border: "#85B7EB",
-  navy: "#042C53",
-  midBlue: "#185FA5",
-  btnBlue: "#0C447C",
-  muted: "#5A7FA3",
-  white: "#ffffff",
+  bg: "#FAF7F2",
+  text: "#233C00",
+  textMuted: "rgba(35,60,0,0.35)",
+  textLight: "rgba(35,60,0,0.6)",
+  sectionBg: "rgba(35,60,0,0.04)",
+  sectionBorder: "rgba(35,60,0,0.08)",
+  sectionName: "rgba(35,60,0,0.6)",
+  sectionCount: "rgba(35,60,0,0.3)",
+  bodyBg: "rgba(35,60,0,0.02)",
+  rowBorder: "rgba(35,60,0,0.05)",
+  removeIcon: "rgba(35,60,0,0.2)",
+  addText: "rgba(35,60,0,0.3)",
+  chevron: "rgba(35,60,0,0.25)",
 };
 
-const fontSerif = "'Playfair Display', serif";
-const fontSans = "'DM Sans', sans-serif";
+const fontSerif = "'Fraunces', serif";
+const fontSans = "'Inter', sans-serif";
 
 function BackArrow() {
   return (
@@ -87,15 +92,30 @@ export default function MenuInterior({ menuId, back, push }: Props) {
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg, position: "relative" }}>
+      {/* Gradient background */}
+      <div style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 420,
+        background: "linear-gradient(180deg, #3a6010 0%, #2E4E08 35%, #233C00 100%)",
+        zIndex: 0,
+        pointerEvents: "none",
+      }} />
+
       {/* Header */}
       <div style={{
-        background: C.white,
-        borderBottom: `1px solid ${C.borderLight}`,
-        padding: "16px 16px 20px",
+        padding: "16px 24px",
         flexShrink: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        position: "relative",
+        zIndex: 1,
       }}>
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button
             onClick={back}
             aria-label="Back"
@@ -104,61 +124,56 @@ export default function MenuInterior({ menuId, back, push }: Props) {
               border: "none",
               padding: 0,
               cursor: "pointer",
-              color: C.midBlue,
+              color: C.textLight,
               display: "flex",
               alignItems: "center",
             }}
           >
-            <BackArrow />
-          </button>
-          <button
-            onClick={() => setShowEdit(true)}
-            aria-label="Edit menu"
-            style={{
-              width: 32,
-              height: 32,
-              background: C.accentBg,
-              borderRadius: "50%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-              border: `0.5px solid ${C.border}`,
-              color: C.midBlue,
-              flexShrink: 0,
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 20h9" />
-              <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
             </svg>
           </button>
-        </div>
-        <div style={{
-          fontFamily: fontSerif,
-          fontSize: 24,
-          fontWeight: 500,
-          color: C.navy,
-          marginBottom: 6,
-          lineHeight: 1.2,
-        }}>
-          {menu.title}
-        </div>
-        {menu.description && (
-          <div style={{
-            fontFamily: fontSerif,
-            fontStyle: "italic",
-            fontSize: 14,
-            color: C.midBlue,
-            lineHeight: 1.4,
-          }}>
-            {menu.description}
+          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            <div style={{
+              fontFamily: fontSans,
+              fontSize: 13,
+              fontWeight: 500,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              color: C.text,
+            }}>
+              {menu.title}
+            </div>
+            <div style={{
+              fontFamily: fontSans,
+              fontSize: 11,
+              color: C.textMuted,
+            }}>
+              {/* Occasion name would go here if available */}
+            </div>
           </div>
-        )}
+        </div>
+        <button
+          onClick={() => setShowEdit(true)}
+          aria-label="Edit menu"
+          style={{
+            background: "transparent",
+            border: "none",
+            padding: 0,
+            cursor: "pointer",
+            color: C.textMuted,
+            flexShrink: 0,
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+            <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+          </svg>
+        </button>
       </div>
 
       {/* Sections */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "16px 16px 24px" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: "8px 20px 16px", display: "flex", flexDirection: "column", gap: 8, position: "relative", zIndex: 1 }}>
         {visibleSections.length === 0 ? (
           <div style={{
             display: "flex",
@@ -167,9 +182,10 @@ export default function MenuInterior({ menuId, back, push }: Props) {
             padding: "48px 24px",
           }}>
             <p style={{
-              fontFamily: fontSans,
-              fontSize: 13,
-              color: C.midBlue,
+              fontFamily: fontSerif,
+              fontStyle: "italic",
+              fontSize: 14,
+              color: C.textLight,
               margin: 0,
               textAlign: "center",
             }}>
@@ -177,75 +193,87 @@ export default function MenuInterior({ menuId, back, push }: Props) {
             </p>
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {visibleSections.map((section) => {
-              const recipes = getRecipesForMenuSection(menuId, section);
-              const isExpanded = expandedSections.has(section);
-              const count = recipes.length;
+          visibleSections.map((section) => {
+            const recipes = getRecipesForMenuSection(menuId, section);
+            const isExpanded = expandedSections.has(section);
+            const count = recipes.length;
 
-              return (
-                <div
-                  key={section}
+            return (
+              <div
+                key={section}
+                style={{
+                  borderRadius: 14,
+                  overflow: "hidden",
+                  flexShrink: 0,
+                }}
+              >
+                {/* Section Header */}
+                <button
+                  onClick={() => toggleSection(section)}
                   style={{
-                    background: C.accentBg,
-                    border: `0.5px solid ${C.border}`,
-                    borderRadius: 10,
-                    overflow: "hidden",
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "14px 16px",
+                    background: C.sectionBg,
+                    border: `1px solid ${C.sectionBorder}`,
+                    borderRadius: isExpanded ? "14px 14px 0 0" : 14,
+                    borderBottom: isExpanded ? "none" : `1px solid ${C.sectionBorder}`,
+                    cursor: "pointer",
                   }}
                 >
-                  {/* Section Header */}
-                  <button
-                    onClick={() => toggleSection(section)}
-                    style={{
-                      width: "100%",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      padding: "14px 16px",
-                      background: "transparent",
-                      border: "none",
-                      cursor: "pointer",
-                    }}
-                  >
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{
+                      fontFamily: fontSans,
+                      fontSize: 12,
+                      fontWeight: 500,
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                      color: C.sectionName,
+                    }}>
+                      {SECTION_LABELS[section]}
+                    </span>
                     <span style={{
                       fontFamily: fontSans,
                       fontSize: 11,
-                      fontWeight: 600,
-                      letterSpacing: "0.1em",
-                      textTransform: "uppercase",
-                      color: C.midBlue,
+                      color: C.sectionCount,
                     }}>
-                      {SECTION_LABELS[section]} · {count}
+                      {count} {count === 1 ? "recipe" : "recipes"}
                     </span>
-                    <span style={{
-                      color: C.border,
-                      fontSize: 16,
-                      lineHeight: 1,
-                      transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
-                      transition: "transform 200ms ease",
-                    }}>
-                      ›
-                    </span>
-                  </button>
+                  </div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.chevron} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{
+                    transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                    transition: "transform 200ms ease",
+                  }}>
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </button>
 
-                  {/* Expanded Content */}
-                  {isExpanded && (
-                    <>
-                      {/* Divider */}
-                      <div style={{
-                        width: "100%",
-                        height: 0.5,
-                        background: C.border,
-                        opacity: 0.4,
-                      }} />
-
-                      {/* Recipe rows */}
-                      {recipes.map((recipe, idx) => {
-                        const category = findCustomCategory(recipe.category);
-                        const categoryLabel = category?.label ?? "Unknown";
-                        return (
+                {/* Expanded Content */}
+                {isExpanded && (
+                  <div style={{
+                    background: C.bodyBg,
+                    border: `1px solid ${C.sectionBorder}`,
+                    borderTop: "none",
+                    borderRadius: "0 0 14px 14px",
+                  }}>
+                    {/* Recipe rows */}
+                    {recipes.map((recipe, idx) => {
+                      const category = findCustomCategory(recipe.category);
+                      const categoryLabel = category?.label ?? "Unknown";
+                      return (
+                        <div
+                          key={recipe.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            padding: "12px 16px",
+                            borderBottom: idx === recipes.length - 1 ? "none" : `1px solid ${C.rowBorder}`,
+                            gap: 12,
+                          }}
+                        >
                           <button
-                            key={recipe.id}
                             onClick={() => {
                               const recipeData: Recipe = {
                                 title: recipe.title,
@@ -259,84 +287,93 @@ export default function MenuInterior({ menuId, back, push }: Props) {
                               };
                               push({ name: "recipe", recipe: recipeData, categoryLabel });
                             }}
-                          style={{
-                            width: "100%",
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: "flex-start",
-                            gap: 6,
-                            padding: "14px 16px",
-                            background: "transparent",
-                            border: "none",
-                            borderTop: idx > 0 ? `0.5px solid rgba(133, 183, 235, 0.4)` : "none",
-                            cursor: "pointer",
-                            textAlign: "left",
-                          }}
-                        >
-                          <div style={{
-                            fontFamily: fontSans,
-                            fontSize: 14,
-                            fontWeight: 500,
-                            color: C.navy,
-                          }}>
-                            {recipe.title}
-                          </div>
-                          {recipe.description && (
+                            style={{
+                              flex: 1,
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "flex-start",
+                              gap: 2,
+                              background: "transparent",
+                              border: "none",
+                              padding: 0,
+                              cursor: "pointer",
+                              textAlign: "left",
+                            }}
+                          >
                             <div style={{
-                              fontFamily: fontSerif,
-                              fontStyle: "italic",
-                              fontSize: 12,
-                              color: C.midBlue,
-                              lineHeight: 1.4,
-                              display: "-webkit-box",
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: "vertical",
-                              overflow: "hidden",
-                            } as CSSProperties}>
-                              {recipe.description}
+                              fontFamily: fontSans,
+                              fontSize: 14,
+                              fontWeight: 500,
+                              color: C.text,
+                            }}>
+                              {recipe.title}
                             </div>
-                          )}
-                        </button>
+                            <div style={{
+                              fontFamily: fontSans,
+                              fontSize: 11,
+                              color: C.textMuted,
+                            }}>
+                              {categoryLabel} · 30 min
+                            </div>
+                          </button>
+                          <button
+                            onClick={() => {
+                              removeRecipeFromMenuSection(menuId, section, recipe.id);
+                              refreshMenu();
+                            }}
+                            aria-label="Remove recipe"
+                            style={{
+                              background: "transparent",
+                              border: "none",
+                              padding: 0,
+                              cursor: "pointer",
+                              color: C.removeIcon,
+                            }}
+                          >
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="18" y1="6" x2="6" y2="18" />
+                              <line x1="6" y1="6" x2="18" y2="18" />
+                            </svg>
+                          </button>
+                        </div>
                       );
-                      })}
+                    })}
 
-                      {/* Add section row */}
-                      <button
-                        onClick={() => {
-                          push({ name: "recipepicker", menuId, section });
-                        }}
-                        style={{
-                          width: "100%",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          padding: "14px 16px",
-                          background: "transparent",
-                          border: "none",
-                          borderTop: recipes.length > 0 ? `0.5px solid rgba(133, 183, 235, 0.4)` : "none",
-                          cursor: "pointer",
-                          color: C.midBlue,
-                        }}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M12 5v14" />
-                          <path d="M5 12h14" />
-                        </svg>
-                        <span style={{
-                          fontFamily: fontSans,
-                          fontSize: 13,
-                          fontWeight: 500,
-                          letterSpacing: "0.04em",
-                        }}>
-                          Add {SECTION_LABELS[section].toLowerCase()}
-                        </span>
-                      </button>
-                    </>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                    {/* Add recipe row */}
+                    <button
+                      onClick={() => {
+                        push({ name: "recipepicker", menuId, section });
+                      }}
+                      style={{
+                        width: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "12px 16px",
+                        background: "transparent",
+                        border: "none",
+                        borderTop: recipes.length > 0 ? `1px solid ${C.rowBorder}` : "none",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.addText} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 5v14" />
+                        <path d="M5 12h14" />
+                      </svg>
+                      <span style={{
+                        fontFamily: fontSans,
+                        fontSize: 12,
+                        fontWeight: 500,
+                        color: C.addText,
+                      }}>
+                        add a recipe
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
 

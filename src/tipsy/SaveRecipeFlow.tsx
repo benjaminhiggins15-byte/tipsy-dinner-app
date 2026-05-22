@@ -164,7 +164,7 @@ export default function SaveRecipeFlow({ onClose, onPick, onNew, initialSelected
       style={{
         position: "absolute",
         inset: 0,
-        background: "rgba(35, 60, 0, 0.35)",
+        background: "rgba(35, 60, 0, 0.08)",
         zIndex: 80,
         display: "flex",
         alignItems: "flex-end",
@@ -282,6 +282,19 @@ function SaveStep1({ cats, selectedCategory, onSelectCategory, onNew, onYes, onS
         </button>
         {cats.map((c) => {
           const isSelected = selectedCategory?.key === c.key;
+
+          const cardStyle = isSelected
+            ? {
+                width: 96, height: 70, position: "relative" as const,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                background: "rgba(35,60,0,0.1)",
+              }
+            : {
+                width: 96, height: 70, position: "relative" as const,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                background: c.gradient,
+              };
+
           return (
             <button
               key={c.key}
@@ -289,21 +302,18 @@ function SaveStep1({ cats, selectedCategory, onSelectCategory, onNew, onYes, onS
               style={{
                 flexShrink: 0, width: 96, cursor: "pointer",
                 borderRadius: 12, overflow: "hidden",
-                border: isSelected ? `2px solid ${C.text}` : "2px solid transparent",
+                border: isSelected ? "1px solid rgba(35,60,0,0.35)" : "2px solid transparent",
                 background: "none", padding: 0, textAlign: "left",
               }}
             >
-              <div style={{
-                width: 96, height: 70, position: "relative",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                background: c.gradient,
-              }}>
-                <div style={{ position: "absolute", inset: 0, background: "rgba(35, 60, 0, 0.15)" }} />
+              <div style={cardStyle}>
+                {!isSelected && <div style={{ position: "absolute", inset: 0, background: "rgba(35, 60, 0, 0.15)" }} />}
                 <div style={{
                   position: "absolute", bottom: 6, left: 0, right: 0, textAlign: "center",
                   fontFamily: fontSans, fontSize: 9, fontWeight: 700, letterSpacing: "0.12em",
-                  textTransform: "uppercase", color: "rgba(255,255,255,0.95)",
-                  textShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                  textTransform: "uppercase",
+                  color: isSelected ? "#233C00" : "rgba(255,255,255,0.95)",
+                  textShadow: isSelected ? "none" : "0 1px 3px rgba(0,0,0,0.3)",
                 }}>{c.label}</div>
               </div>
               <div style={{ fontFamily: fontSans, fontSize: 11, fontWeight: 500, color: C.text, padding: "6px 4px 2px" }}>{c.label}</div>
@@ -347,22 +357,23 @@ function SaveStep1({ cats, selectedCategory, onSelectCategory, onNew, onYes, onS
 
       {/* Save button */}
       <button
-        onClick={onSave}
-        disabled={!selectedCategory}
+        onClick={selectedCategory ? onSave : undefined}
         style={{
           width: "calc(100% - 36px)",
           margin: "0 18px",
           padding: "14px",
-          background: selectedCategory ? C.ctaBg : C.chipBg,
+          background: "#233C00",
           border: "none",
           borderRadius: 14,
-          color: selectedCategory ? C.ctaText : C.textMuted,
+          color: "#FAF7F2",
           fontFamily: fontSans,
           fontSize: 12,
           fontWeight: 500,
           textTransform: "lowercase",
           letterSpacing: "0.02em",
           cursor: selectedCategory ? "pointer" : "not-allowed",
+          opacity: selectedCategory ? 1 : 0.4,
+          pointerEvents: selectedCategory ? "auto" : "none",
         }}
       >
         save recipe for now
@@ -566,20 +577,21 @@ function SaveStep2({ occasions, selectedOccasion, setSelectedOccasion, selectedM
           ← Back
         </button>
         <button
-          onClick={onSave}
-          disabled={!selectedSection}
+          onClick={selectedSection ? onSave : undefined}
           style={{
             padding: "12px 24px",
-            background: selectedSection ? C.ctaBg : C.chipBg,
+            background: "#233C00",
             border: "none",
             borderRadius: 14,
-            color: selectedSection ? C.ctaText : C.textMuted,
+            color: "#FAF7F2",
             fontFamily: fontSans,
             fontSize: 12,
             fontWeight: 500,
             textTransform: "lowercase",
             letterSpacing: "0.02em",
             cursor: selectedSection ? "pointer" : "not-allowed",
+            opacity: selectedSection ? 1 : 0.4,
+            pointerEvents: selectedSection ? "auto" : "none",
           }}
         >
           save recipe for now
