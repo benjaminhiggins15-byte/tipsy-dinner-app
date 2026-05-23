@@ -291,7 +291,6 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
         <ScreenWrap key={step}>
           {step === 1 && (
             <>
-              <Eyebrow>Step 1 — The recipe</Eyebrow>
               <Title>What are we making?</Title>
               <Sub>Give your recipe a name and a short description.</Sub>
               <Field>
@@ -319,7 +318,6 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
 
           {step === 2 && (
             <>
-              <Eyebrow>Step 2 — Ingredients</Eyebrow>
               <Title>What goes in it?</Title>
               <Sub>Add each ingredient with a name and quantity.</Sub>
 
@@ -460,7 +458,6 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
 
           {step === 3 && (
             <>
-              <Eyebrow>Step 3 — Method</Eyebrow>
               <Title>How do you make it?</Title>
               <Sub>Walk through each step in order.</Sub>
 
@@ -617,7 +614,6 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                   Saved to {savedCategory.label}
                 </span>
               </div>
-              <Eyebrow>Your recipe</Eyebrow>
               <Title>{title}</Title>
               <Sub>Tap the card to view it in Explore.</Sub>
               <div onClick={() => goRecipe({ ...previewRecipe, categoryKey: savedCategory.key }, savedCategory.key, savedCategory.label)} style={{ cursor: "pointer" }}>

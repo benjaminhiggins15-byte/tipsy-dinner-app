@@ -11,6 +11,7 @@ import RecipePicker from "./RecipePicker";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 import Anthropic from "@anthropic-ai/sdk";
 import watermarkSquare from "../Logos/watermark_square.png";
+import watermarkCircle from "../Logos/watermark_circle.png";
 import {
   IconChefHat,
   IconBook,
@@ -1152,8 +1153,10 @@ function RecipeCard({
             {ingredients.map((i, idx) => (
               <div key={idx} style={{
                 display: "flex",
-                alignItems: "center",
+                flexDirection: "row",
+                alignItems: "flex-start",
                 justifyContent: "space-between",
+                gap: 8,
                 padding: "12px 24px",
                 borderBottom: idx === ingredients.length - 1 ? "none" : "1px dotted rgba(35,60,0,0.1)",
               }}>
@@ -1162,6 +1165,9 @@ function RecipeCard({
                   fontSize: 15,
                   fontWeight: 400,
                   color: "#233C00",
+                  textAlign: "left",
+                  flex: 1,
+                  maxWidth: "58%",
                 }}>{i.name}</span>
                 <span style={{
                   fontFamily: "Inter, sans-serif",
@@ -1169,6 +1175,9 @@ function RecipeCard({
                   fontWeight: 500,
                   fontVariantNumeric: "tabular-nums",
                   color: "rgba(35,60,0,0.4)",
+                  textAlign: "right",
+                  flexShrink: 0,
+                  maxWidth: "40%",
                 }}>{i.qty}</span>
               </div>
             ))}
@@ -1398,7 +1407,9 @@ When you are ready to present a recipe, use this exact format:
 </steps>
 </recipe>
 
-Use this format every time a recipe is created or updated. Never deviate from it. The text above the recipe block should always be a natural one to two sentence handoff as described above — never let the recipe block appear with no text above it.`;
+Use this format every time a recipe is created or updated. Never deviate from it. The text above the recipe block should always be a natural one to two sentence handoff as described above — never let the recipe block appear with no text above it.
+
+In the recipe JSON, the ingredient name field must contain only the ingredient name — never include quantity, amount, or preparation notes in the name field. All quantity information including amount, unit, and preparation notes must go in the quantity field only.`;
 
       const stream = await anthropic.messages.stream({
         model: "claude-sonnet-4-5",
@@ -1659,7 +1670,9 @@ When you are ready to present a recipe, use this exact format:
 </steps>
 </recipe>
 
-Use this format every time a recipe is created or updated. Never deviate from it. The text above the recipe block should always be a natural one to two sentence handoff as described above — never let the recipe block appear with no text above it.`;
+Use this format every time a recipe is created or updated. Never deviate from it. The text above the recipe block should always be a natural one to two sentence handoff as described above — never let the recipe block appear with no text above it.
+
+In the recipe JSON, the ingredient name field must contain only the ingredient name — never include quantity, amount, or preparation notes in the name field. All quantity information including amount, unit, and preparation notes must go in the quantity field only.`;
 
         const stream = await anthropic.messages.stream({
           model: "claude-sonnet-4-5",
@@ -1787,17 +1800,15 @@ Use this format every time a recipe is created or updated. Never deviate from it
     <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative", background: "#FAF7F2" }}>
       {/* Header - Logo (and Write your own button when empty) */}
       {!expanded && (
-        <div style={{ height: 52, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px", flexShrink: 0, position: "relative", zIndex: 1 }}>
-          <div style={{ background: "transparent", border: "none", padding: 0, display: "flex", alignItems: "center" }}>
+        <div style={{ height: 52, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 24px 0 24px", flexShrink: 0, position: "relative", zIndex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center" }}>
             <img
-              src={watermarkSquare}
+              src={watermarkCircle}
               alt="Tipsy Dinner"
               style={{
                 height: 36,
                 width: "auto",
                 display: "block",
-                border: "none",
-                background: "none",
               }}
             />
           </div>
@@ -1805,7 +1816,7 @@ Use this format every time a recipe is created or updated. Never deviate from it
             <button
               onClick={() => push({ name: "addown" })}
               style={{
-                fontSize: 11,
+                fontSize: 10,
                 fontWeight: 500,
                 letterSpacing: "0.06em",
                 textTransform: "uppercase",
@@ -2489,8 +2500,10 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
           {recipe.ingredients.map((item, i) => (
             <div key={i} style={{
               display: "flex",
+              flexDirection: "row",
               justifyContent: "space-between",
-              alignItems: "center",
+              alignItems: "flex-start",
+              gap: 8,
               padding: "12px 24px",
               borderBottom: "1px dotted rgba(35,60,0,0.1)",
             }}>
@@ -2499,6 +2512,9 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
                 fontSize: 15,
                 fontWeight: 400,
                 color: "#233C00",
+                textAlign: "left",
+                flex: 1,
+                maxWidth: "58%",
               }}>{item.name}</span>
               <span style={{
                 fontFamily: "Inter, sans-serif",
@@ -2506,6 +2522,9 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
                 fontWeight: 500,
                 fontVariantNumeric: "tabular-nums",
                 color: "rgba(35,60,0,0.4)",
+                textAlign: "right",
+                flexShrink: 0,
+                maxWidth: "40%",
               }}>{item.qty}</span>
             </div>
           ))}
