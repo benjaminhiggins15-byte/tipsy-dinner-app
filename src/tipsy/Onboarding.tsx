@@ -35,7 +35,7 @@ function QuestionScreen({
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: "44px 24px 28px" }}>
       <div style={{ marginBottom: 14 }}>
-        <div style={{ fontFamily: "'Lazydog', sans-serif", fontSize: 22, color: "#233C00", textTransform: "uppercase", lineHeight: 1.3, marginBottom: 8 }}>
+        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 22, fontWeight: 700, color: "#233C00", textTransform: "uppercase", lineHeight: 1.3, marginBottom: 8 }}>
           {question}
         </div>
         <div style={{ fontFamily: "'Fraunces', serif", fontSize: 12, color: "rgba(35,60,0,0.55)", fontWeight: 300, fontStyle: "italic", lineHeight: 1.5 }}>
@@ -106,7 +106,7 @@ function Welcome({ onNext }: { onNext: () => void }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: "56px 28px 28px" }}>
       <div style={{ textAlign: "center" }}>
-        <div style={{ fontFamily: "'Lazydog', sans-serif", fontSize: 34, color: "#233C00", textTransform: "uppercase", lineHeight: 1.1 }}>
+        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 34, fontWeight: 700, color: "#233C00", textTransform: "uppercase", lineHeight: 1.1 }}>
           Tipsy Dinner
         </div>
         <div style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", fontWeight: 300, fontSize: 13, color: "rgba(35,60,0,0.55)", marginTop: 6 }}>

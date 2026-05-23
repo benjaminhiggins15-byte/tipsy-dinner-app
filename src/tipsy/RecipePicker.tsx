@@ -13,7 +13,7 @@ const C = {
   white: "#ffffff",
 };
 
-const fontSerif = "'Playfair Display', serif";
+const fontSerif = "'Inter', sans-serif";
 const fontSans = "'DM Sans', sans-serif";
 
 const DURATION = 300;

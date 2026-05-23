@@ -62,7 +62,7 @@ const C = {
 
 const fontSerif = "Fraunces, serif";
 const fontSans = "Inter, sans-serif";
-const fontDisplay = "Lazydog, sans-serif";
+const fontDisplay = "Inter, sans-serif";
 
 // Tray category gradients (per reference)
 const trayGradients: Record<string, string> = {
@@ -257,7 +257,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
       {/* Top Bar */}
       <div style={{
         height: 52,
-        display: "flex", alignItems: "center", justifyContent: "space-between",
+        display: "flex", alignItems: "center",
         padding: "0 24px",
         position: "relative", flexShrink: 0,
       }}>
@@ -269,38 +269,6 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
             <polyline points="15 18 9 12 15 6" />
           </svg>
         </button>
-        <span style={{
-          fontFamily: fontSans,
-          fontSize: 11,
-          fontWeight: 500,
-          letterSpacing: "0.1em",
-          textTransform: "uppercase",
-          color: C.textMuted,
-        }}>
-          Step {step} of 5
-        </span>
-        {step >= 1 && step <= 3 && (
-          <button onClick={() => {
-            if (step === 1) tryAdvance1();
-            else if (step === 2) tryAdvance2();
-            else if (step === 3) tryAdvance3();
-          }} style={{
-            fontFamily: fontSans,
-            fontSize: 12,
-            fontWeight: 500,
-            letterSpacing: "0.06em",
-            textTransform: "uppercase",
-            color: C.nextBtnText,
-            background: C.nextBtnBg,
-            borderRadius: 20,
-            padding: "8px 16px",
-            border: "none",
-            cursor: "pointer",
-          }}>
-            Next
-          </button>
-        )}
-        {step === 4 && <div style={{ width: 70 }} />}
       </div>
 
       {/* Progress */}

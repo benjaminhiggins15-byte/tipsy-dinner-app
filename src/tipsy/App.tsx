@@ -795,7 +795,7 @@ function Categories({ push, back, isTabRoot }: { push: (s: Screen) => void; back
                   <div style={{ fontFamily: "Inter, sans-serif", fontSize: 11, fontWeight: 400, color: "rgba(35,60,0,0.4)" }}>
                     {count} {count === 1 ? "recipe" : "recipes"}
                   </div>
-                  <div style={{ fontFamily: "Lazydog, sans-serif", fontSize: 15, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#233C00", lineHeight: 1.15 }}>
+                  <div style={{ fontFamily: "Inter, sans-serif", fontSize: 15, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#233C00", lineHeight: 1.15 }}>
                     {c.label}
                   </div>
                 </div>
@@ -893,11 +893,11 @@ function Recipes({
             {/* Recipe info */}
             <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
               <div style={{
-                fontFamily: "Lazydog, sans-serif",
+                fontFamily: "Inter, sans-serif",
                 fontSize: 14,
                 fontWeight: 700,
                 letterSpacing: "0.06em",
-                textTransform: "uppercase",
+                textTransform: "capitalize",
                 color: "#233C00",
                 lineHeight: 1.2,
                 whiteSpace: "nowrap",
@@ -1021,12 +1021,12 @@ function RecipeCard({
 
           {/* Title */}
           <div style={{
-            fontFamily: "Lazydog, sans-serif",
+            fontFamily: "Inter, sans-serif",
             fontStyle: "normal",
             fontSize: 28,
             fontWeight: 700,
             letterSpacing: "0.04em",
-            textTransform: "uppercase",
+            textTransform: "capitalize",
             color: "#233C00",
             lineHeight: 1.1,
             marginBottom: 8,
@@ -1232,13 +1232,13 @@ function Placeholder({ title, back }: { title: string; back: () => void }) {
             <BackArrow />
           </button>
         </div>
-        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 400, color: "#042C53" }}>
+        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 28, fontWeight: 700, textTransform: "uppercase", color: "#042C53" }}>
           {title}
         </div>
       </div>
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, flexDirection: "column", gap: 16 }}>
         <div style={{ width: 32, height: 1, background: "#85B7EB" }} />
-        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 20, color: "#042C53", textAlign: "center" }}>
+        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 20, fontWeight: 700, textTransform: "uppercase", color: "#042C53", textAlign: "center" }}>
           coming soon
         </div>
         <div style={{ fontSize: 12, color: "#185FA5", letterSpacing: "0.04em" }}>
@@ -1360,7 +1360,7 @@ Brainstorm mode — helping the user land on a dish. Stay here until they've cho
 Recipe mode — only enter this when the user has chosen a specific dish and indicated they want the recipe. Never jump here early.
 Brainstorm mode rules:
 If the request is broad or the cuisine direction is still open, ask one focused question before offering suggestions. Broad means anything where cuisine type, protein, occasion, or dietary direction is still unknown. Do not offer suggestions until you have enough to make them meaningful.
-Once you have enough to go on, always open with one short natural line before the suggestions — something like 'a few ideas' or 'here's where I'd go' — then offer three to five specific, concrete suggestions. Never lead directly with a bolded dish name. There must always be a line of prose before the list. Not "a pasta dish" but "cacio e pepe with lemon zest." Make them sound genuinely good. Bold the dish name, follow with a one to two sentence description on the same line or just below.
+Once you have enough to go on, always open with one short natural line before the suggestions — something like 'a few ideas' or 'here's where I'd go' — then offer three to five specific, concrete suggestions. Never lead directly with a bolded dish name. There must always be a line of prose before the list. Not "a pasta dish" but "cacio e pepe with lemon zest." Make them sound genuinely good. Format each suggestion with the dish name in bold, followed by an em dash, then the description on the same line. Example: **Grilled little gem wedges** — halved, charred face-down until edges crisp, hit with olive oil and flaky salt. Never bold full sentences or descriptive copy — only the dish name itself.
 If the user says "show me more," offer another round of equally specific suggestions in the same format.
 Close each round of suggestions with a short directional question. Vary the phrasing. Never use the same closing line twice in a conversation.
 If the user gives you a very short or one-word answer and it's enough to go on, acknowledge it briefly in one short phrase before moving into suggestions — something like 'good call' or 'light bites it is' — then go straight into the list. Only ask a follow-up if the answer genuinely isn't enough to proceed.
@@ -1374,7 +1374,7 @@ Technique and tangent questions:
 Answer wine pairing, technique, equipment, and any other cooking questions naturally as part of the conversation. Never preface these with a comment about what kind of question it is. Just answer it like a person would.
 Do not trigger a recipe card update for conversational tangents. Only update the card when the user is explicitly iterating on the recipe itself.
 General rules:
-No markdown formatting except bold for dish names in brainstorm lists. No asterisks, no headers, no bullet points in responses. Plain conversational prose everywhere else.
+No markdown formatting except bold for dish names in brainstorm lists. Never use asterisks for anything other than bolding item names in lists. No headers, no bullet points in responses. Plain conversational prose everywhere else.
 Never pepper the user with questions. One question maximum before committing to something useful.
 Anchor to the user's stated parameters throughout the entire conversation. If they say light and summery, every suggestion stays light and summery until they explicitly change direction.
 Never acknowledge what type of question is being asked. Never categorize a request before answering it. Just answer.
@@ -1587,7 +1587,7 @@ Use this format every time a recipe is created or updated. Never deviate from it
   };
 
   const isEmpty = messages.length === 0;
-  const placeholder = isEmpty ? "pour a glass — what are we cooking?" : "ask anything…";
+  const placeholder = "ask anything";
 
   const handleChipClick = (text: string) => {
     if (typing) return;
@@ -1621,7 +1621,7 @@ Brainstorm mode — helping the user land on a dish. Stay here until they've cho
 Recipe mode — only enter this when the user has chosen a specific dish and indicated they want the recipe. Never jump here early.
 Brainstorm mode rules:
 If the request is broad or the cuisine direction is still open, ask one focused question before offering suggestions. Broad means anything where cuisine type, protein, occasion, or dietary direction is still unknown. Do not offer suggestions until you have enough to make them meaningful.
-Once you have enough to go on, always open with one short natural line before the suggestions — something like 'a few ideas' or 'here's where I'd go' — then offer three to five specific, concrete suggestions. Never lead directly with a bolded dish name. There must always be a line of prose before the list. Not "a pasta dish" but "cacio e pepe with lemon zest." Make them sound genuinely good. Bold the dish name, follow with a one to two sentence description on the same line or just below.
+Once you have enough to go on, always open with one short natural line before the suggestions — something like 'a few ideas' or 'here's where I'd go' — then offer three to five specific, concrete suggestions. Never lead directly with a bolded dish name. There must always be a line of prose before the list. Not "a pasta dish" but "cacio e pepe with lemon zest." Make them sound genuinely good. Format each suggestion with the dish name in bold, followed by an em dash, then the description on the same line. Example: **Grilled little gem wedges** — halved, charred face-down until edges crisp, hit with olive oil and flaky salt. Never bold full sentences or descriptive copy — only the dish name itself.
 If the user says "show me more," offer another round of equally specific suggestions in the same format.
 Close each round of suggestions with a short directional question. Vary the phrasing. Never use the same closing line twice in a conversation.
 If the user gives you a very short or one-word answer and it's enough to go on, acknowledge it briefly in one short phrase before moving into suggestions — something like 'good call' or 'light bites it is' — then go straight into the list. Only ask a follow-up if the answer genuinely isn't enough to proceed.
@@ -1635,7 +1635,7 @@ Technique and tangent questions:
 Answer wine pairing, technique, equipment, and any other cooking questions naturally as part of the conversation. Never preface these with a comment about what kind of question it is. Just answer it like a person would.
 Do not trigger a recipe card update for conversational tangents. Only update the card when the user is explicitly iterating on the recipe itself.
 General rules:
-No markdown formatting except bold for dish names in brainstorm lists. No asterisks, no headers, no bullet points in responses. Plain conversational prose everywhere else.
+No markdown formatting except bold for dish names in brainstorm lists. Never use asterisks for anything other than bolding item names in lists. No headers, no bullet points in responses. Plain conversational prose everywhere else.
 Never pepper the user with questions. One question maximum before committing to something useful.
 Anchor to the user's stated parameters throughout the entire conversation. If they say light and summery, every suggestion stays light and summery until they explicitly change direction.
 Never acknowledge what type of question is being asked. Never categorize a request before answering it. Just answer.
@@ -1818,7 +1818,7 @@ Use this format every time a recipe is created or updated. Never deviate from it
                 fontFamily: "Inter, sans-serif",
               }}
             >
-              Write your own
+              Write a recipe
             </button>
           )}
         </div>
@@ -1830,12 +1830,12 @@ Use this format every time a recipe is created or updated. Never deviate from it
           {/* Hero text */}
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 32px 20px", position: "relative", zIndex: 1 }}>
             <div style={{
-              fontFamily: "Lazydog, sans-serif",
+              fontFamily: "Inter, sans-serif",
               fontStyle: "normal",
-              fontSize: 32,
-              fontWeight: 400,
+              fontSize: 30,
+              fontWeight: 300,
               color: "#233C00",
-              textTransform: "uppercase",
+              textTransform: "lowercase",
               lineHeight: 1.1,
               textAlign: "center",
             }}>
@@ -1843,91 +1843,132 @@ Use this format every time a recipe is created or updated. Never deviate from it
             </div>
           </div>
 
-          {/* Prompt chips and divider */}
-          <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", gap: 10, padding: "0 20px 16px", position: "relative", zIndex: 1 }}>
+          {/* Prompt chips - horizontal scrolling row */}
+          <div style={{
+            flexShrink: 0,
+            display: "flex",
+            flexDirection: "row",
+            overflowX: "auto",
+            padding: "0 20px 8px",
+            position: "relative",
+            zIndex: 1,
+            gap: 12,
+            WebkitOverflowScrolling: "touch",
+          }}>
             <button
-              onClick={() => handleChipClick("something impressive for a dinner party")}
+              onClick={() => handleChipClick("Brainstorm sides for grilled ribeye")}
               style={{
-                width: "100%",
-                fontFamily: "Fraunces, serif",
-                fontStyle: "italic",
-                fontWeight: 400,
-                fontSize: 14,
-                color: "rgba(35,60,0,0.75)",
-                background: "rgba(35,60,0,0.05)",
+                minWidth: 200,
+                height: 72,
+                background: "rgba(35,60,0,0.06)",
                 border: "1px solid rgba(35,60,0,0.1)",
-                borderRadius: 12,
-                padding: "13px 18px",
-                lineHeight: 1,
+                borderRadius: 16,
+                padding: "14px 16px",
                 cursor: "pointer",
-                textAlign: "left",
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-start",
+                justifyContent: "center",
+                gap: 4,
+                flexShrink: 0,
               }}
             >
-              something impressive for a dinner party
-            </button>
-            <button
-              onClick={() => handleChipClick("a weeknight dinner, nothing too fussy")}
-              style={{
-                width: "100%",
+              <div style={{
+                fontFamily: "Inter, sans-serif",
+                fontWeight: 700,
+                fontSize: 15,
+                color: "#233C00",
+                lineHeight: 1.2,
+              }}>
+                Brainstorm
+              </div>
+              <div style={{
                 fontFamily: "Fraunces, serif",
                 fontStyle: "italic",
-                fontWeight: 400,
-                fontSize: 14,
-                color: "rgba(35,60,0,0.75)",
-                background: "rgba(35,60,0,0.05)",
-                border: "1px solid rgba(35,60,0,0.1)",
-                borderRadius: 12,
-                padding: "13px 18px",
-                lineHeight: 1,
-                cursor: "pointer",
-                textAlign: "left",
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              a weeknight dinner, nothing too fussy
+                fontWeight: 300,
+                fontSize: 13,
+                color: "rgba(35,60,0,0.55)",
+                lineHeight: 1.2,
+              }}>
+                sides for grilled ribeye
+              </div>
             </button>
             <button
-              onClick={() => handleChipClick("we've got a bottle open — build around it")}
+              onClick={() => handleChipClick("Help me decide on dinner")}
               style={{
-                width: "100%",
-                fontFamily: "Fraunces, serif",
-                fontStyle: "italic",
-                fontWeight: 400,
-                fontSize: 14,
-                color: "rgba(35,60,0,0.75)",
-                background: "rgba(35,60,0,0.05)",
+                minWidth: 200,
+                height: 72,
+                background: "rgba(35,60,0,0.06)",
                 border: "1px solid rgba(35,60,0,0.1)",
-                borderRadius: 12,
-                padding: "13px 18px",
-                lineHeight: 1,
+                borderRadius: 16,
+                padding: "14px 16px",
                 cursor: "pointer",
-                textAlign: "left",
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-start",
+                justifyContent: "center",
+                gap: 4,
+                flexShrink: 0,
               }}
             >
-              we've got a bottle open — build around it
+              <div style={{
+                fontFamily: "Inter, sans-serif",
+                fontWeight: 700,
+                fontSize: 15,
+                color: "#233C00",
+                lineHeight: 1.2,
+              }}>
+                Help
+              </div>
+              <div style={{
+                fontFamily: "Fraunces, serif",
+                fontStyle: "italic",
+                fontWeight: 300,
+                fontSize: 13,
+                color: "rgba(35,60,0,0.55)",
+                lineHeight: 1.2,
+              }}>
+                me decide on dinner
+              </div>
             </button>
-
-            {/* Divider - text only, no lines */}
-            <div style={{
-              fontFamily: "Inter, sans-serif",
-              fontSize: 11,
-              fontWeight: 500,
-              letterSpacing: "0.1em",
-              textTransform: "uppercase",
-              color: "rgba(35,60,0,0.25)",
-              textAlign: "center",
-              padding: "2px 0",
-            }}>
-              or just type
-            </div>
+            <button
+              onClick={() => handleChipClick("Elevate my bolognese recipe")}
+              style={{
+                minWidth: 200,
+                height: 72,
+                background: "rgba(35,60,0,0.06)",
+                border: "1px solid rgba(35,60,0,0.1)",
+                borderRadius: 16,
+                padding: "14px 16px",
+                cursor: "pointer",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-start",
+                justifyContent: "center",
+                gap: 4,
+                flexShrink: 0,
+              }}
+            >
+              <div style={{
+                fontFamily: "Inter, sans-serif",
+                fontWeight: 700,
+                fontSize: 15,
+                color: "#233C00",
+                lineHeight: 1.2,
+              }}>
+                Elevate
+              </div>
+              <div style={{
+                fontFamily: "Fraunces, serif",
+                fontStyle: "italic",
+                fontWeight: 300,
+                fontSize: 13,
+                color: "rgba(35,60,0,0.55)",
+                lineHeight: 1.2,
+              }}>
+                my bolognese recipe
+              </div>
+            </button>
           </div>
         </>
       ) : (
@@ -2075,7 +2116,7 @@ function ChatBubble({ role, text }: { role: "user" | "ai"; text: string }) {
         elements.push(
           <div key={key++} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
             <span style={{ fontWeight: 500, flexShrink: 0 }}>{num}.</span>
-            <span dangerouslySetInnerHTML={{ __html: content.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') }} />
+            <span dangerouslySetInnerHTML={{ __html: content.replace(/\*\*(.+?)\*\*/g, '<span style="font-weight: 700; font-family: Inter, sans-serif; color: #233C00">$1</span>') }} />
           </div>
         );
         continue;
@@ -2083,7 +2124,7 @@ function ChatBubble({ role, text }: { role: "user" | "ai"; text: string }) {
 
       // Regular line with potential bold formatting
       if (line.trim()) {
-        const html = line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        const html = line.replace(/\*\*(.+?)\*\*/g, '<span style="font-weight: 700; font-family: Inter, sans-serif; color: #233C00">$1</span>');
         elements.push(
           <div key={key++} style={{ marginBottom: i < lines.length - 1 ? 8 : 0 }}>
             <span dangerouslySetInnerHTML={{ __html: html }} />
@@ -2121,16 +2162,15 @@ function ChatBubble({ role, text }: { role: "user" | "ai"; text: string }) {
     );
   }
 
-  // AI messages - no bubble, Fraunces italic green text on cream
+  // AI messages - no bubble, Inter text on cream
   return (
     <div
       style={{
         alignSelf: "flex-start",
         color: "#233C00",
-        fontFamily: "Fraunces, serif",
-        fontStyle: "italic",
-        fontWeight: 300,
-        fontSize: 16,
+        fontFamily: "Inter, sans-serif",
+        fontWeight: 400,
+        fontSize: 15,
         maxWidth: "88%",
         lineHeight: 1.55,
         padding: "4px 0",
@@ -2206,8 +2246,8 @@ function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
     if (textareaRef.current) {
       // Reset height to auto to get the correct scrollHeight
       textareaRef.current.style.height = "auto";
-      // Set height based on scrollHeight, capped at ~5 lines (100px)
-      const newHeight = Math.min(textareaRef.current.scrollHeight, 100);
+      // Set height based on scrollHeight, capped at 8 lines (168px)
+      const newHeight = Math.min(textareaRef.current.scrollHeight, 168);
       textareaRef.current.style.height = `${newHeight}px`;
     }
   }, [value]);
@@ -2245,8 +2285,8 @@ function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
             fontSize: 15,
             color: "#233C00",
             resize: "none",
-            overflow: "hidden",
-            maxHeight: "1.4em",
+            overflowY: "auto",
+            maxHeight: 168,
             lineHeight: 1.4,
             padding: 0,
           }}
@@ -2356,11 +2396,11 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
           fontFamily: "Inter, sans-serif",
           fontSize: 10,
           textTransform: "uppercase",
-          letterSpacing: "0.1em",
-          color: "rgba(35,60,0,0.5)",
+          letterSpacing: "0.12em",
+          color: "rgba(35,60,0,0.35)",
           fontWeight: 500,
         }}>
-          Recipe Preview
+          RECIPE PREVIEW
         </div>
         <span />
       </div>
@@ -2369,23 +2409,24 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto" }}>
         {/* Hero section - scrolls normally */}
         <div style={{ height: 120, background: "#FAF7F2" }} />
-        <div style={{ padding: "16px 20px 14px" }}>
+        <div style={{ padding: "16px 24px 14px" }}>
           <div style={{
             fontFamily: "Inter, sans-serif",
-            fontSize: 9,
+            fontSize: 11,
             textTransform: "uppercase",
-            letterSpacing: "0.14em",
-            color: "rgba(35,60,0,0.5)",
+            letterSpacing: "0.12em",
+            color: "rgba(35,60,0,0.35)",
             marginBottom: 6,
             fontWeight: 500,
           }}>
             Recipe
           </div>
           <div style={{
-            fontFamily: "Lazydog, sans-serif",
-            fontSize: 20,
+            fontFamily: "Inter, sans-serif",
+            fontSize: 28,
+            fontWeight: 700,
             color: "#233C00",
-            lineHeight: 1.3,
+            lineHeight: 1.1,
             marginBottom: 8,
             textTransform: "uppercase",
           }}>
@@ -2395,41 +2436,52 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
             fontFamily: "Fraunces, serif",
             fontStyle: "italic",
             fontWeight: 300,
-            fontSize: 14,
-            color: "rgba(35,60,0,0.75)",
+            fontSize: 15,
+            color: "rgba(35,60,0,0.55)",
             lineHeight: 1.5,
           }}>
             {recipe.description}
           </div>
         </div>
-        <div style={{ borderTop: "1px solid rgba(35,60,0,0.12)" }} />
 
         {/* Sticky Tabs - stick to top when scrolled */}
-        <div style={{ display: "flex", position: "sticky", top: 0, zIndex: 10, background: "#FAF7F2" }}>
-          {(["ingredients", "steps"] as const).map((t) => {
-            const active = tab === t;
-            return (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                style={{
-                  flex: 1,
-                  padding: "11px 0",
-                  background: active ? "rgba(35,60,0,0.08)" : "rgba(35,60,0,0.03)",
-                  color: active ? "#233C00" : "rgba(35,60,0,0.5)",
-                  border: "none",
-                  cursor: "pointer",
-                  fontFamily: "Inter, sans-serif",
-                  fontSize: 11,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.1em",
-                  fontWeight: 500,
-                }}
-              >
-                {t}
-              </button>
-            );
-          })}
+        <div style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 10,
+          background: "#FAF7F2",
+          borderBottom: "1px solid rgba(35,60,0,0.08)",
+        }}>
+          <div style={{
+            display: "flex",
+            gap: 28,
+            padding: "20px 24px 0",
+          }}>
+            {(["ingredients", "steps"] as const).map((t) => {
+              const active = tab === t;
+              return (
+                <button
+                  key={t}
+                  onClick={() => setTab(t)}
+                  style={{
+                    background: "transparent",
+                    color: active ? "#233C00" : "rgba(35,60,0,0.3)",
+                    border: "none",
+                    borderBottom: active ? "1.5px solid #233C00" : "1.5px solid transparent",
+                    cursor: "pointer",
+                    fontFamily: "Inter, sans-serif",
+                    fontSize: 11,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    fontWeight: 500,
+                    padding: "0 0 12px 0",
+                  }}
+                >
+                  {t}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Both tabs rendered, only one visible */}
@@ -2439,18 +2491,21 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
-              padding: "10px 20px",
-              borderBottom: "1px solid rgba(35,60,0,0.08)",
+              padding: "12px 24px",
+              borderBottom: "1px dotted rgba(35,60,0,0.1)",
             }}>
               <span style={{
                 fontFamily: "Inter, sans-serif",
-                fontSize: 13,
+                fontSize: 15,
+                fontWeight: 400,
                 color: "#233C00",
               }}>{item.name}</span>
               <span style={{
                 fontFamily: "Inter, sans-serif",
-                fontSize: 13,
-                color: "rgba(35,60,0,0.6)",
+                fontSize: 14,
+                fontWeight: 500,
+                fontVariantNumeric: "tabular-nums",
+                color: "rgba(35,60,0,0.4)",
               }}>{item.qty}</span>
             </div>
           ))}
@@ -2461,23 +2516,31 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
               display: "flex",
               gap: 14,
               alignItems: "flex-start",
-              padding: "12px 20px",
-              borderBottom: "1px solid rgba(35,60,0,0.08)",
+              padding: "12px 24px",
+              borderBottom: "1px dotted rgba(35,60,0,0.1)",
             }}>
-              <span style={{
-                fontFamily: "Inter, sans-serif",
-                fontSize: 20,
-                color: "rgba(35,60,0,0.4)",
-                lineHeight: 1,
+              <div style={{
+                width: 28,
+                height: 28,
+                borderRadius: "50%",
+                background: "rgba(35,60,0,0.06)",
+                border: "1px solid rgba(35,60,0,0.1)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
                 flexShrink: 0,
-                minWidth: 18,
+                fontFamily: "Inter, sans-serif",
+                fontSize: 11,
                 fontWeight: 500,
-              }}>{i + 1}</span>
+                color: "rgba(35,60,0,0.4)",
+              }}>{i + 1}</div>
               <span style={{
                 fontFamily: "Inter, sans-serif",
-                fontSize: 13,
+                fontSize: 14,
+                fontWeight: 400,
                 color: "#233C00",
                 lineHeight: 1.6,
+                flex: 1,
               }}>{s}</span>
             </div>
           ))}
@@ -2490,8 +2553,8 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
             width: "calc(100% - 32px)",
             margin: "16px 16px",
             padding: "12px 0",
-            background: "#FEE7C0",
-            color: "#233C00",
+            background: "#233C00",
+            color: "#FAF7F2",
             border: "none",
             borderRadius: 100,
             fontFamily: "Inter, sans-serif",

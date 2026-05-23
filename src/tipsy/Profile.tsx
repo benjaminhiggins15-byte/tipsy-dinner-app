@@ -109,7 +109,7 @@ export default function Profile({ back, openEdit, isTabRoot = false }: { back: (
         ) : (
           <div />
         )}
-        <div style={{ textAlign: "center", fontFamily: "'Lazydog', sans-serif", fontSize: 20, textTransform: "uppercase", color: "#233C00" }}>
+        <div style={{ textAlign: "center", fontFamily: "'Inter', sans-serif", fontSize: 20, fontWeight: 700, textTransform: "uppercase", color: "#233C00" }}>
           Profile
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -157,7 +157,7 @@ export function ProfileEdit({ fieldKey, back }: { fieldKey: FieldKey; back: () =
         padding: "20px 16px 14px",
       }}>
         <button onClick={back} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(35,60,0,0.6)", fontSize: 22, padding: 0, textAlign: "left" }}>‹</button>
-        <div style={{ textAlign: "center", fontFamily: "'Lazydog', sans-serif", fontSize: 20, textTransform: "uppercase", color: "#233C00" }}>
+        <div style={{ textAlign: "center", fontFamily: "'Inter', sans-serif", fontSize: 20, fontWeight: 700, textTransform: "uppercase", color: "#233C00" }}>
           {meta.label}
         </div>
         <div />

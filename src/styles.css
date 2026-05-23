@@ -1,13 +1,6 @@
 @import "tailwindcss" source(none);
 @source "../src";
 
-@font-face {
-  font-family: 'Lazydog';
-  src: url('./fonts/lazydog.ttf') format('truetype');
-  font-weight: normal;
-  font-style: normal;
-}
-
 * { box-sizing: border-box; }
 
 html, body, #root {
