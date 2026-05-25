@@ -15,6 +15,7 @@ Target user: myself first. Elevated home cook. Cooks for two (wife) and for crow
 
 - React + Vite
 - Bun (package manager, dev server)
+- Supabase — auth provider, client at `src/lib/supabase.ts`
 - Anthropic SDK (AI layer, direct browser call, moving server-side with Supabase later)
 - localStorage (data layer, migrating to Supabase later)
 - Tabler Icons
@@ -274,6 +275,42 @@ tipsyDinnerMenus
 
 ---
 
+## Authentication
+
+**Stack:**
+- Supabase Auth — `@supabase/supabase-js` installed
+- Client: `src/lib/supabase.ts`
+- Auth screens: `src/tipsy/SignUp.tsx` and `src/tipsy/SignIn.tsx`
+- Transition wrapper: `src/tipsy/AuthFlow.tsx` handles slide animations between auth screens
+
+**Session handling:**
+- `App.tsx` manages session state using `supabase.auth.getSession()` and `supabase.auth.onAuthStateChange()`
+- Real-time listener reacts to login/logout
+- Sign out button in Profile page Support section
+
+**Routing logic:**
+1. No active session → show SignUp screen (can navigate to SignIn via pill button)
+2. Active session + no `tipsyDinnerOnboardingComplete` flag → show Onboarding flow
+3. Active session + onboarding complete → show Build screen (main app)
+
+**Auth methods:**
+- Email/password sign up and sign in
+- Google OAuth (wired and working)
+- Email confirmation currently disabled in Supabase (intentional for development)
+
+**Onboarding:**
+- Legacy Welcome screen (name/email/password) removed — auth happens before onboarding
+- Onboarding now starts directly at first question ("Your palate")
+- Three questions total: palate, inspiration, constraints
+- Loader screen sets `tipsyDinnerOnboardingComplete` flag on completion
+
+**Transitions:**
+- SignUp ↔ SignIn: slide left/right via AuthFlow component
+- Sign out: slides right from main app to auth screens (same as back navigation throughout app)
+- Uses same DURATION (300ms) and easing as all other screen transitions
+
+---
+
 ## Session Rules for Claude Code
 
 - Design decisions are made in Claude.ai first — never figure out design in Claude Code
@@ -288,12 +325,15 @@ tipsyDinnerMenus
 
 ## Current Build Status
 
-**Complete and functional (needs visual redesign):**
-- Onboarding flow
-- Profile page
+**Complete and functional:**
+- Authentication — Supabase Auth with email/password and Google OAuth
+- Sign Up and Sign In screens with slide transitions
+- Session handling and protected routes
+- Onboarding flow (starts at first question, no legacy Welcome screen)
+- Profile page with sign out button
 - Recipes — Categories, Recipes, Recipe Card
 - Write Your Own flow
-- Screen transitions (slide left/right)
+- Screen transitions (slide left/right, including auth transitions)
 - Build AI — wired and functional, full conversation loop including save
 - Menus — full three-level hierarchy
 - RecipePicker
@@ -319,7 +359,6 @@ tipsyDinnerMenus
 
 **Not yet built:**
 - Splash screen
-- User accounts and auth
-- Supabase migration
+- Supabase migration (recipes, categories, menus data)
 - Streaming responses
 - Search

@@ -9,6 +9,9 @@ import Menus from "./Menus";
 import MenuInterior from "./MenuInterior";
 import RecipePicker from "./RecipePicker";
 import SaveRecipeFlow from "./SaveRecipeFlow";
+import AuthFlow from "./AuthFlow";
+import { supabase } from "../lib/supabase";
+import type { Session } from "@supabase/supabase-js";
 import Anthropic from "@anthropic-ai/sdk";
 import watermarkSquare from "../Logos/watermark_square.png";
 import watermarkCircle from "../Logos/watermark_circle.png";
@@ -102,6 +105,7 @@ function renderScreen(
   finishDeleteRecipe?: () => void,
   finishCreateCategoryForRecipe?: (catKey: string, catLabel: string, draft: RecipeDraft, returnTo: "cook" | "addown") => void,
   finishSaveRecipe?: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void,
+  onSignOut?: () => void,
 ) {
   switch (s.name) {
     case "cook": return (
@@ -191,7 +195,7 @@ function renderScreen(
         onClose={back}
       />
     );
-    case "profile": return <Profile back={back} openEdit={(k) => push({ name: "profileedit", fieldKey: k })} isTabRoot={isTabRoot} />;
+    case "profile": return <Profile back={back} openEdit={(k) => push({ name: "profileedit", fieldKey: k })} isTabRoot={isTabRoot} onSignOut={onSignOut || (() => {})} />;
     case "profileedit": return <ProfileEdit fieldKey={s.fieldKey} back={back} />;
     case "placeholder": return <Placeholder title={s.title} back={back} />;
   }
@@ -216,13 +220,44 @@ export default function App() {
   const current = currentStack[currentStack.length - 1];
   const isTabRoot = currentStack.length === 1;
 
+  const [session, setSession] = useState<Session | null | undefined>(undefined);
+  const [authScreen, setAuthScreen] = useState<"signup" | "signin">("signup");
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
+
   useEffect(() => {
-    try {
-      setShowOnboarding(localStorage.getItem("tipsyDinnerOnboardingComplete") !== "true");
-    } catch {
-      setShowOnboarding(false);
-    }
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session) {
+        // Check onboarding status
+        try {
+          setShowOnboarding(localStorage.getItem("tipsyDinnerOnboardingComplete") !== "true");
+        } catch {
+          setShowOnboarding(false);
+        }
+      }
+    });
+
+    // Listen for auth changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session) {
+        // Check onboarding status when user logs in
+        try {
+          setShowOnboarding(localStorage.getItem("tipsyDinnerOnboardingComplete") !== "true");
+        } catch {
+          setShowOnboarding(false);
+        }
+      } else {
+        // Reset to signin screen when logged out
+        setAuthScreen("signin");
+        setShowOnboarding(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const [transition, setTransition] = useState<{
@@ -231,6 +266,12 @@ export default function App() {
     direction: "forward" | "back";
     fromIsTabRoot?: boolean;
     toIsTabRoot?: boolean;
+  } | null>(null);
+
+  const [topLevelTransition, setTopLevelTransition] = useState<{
+    from: "auth" | "onboarding" | "app";
+    to: "auth" | "onboarding" | "app";
+    direction: "forward" | "back";
   } | null>(null);
 
   const updateCurrentTabStack = (updater: (stack: Screen[]) => Screen[]) => {
@@ -479,28 +520,171 @@ export default function App() {
     return () => clearTimeout(t);
   }, [transition]);
 
+  const topLevelTransKey = topLevelTransition
+    ? `${topLevelTransition.from}->${topLevelTransition.to}:${topLevelTransition.direction}`
+    : null;
+  const [topLevelArmedKey, setTopLevelArmedKey] = useState<string | null>(null);
+  const topLevelAnimPhase: "start" | "end" =
+    topLevelTransKey && topLevelArmedKey !== topLevelTransKey ? "start" : "end";
+
+  useEffect(() => {
+    if (!topLevelTransKey) {
+      if (topLevelArmedKey !== null) setTopLevelArmedKey(null);
+      return;
+    }
+    if (topLevelArmedKey === topLevelTransKey) return;
+    let r2 = 0;
+    let cancelled = false;
+    const r1 = requestAnimationFrame(() => {
+      if (cancelled) return;
+      r2 = requestAnimationFrame(() => {
+        if (cancelled) return;
+        setTopLevelArmedKey(topLevelTransKey);
+      });
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(r1);
+      if (r2) cancelAnimationFrame(r2);
+    };
+  }, [topLevelTransKey, topLevelArmedKey]);
+
+  useEffect(() => {
+    if (!topLevelTransition) return;
+    const t = setTimeout(() => {
+      setTopLevelTransition(null);
+      // After transition completes, update session state
+      if (topLevelTransition.to === "auth") {
+        setSession(null);
+        setShowOnboarding(null);
+      }
+    }, DURATION + 20);
+    return () => clearTimeout(t);
+  }, [topLevelTransition]);
+
+  const handleSignOut = () => {
+    // Trigger transition from app to auth
+    setTopLevelTransition({
+      from: "app",
+      to: "auth",
+      direction: "back",
+    });
+    setAuthScreen("signin");
+  };
+
+  const handleAuthSuccess = () => {
+    // Session will be updated by onAuthStateChange listener
+    // Onboarding check will happen automatically
+  };
+
+  const renderTopLevelView = (view: "auth" | "onboarding" | "app") => {
+    if (view === "auth") {
+      return (
+        <AuthFlow
+          initialScreen={authScreen}
+          onSuccess={handleAuthSuccess}
+        />
+      );
+    }
+    if (view === "onboarding") {
+      return <Onboarding onComplete={() => setShowOnboarding(false)} />;
+    }
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative", background: "#FAF7F2" }}>
+        <ScreenStage
+          current={current}
+          transition={transition}
+          push={push}
+          back={back}
+          isTabRoot={isTabRoot}
+          replaceRecipe={replaceRecipeAndBack}
+          finishEditCategory={finishEditCategory}
+          finishDeleteCategory={finishDeleteCategory}
+          finishDeleteRecipe={finishDeleteRecipe}
+          finishCreateCategoryForRecipe={finishCreateCategoryForRecipe}
+          finishSaveRecipe={finishSaveRecipe}
+          onSignOut={handleSignOut}
+        />
+        <BottomTabBar activeTab={activeTab} onTabClick={switchToTab} />
+      </div>
+    );
+  };
+
+  const getCurrentView = (): "auth" | "onboarding" | "app" | null => {
+    if (session === undefined) return null;
+    if (session === null) return "auth";
+    if (showOnboarding === null) return null;
+    if (showOnboarding) return "onboarding";
+    return "app";
+  };
+
+  const currentView = getCurrentView();
+
+  const layerBase: CSSProperties = {
+    position: "absolute",
+    inset: 0,
+    height: "100%",
+    display: "flex",
+    flexDirection: "column",
+    background: "#FAF7F2",
+    willChange: "transform",
+  };
+
   return (
     <div style={S.page}>
       <div style={S.phone}>
-        {showOnboarding === null ? null : showOnboarding ? (
-          <Onboarding onComplete={() => setShowOnboarding(false)} />
+        {currentView === null ? null : topLevelTransition ? (
+          <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", background: "#FAF7F2" }}>
+            {(() => {
+              const { from, to, direction } = topLevelTransition;
+
+              let fromTransform = "translateX(0)";
+              let toTransform = "translateX(0)";
+
+              if (direction === "forward") {
+                fromTransform = topLevelAnimPhase === "start" ? "translateX(0)" : "translateX(-25%)";
+                toTransform = topLevelAnimPhase === "start" ? "translateX(100%)" : "translateX(0)";
+              } else {
+                fromTransform = topLevelAnimPhase === "start" ? "translateX(0)" : "translateX(100%)";
+                toTransform = topLevelAnimPhase === "start" ? "translateX(-25%)" : "translateX(0)";
+              }
+
+              const transitionStyle =
+                topLevelAnimPhase === "start" ? "none" : `transform ${DURATION}ms ${EASE}`;
+
+              const fromZ = direction === "forward" ? 1 : 2;
+              const toZ = direction === "forward" ? 2 : 1;
+
+              return (
+                <>
+                  <div
+                    style={{
+                      ...layerBase,
+                      transform: fromTransform,
+                      transition: transitionStyle,
+                      zIndex: fromZ,
+                      pointerEvents: "none",
+                    }}
+                  >
+                    {renderTopLevelView(from)}
+                  </div>
+                  <div
+                    style={{
+                      ...layerBase,
+                      transform: toTransform,
+                      transition: transitionStyle,
+                      zIndex: toZ,
+                      pointerEvents: "none",
+                    }}
+                  >
+                    {renderTopLevelView(to)}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
         ) : (
-        <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative", background: "#FAF7F2" }}>
-          <ScreenStage
-            current={current}
-            transition={transition}
-            push={push}
-            back={back}
-            isTabRoot={isTabRoot}
-            replaceRecipe={replaceRecipeAndBack}
-            finishEditCategory={finishEditCategory}
-            finishDeleteCategory={finishDeleteCategory}
-            finishDeleteRecipe={finishDeleteRecipe}
-            finishCreateCategoryForRecipe={finishCreateCategoryForRecipe}
-            finishSaveRecipe={finishSaveRecipe}
-          />
-          <BottomTabBar activeTab={activeTab} onTabClick={switchToTab} />
-        </div>
+          renderTopLevelView(currentView)
         )}
       </div>
       <button
@@ -552,6 +736,7 @@ function ScreenStage({
   finishDeleteRecipe,
   finishCreateCategoryForRecipe,
   finishSaveRecipe,
+  onSignOut,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back"; fromIsTabRoot?: boolean; toIsTabRoot?: boolean } | null;
@@ -564,6 +749,7 @@ function ScreenStage({
   finishDeleteRecipe: () => void;
   finishCreateCategoryForRecipe: (catKey: string, catLabel: string, draft: RecipeDraft, returnTo: "cook" | "addown") => void;
   finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
+  onSignOut: () => void;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
@@ -613,7 +799,7 @@ function ScreenStage({
     return (
       <div style={{ ...layerBase, position: "relative", height: "100%", paddingBottom: 64, background: "#FAF7F2" }}>
         <div style={{ ...layerBase, position: "relative", height: "100%" }}>
-          {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe)}
+          {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut)}
         </div>
       </div>
     );
@@ -651,10 +837,10 @@ function ScreenStage({
   return (
     <div style={{ position: "relative", height: "100%", background: "#FAF7F2" }}>
       <div style={{ ...layerBase, transform: fromTransform, transition: transitionStyle, zIndex: fromZ, pointerEvents: "none", paddingBottom: 64 }}>
-        {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe)}
+        {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut)}
       </div>
       <div style={{ ...layerBase, transform: toTransform, transition: transitionStyle, zIndex: toZ, pointerEvents: "none", paddingBottom: 64 }}>
-        {renderScreen(to, push, back, toIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe)}
+        {renderScreen(to, push, back, toIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut)}
       </div>
     </div>
   );

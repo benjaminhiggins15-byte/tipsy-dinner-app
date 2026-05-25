@@ -1,4 +1,5 @@
 import { useState, type CSSProperties } from "react";
+import { supabase } from "../lib/supabase";
 
 const KEYS = {
   name: "tipsyDinnerName",
@@ -95,7 +96,20 @@ const FIELD_META: Record<FieldKey, { label: string; multiline: boolean }> = {
   constraints: { label: "Constraints", multiline: true },
 };
 
-export default function Profile({ back, openEdit, isTabRoot = false }: { back: () => void; openEdit: (k: FieldKey) => void; isTabRoot?: boolean }) {
+export default function Profile({ back, openEdit, isTabRoot = false, onSignOut }: { back: () => void; openEdit: (k: FieldKey) => void; isTabRoot?: boolean; onSignOut: () => void }) {
+  const handleSignOut = async () => {
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error("Sign out error:", error);
+        return;
+      }
+      onSignOut();
+    } catch (err) {
+      console.error("Unexpected sign out error:", err);
+    }
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#FAF7F2" }}>
       <div style={{
@@ -127,6 +141,7 @@ export default function Profile({ back, openEdit, isTabRoot = false }: { back: (
         <Row title="Constraints" subtitle={trim30(read(KEYS.constraints))} onClick={() => openEdit("constraints")} />
 
         <div style={sectionLabel}>Support</div>
+        <Row title="Sign Out" onClick={handleSignOut} />
         <Row title="Contact us" />
       </div>
     </div>

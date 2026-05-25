@@ -77,73 +77,6 @@ function QuestionScreen({
   );
 }
 
-function Welcome({ onNext }: { onNext: () => void }) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [pw, setPw] = useState("");
-  const fieldLabel: CSSProperties = {
-    fontFamily: "'Inter', sans-serif",
-    fontSize: 10,
-    fontWeight: 500,
-    letterSpacing: "0.1em",
-    textTransform: "uppercase",
-    color: "rgba(35,60,0,0.35)",
-    marginBottom: 6,
-  };
-  const fieldInput: CSSProperties = {
-    width: "100%",
-    height: 32,
-    background: "transparent",
-    border: "none",
-    borderBottom: "1px solid rgba(35,60,0,0.2)",
-    borderRadius: 0,
-    fontFamily: "'Inter', sans-serif",
-    fontSize: 14,
-    color: "#233C00",
-    outline: "none",
-    padding: "0 2px",
-  };
-  return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: "56px 28px 28px" }}>
-      <div style={{ textAlign: "center" }}>
-        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 34, fontWeight: 700, color: "#233C00", textTransform: "uppercase", lineHeight: 1.1 }}>
-          Tipsy Dinner
-        </div>
-        <div style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", fontWeight: 300, fontSize: 13, color: "rgba(35,60,0,0.55)", marginTop: 6 }}>
-          your personal kitchen HQ
-        </div>
-      </div>
-      <div style={{ height: 1, background: "rgba(35,60,0,0.2)", margin: "26px 0 22px" }} />
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 18 }}>
-        <div>
-          <div style={fieldLabel}>Name</div>
-          <input style={fieldInput} value={name} onChange={(e) => setName(e.target.value)} />
-        </div>
-        <div>
-          <div style={fieldLabel}>Email</div>
-          <input style={fieldInput} type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-        </div>
-        <div>
-          <div style={fieldLabel}>Password</div>
-          <input style={fieldInput} type="password" value={pw} onChange={(e) => setPw(e.target.value)} />
-        </div>
-      </div>
-      <button
-        style={btnStyle}
-        onClick={() => {
-          try {
-            if (name) localStorage.setItem("tipsyDinnerName", name);
-            if (email) localStorage.setItem("tipsyDinnerEmail", email);
-          } catch { /* noop */ }
-          onNext();
-        }}
-      >
-        Let's Get Started
-      </button>
-    </div>
-  );
-}
-
 function Loader({ onDone }: { onDone: () => void }) {
   useEffect(() => {
     const t = setTimeout(onDone, 2500);
@@ -203,11 +136,10 @@ export default function Onboarding({ onComplete }: Props) {
   };
 
   const renderStep = (s: number) => {
-    if (s === 1) return <Welcome key="s1" onNext={next} />;
-    if (s === 2) return <QuestionScreen key="s2" label="Taste" question="Your palate" hint="Cuisines, flavors, techniques — what makes your cooking yours?" storageKey="tipsyDinnerPalate" onNext={next} />;
-    if (s === 3) return <QuestionScreen key="s3" label="Inspiration" question="Your inspiration" hint="Sites, accounts, chefs, cookbooks — who shapes how you cook?" storageKey="tipsyDinnerInspiration" onNext={next} />;
-    if (s === 4) return <QuestionScreen key="s4" label="Constraints" question="Your no-gos" hint="Allergies, aversions, or anything that never makes your plate?" storageKey="tipsyDinnerConstraints" onNext={next} />;
-    return <Loader key="s5" onDone={() => {
+    if (s === 1) return <QuestionScreen key="s1" label="Taste" question="Your palate" hint="Cuisines, flavors, techniques — what makes your cooking yours?" storageKey="tipsyDinnerPalate" onNext={next} />;
+    if (s === 2) return <QuestionScreen key="s2" label="Inspiration" question="Your inspiration" hint="Sites, accounts, chefs, cookbooks — who shapes how you cook?" storageKey="tipsyDinnerInspiration" onNext={next} />;
+    if (s === 3) return <QuestionScreen key="s3" label="Constraints" question="Your no-gos" hint="Allergies, aversions, or anything that never makes your plate?" storageKey="tipsyDinnerConstraints" onNext={next} />;
+    return <Loader key="s4" onDone={() => {
       try { localStorage.setItem("tipsyDinnerOnboardingComplete", "true"); } catch { /* noop */ }
       onComplete();
     }} />;
