@@ -343,6 +343,17 @@ tipsyDinnerMenus
 - Mini player fade and pulse animations
 - Recipe card auto-collapse on message send
 - Lazydog font registered (`src/fonts/lazydog.ttf`, `@font-face` as `'Lazydog'`)
+- Recipes migrated to Supabase ✓
+- Ingredients migrated to Supabase as separate table with sort_order ✓
+- localStorage key tipsyDinnerRecipes removed ✓
+- Categories migrated to Supabase ✓
+- recipe_categories join table wired ✓
+- getSavedRecipesForCategory now filters correctly by category ✓
+- localStorage key tipsyDinnerCategories removed ✓
+
+**Known issues (refinement pass later):**
+- Slight flash on screen transitions during async category/recipe loads
+- + button position shifts after category creation
 
 **Visual redesign order (follow this sequence):**
 1. Build — empty state
@@ -359,6 +370,6 @@ tipsyDinnerMenus
 
 **Not yet built:**
 - Splash screen
-- Supabase migration (recipes, categories, menus data)
+- Supabase migration for menus data (occasions, menus) — recipes and categories complete
 - Streaming responses
 - Search

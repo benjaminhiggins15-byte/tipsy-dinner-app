@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, type Recipe, type Occasion, type Menu, type SavedRecipe, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection } from "./data";
+import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, migrateRecipesFromLocalStorage, type Recipe, type Occasion, type Menu, type SavedRecipe, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
@@ -259,6 +259,22 @@ export default function App() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Migrate recipes from localStorage and cleanup old category data when session is available
+  useEffect(() => {
+    if (session) {
+      migrateRecipesFromLocalStorage().catch((err) => {
+        console.error('Migration error:', err);
+      });
+
+      // Remove old localStorage categories key (categories now in Supabase)
+      try {
+        localStorage.removeItem('tipsyDinnerCategories');
+      } catch (err) {
+        console.error('Error removing old categories key:', err);
+      }
+    }
+  }, [session]);
 
   const [transition, setTransition] = useState<{
     from: Screen;
@@ -925,11 +941,30 @@ function BottomTabBar({ activeTab, onTabClick }: { activeTab: TabId; onTabClick:
 
 /* ---------------- Categories ---------------- */
 function Categories({ push, back, isTabRoot }: { push: (s: Screen) => void; back: () => void; isTabRoot: boolean }) {
-  const cats = getAllCategories();
-  const recipeCount = (catKey: string) => {
-    const recipes = getRecipesForCategory(catKey, "");
-    return recipes.length;
-  };
+  const [cats, setCats] = useState<{ key: string; label: string; gradient: string }[]>([]);
+  const [recipeCounts, setRecipeCounts] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    const loadCategories = async () => {
+      const categories = await getAllCategories();
+      setCats(categories);
+    };
+    loadCategories();
+  }, []);
+
+  useEffect(() => {
+    const loadCounts = async () => {
+      const counts: Record<string, number> = {};
+      for (const cat of cats) {
+        const recipes = await getRecipesForCategory(cat.key, "");
+        counts[cat.key] = recipes.length;
+      }
+      setRecipeCounts(counts);
+    };
+    if (cats.length > 0) {
+      loadCounts();
+    }
+  }, [cats.length]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -960,7 +995,7 @@ function Categories({ push, back, isTabRoot }: { push: (s: Screen) => void; back
       <div style={{ flex: 1, overflowY: "auto", padding: "8px 20px 16px" }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gridAutoRows: "160px", gap: 12 }}>
           {cats.map((c) => {
-            const count = recipeCount(c.key);
+            const count = recipeCounts[c.key] ?? 0;
             return (
               <div
                 key={c.key}
@@ -1023,7 +1058,16 @@ function Recipes({
   push: (s: Screen) => void;
   back: () => void;
 }) {
-  const recipes = getRecipesForCategory(categoryKey, categoryLabel);
+  const [recipes, setRecipes] = useState<Recipe[]>([]);
+
+  useEffect(() => {
+    const loadRecipes = async () => {
+      const data = await getRecipesForCategory(categoryKey, categoryLabel);
+      setRecipes(data);
+    };
+    loadRecipes();
+  }, [categoryKey, categoryLabel]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* Header */}
@@ -1734,11 +1778,11 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
     }
   };
 
-  const onPickCategory = (catKey: string, catLabel: string, menuInfo?: { menuId: number; section: MenuSection }) => {
+  const onPickCategory = async (catKey: string, catLabel: string, menuInfo?: { menuId: number; section: MenuSection }) => {
     if (!currentRecipe) return;
 
     const id = Date.now();
-    saveRecipe({
+    await saveRecipe({
       id,
       title: currentRecipe.title,
       description: currentRecipe.description,
@@ -1746,7 +1790,7 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
       ingredients: currentRecipe.ingredients,
       steps: currentRecipe.steps,
       createdAt: new Date().toISOString(),
-    });
+    }, 'ai', catKey); // AI-generated recipe with category association
 
     // If menu info provided, add recipe to menu section
     if (menuInfo) {

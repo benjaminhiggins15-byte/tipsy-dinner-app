@@ -30,10 +30,25 @@ type Props = {
 export default function RecipePicker({ menuId, section, onClose }: Props) {
   const [view, setView] = useState<View>("categories");
   const [transition, setTransition] = useState<{ from: View; to: View; direction: "forward" | "back" } | null>(null);
-  const [addedInSession, setAddedInSession] = useState<Set<number>>(new Set());
+  const [addedInSession, setAddedInSession] = useState<Set<number | string>>(new Set());
+  const [existingRecipeIds, setExistingRecipeIds] = useState<(number | string)[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
 
-  const categories = loadCustomCategories();
-  const existingRecipeIds = getRecipesForMenuSection(menuId, section);
+  useEffect(() => {
+    const loadCategories = async () => {
+      const cats = await loadCustomCategories();
+      setCategories(cats);
+    };
+    loadCategories();
+  }, []);
+
+  useEffect(() => {
+    const loadExistingRecipes = async () => {
+      const recipes = await getRecipesForMenuSection(menuId, section);
+      setExistingRecipeIds(recipes.map(r => r.id));
+    };
+    loadExistingRecipes();
+  }, [menuId, section]);
 
   const SECTION_LABELS: Record<MenuSection, string> = {
     apps: "Apps",
@@ -52,7 +67,7 @@ export default function RecipePicker({ menuId, section, onClose }: Props) {
     }, 0);
   };
 
-  const handleRecipeTap = (recipeId: number) => {
+  const handleRecipeTap = (recipeId: number | string) => {
     if (existingRecipeIds.includes(recipeId)) return; // Already in section, ignore
 
     addRecipeToMenuSection(menuId, section, recipeId);
@@ -256,10 +271,10 @@ function getTransform(direction: "forward" | "back", layer: "from" | "to", phase
 function renderView(
   view: View,
   categories: any[],
-  existingRecipeIds: number[],
-  addedInSession: Set<number>,
+  existingRecipeIds: (number | string)[],
+  addedInSession: Set<number | string>,
   onCategoryTap: (key: string, label: string) => void,
-  onRecipeTap: (id: number) => void
+  onRecipeTap: (id: number | string) => void
 ) {
   if (view === "categories") {
     return (
@@ -331,10 +346,10 @@ function ViewContent({
 }: {
   view: View;
   categories: any[];
-  existingRecipeIds: number[];
-  addedInSession: Set<number>;
+  existingRecipeIds: (number | string)[];
+  addedInSession: Set<number | string>;
   onCategoryTap: (key: string, label: string) => void;
-  onRecipeTap: (id: number) => void;
+  onRecipeTap: (id: number | string) => void;
 }) {
   return (
     <div style={{
@@ -368,10 +383,10 @@ function ViewLayer({
 }: {
   view: View;
   categories: any[];
-  existingRecipeIds: number[];
-  addedInSession: Set<number>;
+  existingRecipeIds: (number | string)[];
+  addedInSession: Set<number | string>;
   onCategoryTap: (key: string, label: string) => void;
-  onRecipeTap: (id: number) => void;
+  onRecipeTap: (id: number | string) => void;
   transform: string;
   transitionStyle: string;
   zIndex: number;
@@ -409,11 +424,19 @@ function RecipeList({
 }: {
   categoryKey: string;
   categoryLabel: string;
-  existingRecipeIds: number[];
-  addedInSession: Set<number>;
-  onRecipeTap: (id: number) => void;
+  existingRecipeIds: (number | string)[];
+  addedInSession: Set<number | string>;
+  onRecipeTap: (id: number | string) => void;
 }) {
-  const recipes = getRecipesForCategory(categoryKey, categoryLabel);
+  const [recipes, setRecipes] = useState<any[]>([]);
+
+  useEffect(() => {
+    const loadRecipes = async () => {
+      const data = await getRecipesForCategory(categoryKey, categoryLabel);
+      setRecipes(data);
+    };
+    loadRecipes();
+  }, [categoryKey, categoryLabel]);
 
   if (recipes.length === 0) {
     return (

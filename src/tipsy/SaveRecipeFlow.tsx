@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useState, useEffect, type CSSProperties } from "react";
 import {
   loadCustomCategories,
   loadOccasions,
@@ -83,9 +83,18 @@ export default function SaveRecipeFlow({ onClose, onPick, onNew, initialSelected
   const [selectedOccasion, setSelectedOccasion] = useState<number | null>(null);
   const [selectedMenu, setSelectedMenu] = useState<number | null>(null);
   const [selectedSection, setSelectedSection] = useState<MenuSection | null>(null);
+  const [allCats, setAllCats] = useState<any[]>([]);
 
-  const allCats = loadCustomCategories();
   const occasions = loadOccasions();
+
+  // Load categories on mount
+  useEffect(() => {
+    const loadCategories = async () => {
+      const cats = await loadCustomCategories();
+      setAllCats(cats);
+    };
+    loadCategories();
+  }, []);
 
   // Reorder categories so the initially selected one appears first
   const cats = initialSelectedCategory

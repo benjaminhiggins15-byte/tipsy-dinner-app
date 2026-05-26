@@ -204,9 +204,9 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
     setStep(4);
   };
 
-  const onPickCategory = (key: string, label: string, menuInfo?: { menuId: number; section: MenuSection }) => {
+  const onPickCategory = async (key: string, label: string, menuInfo?: { menuId: number; section: MenuSection }) => {
     const id = Date.now();
-    saveRecipe({
+    await saveRecipe({
       id,
       title: title.trim(),
       description: desc.trim(),
@@ -214,7 +214,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
       ingredients,
       steps,
       createdAt: new Date().toISOString(),
-    });
+    }, 'manual', key); // Manual recipe from Write Your Own with category association
 
     if (menuInfo) {
       addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, id);
@@ -225,9 +225,9 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
     setStep(6);
   };
 
-  const saveEdit = () => {
-    if (!isEdit || !editRecipe || typeof editRecipe.savedId !== "number") return;
-    updateSavedRecipe(editRecipe.savedId, {
+  const saveEdit = async () => {
+    if (!isEdit || !editRecipe || !editRecipe.savedId) return;
+    await updateSavedRecipe(editRecipe.savedId, {
       title: title.trim(),
       description: desc.trim(),
       ingredients,
@@ -699,9 +699,9 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
               Cancel
             </button>
             <button
-              onClick={() => {
-                if (editRecipe && typeof editRecipe.savedId === "number") {
-                  deleteSavedRecipe(editRecipe.savedId);
+              onClick={async () => {
+                if (editRecipe && editRecipe.savedId) {
+                  await deleteSavedRecipe(editRecipe.savedId);
                 }
                 setShowDelete(false);
                 onDeleted?.();

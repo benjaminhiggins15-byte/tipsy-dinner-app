@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useState, useEffect, type CSSProperties, type KeyboardEvent } from "react";
 import { categories, saveCustomCategory, updateCustomCategory, deleteCustomCategory, findCustomCategory, type CustomCategory } from "./data";
 
 const C = {
@@ -25,28 +25,47 @@ type Props = {
 
 export default function NewCategory({ back, onSaved, editKey, onEditSaved, onDeleted }: Props) {
   const isEdit = !!editKey;
-  const existing = isEdit ? findCustomCategory(editKey!) : null;
-  const initialGradientIdx = existing
-    ? Math.max(0, categories.findIndex((c) => c.gradient === existing.gradient))
-    : 0;
-  const [name, setName] = useState(existing?.label ?? "");
+  const [name, setName] = useState("");
   const [nameErr, setNameErr] = useState(false);
-  const [gradientIdx, setGradientIdx] = useState(initialGradientIdx);
+  const [gradientIdx, setGradientIdx] = useState(0);
   const [showDelete, setShowDelete] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const trySave = () => {
+  // Load existing category if editing
+  useEffect(() => {
+    if (isEdit && editKey) {
+      const loadExisting = async () => {
+        const existing = await findCustomCategory(editKey);
+        if (existing) {
+          setName(existing.label);
+          const idx = Math.max(0, categories.findIndex((c) => c.gradient === existing.gradient));
+          setGradientIdx(idx);
+        }
+      };
+      loadExisting();
+    }
+  }, [isEdit, editKey]);
+
+  const trySave = async () => {
     if (!name.trim()) {
       setNameErr(true);
       return;
     }
-    const trimmed = name.trim();
-    const gradient = categories[gradientIdx].gradient;
-    if (isEdit && editKey) {
-      updateCustomCategory(editKey, trimmed, gradient);
-      onEditSaved?.(trimmed);
-    } else {
-      const cat = saveCustomCategory(trimmed, gradient);
-      onSaved(cat);
+    setLoading(true);
+    try {
+      const trimmed = name.trim();
+      const gradient = categories[gradientIdx].gradient;
+      if (isEdit && editKey) {
+        await updateCustomCategory(editKey, trimmed, gradient);
+        onEditSaved?.(trimmed);
+      } else {
+        const cat = await saveCustomCategory(trimmed, gradient);
+        onSaved(cat);
+      }
+    } catch (error) {
+      console.error('Error saving category:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -161,10 +180,19 @@ export default function NewCategory({ back, onSaved, editKey, onEditSaved, onDel
               Cancel
             </button>
             <button
-              onClick={() => {
-                if (editKey) deleteCustomCategory(editKey);
-                setShowDelete(false);
-                onDeleted?.();
+              onClick={async () => {
+                if (editKey) {
+                  setLoading(true);
+                  try {
+                    await deleteCustomCategory(editKey);
+                    setShowDelete(false);
+                    onDeleted?.();
+                  } catch (error) {
+                    console.error('Error deleting category:', error);
+                  } finally {
+                    setLoading(false);
+                  }
+                }
               }}
               style={{
                 width: "100%", padding: "12px", borderRadius: 10,
