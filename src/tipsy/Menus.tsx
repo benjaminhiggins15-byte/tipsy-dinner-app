@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useState, useEffect, type CSSProperties, type KeyboardEvent } from "react";
 import {
   getMenusForOccasion,
   saveMenu,
@@ -40,6 +40,13 @@ const C = {
   descText: "rgba(35,60,0,0.45)",
   actionIcon: "rgba(35,60,0,0.2)",
   plusBorder: "rgba(35,60,0,0.2)",
+  accentBg: "rgba(35,60,0,0.06)",
+  borderLight: "rgba(35,60,0,0.08)",
+  border: "rgba(35,60,0,0.1)",
+  midBlue: "#233C00",
+  btnBlue: "#233C00",
+  muted: "rgba(35,60,0,0.3)",
+  navy: "#233C00",
 };
 
 const fontSerif = "'Fraunces', serif";
@@ -78,23 +85,33 @@ function BackArrow() {
 }
 
 type Props = {
-  occasionId: number;
+  occasionId: string;
   occasionName: string;
   back: () => void;
   push: (menu: Menu) => void;
 };
 
 export default function Menus({ occasionId, occasionName, back, push }: Props) {
-  const [menus, setMenus] = useState<Menu[]>(() => getMenusForOccasion(occasionId));
+  const [menus, setMenus] = useState<Menu[]>([]);
+  const [occasion, setOccasion] = useState<Occasion | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [editingMenu, setEditingMenu] = useState<Menu | null>(null);
   const [editingOccasion, setEditingOccasion] = useState(false);
 
-  const refreshMenus = () => {
-    setMenus(getMenusForOccasion(occasionId));
+  useEffect(() => {
+    refreshMenus();
+    loadOccasion();
+  }, [occasionId]);
+
+  const refreshMenus = async () => {
+    const loaded = await getMenusForOccasion(occasionId);
+    setMenus(loaded);
   };
 
-  const occasion = findOccasion(occasionId);
+  const loadOccasion = async () => {
+    const loaded = await findOccasion(occasionId);
+    setOccasion(loaded);
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#FAF7F2" }}>
@@ -379,7 +396,7 @@ function CreateMenuSheet({
   onClose,
   onSaved,
 }: {
-  occasionId: number;
+  occasionId: string;
   onClose: () => void;
   onSaved: (menu: Menu) => void;
 }) {
@@ -397,13 +414,17 @@ function CreateMenuSheet({
     }
   };
 
-  const trySave = () => {
+  const trySave = async () => {
     if (!title.trim()) {
       setTitleErr(true);
       return;
     }
-    const menu = saveMenu(occasionId, title.trim(), description.trim(), enabledSections);
-    onSaved(menu);
+    try {
+      const menu = await saveMenu(occasionId, title.trim(), description.trim(), enabledSections);
+      onSaved(menu);
+    } catch (err) {
+      console.error('saveMenu failed:', err);
+    }
   };
 
   // Slide-up animation
@@ -419,7 +440,7 @@ function CreateMenuSheet({
       style={{
         position: "absolute",
         inset: 0,
-        background: "rgba(4,44,83,0.55)",
+        background: "rgba(35,60,0,0.25)",
         display: "flex",
         alignItems: "flex-end",
         zIndex: 10,
@@ -431,7 +452,7 @@ function CreateMenuSheet({
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "100%",
-          background: C.white,
+          background: C.bg,
           borderTopLeftRadius: 20,
           borderTopRightRadius: 20,
           padding: "24px 20px calc(80px + env(safe-area-inset-bottom))",
@@ -547,7 +568,7 @@ function CreateMenuSheet({
                       width: 20,
                       height: 20,
                       borderRadius: "50%",
-                      background: C.white,
+                      background: C.bg,
                       position: "absolute",
                       top: 2,
                       left: isOn ? 22 : 2,
@@ -576,7 +597,7 @@ function CreateMenuSheet({
           style={{
             width: "100%",
             background: C.btnBlue,
-            color: C.white,
+            color: C.bg,
             border: "none",
             borderRadius: 12,
             padding: "14px",
@@ -624,12 +645,12 @@ function EditMenuSheet({
     }
   };
 
-  const trySave = () => {
+  const trySave = async () => {
     if (!title.trim()) {
       setTitleErr(true);
       return;
     }
-    updateMenu(menu.id, {
+    await updateMenu(menu.id, {
       title: title.trim(),
       description: description.trim(),
       enabledSections,
@@ -637,8 +658,8 @@ function EditMenuSheet({
     onSaved();
   };
 
-  const tryDelete = () => {
-    deleteMenu(menu.id);
+  const tryDelete = async () => {
+    await deleteMenu(menu.id);
     onDeleted();
   };
 
@@ -655,7 +676,7 @@ function EditMenuSheet({
       style={{
         position: "absolute",
         inset: 0,
-        background: "rgba(4,44,83,0.55)",
+        background: "rgba(35,60,0,0.25)",
         display: "flex",
         alignItems: "flex-end",
         zIndex: 10,
@@ -667,7 +688,7 @@ function EditMenuSheet({
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "100%",
-          background: C.white,
+          background: C.bg,
           borderTopLeftRadius: 20,
           borderTopRightRadius: 20,
           padding: "24px 20px calc(80px + env(safe-area-inset-bottom))",
@@ -783,7 +804,7 @@ function EditMenuSheet({
                       width: 20,
                       height: 20,
                       borderRadius: "50%",
-                      background: C.white,
+                      background: C.bg,
                       position: "absolute",
                       top: 2,
                       left: isOn ? 22 : 2,
@@ -855,7 +876,7 @@ function EditMenuSheet({
             style={{
               position: "fixed",
               inset: 0,
-              background: "rgba(4,44,83,0.55)",
+              background: "rgba(35,60,0,0.25)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -920,7 +941,7 @@ function EditMenuSheet({
                   borderRadius: 10,
                   background: "#B85C5C",
                   border: "none",
-                  color: "#fff",
+                  color: C.bg,
                   fontFamily: fontSans,
                   fontSize: 13,
                   fontWeight: 500,
@@ -953,12 +974,12 @@ function EditOccasionSheet({
   const [selectedIcon, setSelectedIcon] = useState(occasion.icon);
   const [sheetPhase, setSheetPhase] = useState<"entering" | "entered">("entering");
 
-  const trySave = () => {
+  const trySave = async () => {
     if (!name.trim()) {
       setNameErr(true);
       return;
     }
-    updateOccasion(occasion.id, { name: name.trim(), icon: selectedIcon });
+    await updateOccasion(occasion.id, { name: name.trim(), icon: selectedIcon });
     onSaved();
   };
 

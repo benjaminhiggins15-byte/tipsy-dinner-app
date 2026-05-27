@@ -535,26 +535,23 @@ export async function migrateRecipesFromLocalStorage(): Promise<boolean> {
 
 // ==================== CURATE: OCCASIONS & MENUS ====================
 
-const OCCASIONS_STORAGE_KEY = "tipsyDinnerOccasions";
-const MENUS_STORAGE_KEY = "tipsyDinnerMenus";
-
 export type Occasion = {
-  id: number;
+  id: string; // UUID from Supabase
   name: string;
-  icon: string; // Tabler icon name (e.g., "IconChefHat")
+  icon: string; // Hardcoded on read (not stored in DB)
   createdAt: string;
 };
 
 export type MenuSection = "apps" | "mains" | "sides" | "desserts" | "drinks";
 
 export type Menu = {
-  id: number;
-  occasionId: number;
+  id: string; // UUID from Supabase
+  occasionId: string; // UUID from Supabase
   title: string;
   description: string;
-  enabledSections: MenuSection[]; // Which sections are toggled on
+  enabledSections: MenuSection[];
   recipes: {
-    apps: (number | string)[]; // Array of SavedRecipe IDs (can be UUID or number)
+    apps: (number | string)[]; // Array of SavedRecipe IDs
     mains: (number | string)[];
     sides: (number | string)[];
     desserts: (number | string)[];
@@ -565,178 +562,575 @@ export type Menu = {
 
 // ==================== OCCASIONS ====================
 
-export function loadOccasions(): Occasion[] {
-  if (typeof window === "undefined") return [];
+export async function loadOccasions(): Promise<Occasion[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return [];
+  }
+
   try {
-    const raw = window.localStorage.getItem(OCCASIONS_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
+    const { data: occasions, error } = await supabase
+      .from('occasions')
+      .select('id, name, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+
+    return (occasions || []).map((occ) => ({
+      id: occ.id,
+      name: occ.name,
+      icon: "IconChefHat", // Hardcoded default
+      createdAt: occ.created_at,
+    }));
+  } catch (error) {
+    console.error('Error loading occasions:', error);
     return [];
   }
 }
 
-export function saveOccasion(name: string, icon: string): Occasion {
-  const occasion: Occasion = {
-    id: Date.now(),
-    name,
-    icon,
-    createdAt: new Date().toISOString(),
-  };
-  if (typeof window !== "undefined") {
-    const list = loadOccasions();
-    list.push(occasion);
-    window.localStorage.setItem(OCCASIONS_STORAGE_KEY, JSON.stringify(list));
+export async function saveOccasion(name: string, icon: string): Promise<Occasion> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    throw new Error('Cannot save occasion: no user session');
   }
-  return occasion;
+
+  try {
+    // Drop icon parameter - not stored in DB
+    const { data: occasion, error } = await supabase
+      .from('occasions')
+      .insert({
+        user_id: userId,
+        name: name,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return {
+      id: occasion.id,
+      name: occasion.name,
+      icon: "IconChefHat", // Hardcoded default
+      createdAt: occasion.created_at,
+    };
+  } catch (error) {
+    console.error('Error saving occasion:', error);
+    throw error;
+  }
 }
 
-export function updateOccasion(
-  id: number,
+export async function updateOccasion(
+  id: string,
   patch: Partial<Pick<Occasion, "name" | "icon">>,
-): Occasion | null {
-  if (typeof window === "undefined") return null;
-  const list = loadOccasions();
-  const idx = list.findIndex((o) => o.id === id);
-  if (idx === -1) return null;
-  const updated: Occasion = { ...list[idx], ...patch };
-  list[idx] = updated;
-  window.localStorage.setItem(OCCASIONS_STORAGE_KEY, JSON.stringify(list));
-  return updated;
+): Promise<Occasion | null> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot update occasion: no user session');
+    return null;
+  }
+
+  try {
+    // Only update name if provided (ignore icon)
+    const updateData: any = {};
+    if (patch.name !== undefined) updateData.name = patch.name;
+
+    if (Object.keys(updateData).length > 0) {
+      const { error } = await supabase
+        .from('occasions')
+        .update(updateData)
+        .eq('id', id)
+        .eq('user_id', userId);
+
+      if (error) throw error;
+    }
+
+    // Re-fetch and return
+    const { data: occasion, error: fetchError } = await supabase
+      .from('occasions')
+      .select('id, name, created_at')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
+
+    if (fetchError) throw fetchError;
+
+    return {
+      id: occasion.id,
+      name: occasion.name,
+      icon: "IconChefHat", // Hardcoded default
+      createdAt: occasion.created_at,
+    };
+  } catch (error) {
+    console.error('Error updating occasion:', error);
+    return null;
+  }
 }
 
-export function deleteOccasion(id: number) {
-  if (typeof window === "undefined") return;
-  const list = loadOccasions().filter((o) => o.id !== id);
-  window.localStorage.setItem(OCCASIONS_STORAGE_KEY, JSON.stringify(list));
-  // Also delete all menus for this occasion
-  const menus = loadMenus().filter((m) => m.occasionId !== id);
-  window.localStorage.setItem(MENUS_STORAGE_KEY, JSON.stringify(menus));
+export async function deleteOccasion(id: string): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot delete occasion: no user session');
+    return;
+  }
+
+  try {
+    // Only delete occasions row - DB cascades menus and menu_recipes
+    const { error } = await supabase
+      .from('occasions')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId);
+
+    if (error) throw error;
+  } catch (error) {
+    console.error('Error deleting occasion:', error);
+  }
 }
 
-export function findOccasion(id: number): Occasion | null {
-  return loadOccasions().find((o) => o.id === id) ?? null;
+export async function findOccasion(id: string): Promise<Occasion | null> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return null;
+  }
+
+  try {
+    const { data: occasion, error } = await supabase
+      .from('occasions')
+      .select('id, name, created_at')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
+
+    if (error) throw error;
+
+    return {
+      id: occasion.id,
+      name: occasion.name,
+      icon: "IconChefHat", // Hardcoded default
+      createdAt: occasion.created_at,
+    };
+  } catch (error) {
+    console.error('Error finding occasion:', error);
+    return null;
+  }
 }
 
 // ==================== MENUS ====================
 
-export function loadMenus(): Menu[] {
-  if (typeof window === "undefined") return [];
+// Helper to build nested recipes structure from menu_recipes rows
+function buildRecipesStructure(menuRecipes: any[]): Menu['recipes'] {
+  const recipes: Menu['recipes'] = {
+    apps: [],
+    mains: [],
+    sides: [],
+    desserts: [],
+    drinks: [],
+  };
+
+  for (const mr of menuRecipes) {
+    const section = mr.section as MenuSection;
+    if (section in recipes) {
+      recipes[section].push(mr.recipe_id);
+    }
+  }
+
+  return recipes;
+}
+
+export async function loadMenus(): Promise<Menu[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return [];
+  }
+
   try {
-    const raw = window.localStorage.getItem(MENUS_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
+    // Fetch all menus
+    const { data: menus, error: menusError } = await supabase
+      .from('menus')
+      .select('id, occasion_id, name, description, active_sections, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (menusError) throw menusError;
+    if (!menus || menus.length === 0) return [];
+
+    // Fetch all menu_recipes for these menus
+    const menuIds = menus.map(m => m.id);
+    const { data: menuRecipes, error: recipesError } = await supabase
+      .from('menu_recipes')
+      .select('menu_id, recipe_id, section')
+      .in('menu_id', menuIds)
+      .eq('user_id', userId);
+
+    if (recipesError) throw recipesError;
+
+    // Group menu_recipes by menu_id
+    const recipesByMenu = new Map<string, any[]>();
+    for (const mr of menuRecipes || []) {
+      if (!recipesByMenu.has(mr.menu_id)) {
+        recipesByMenu.set(mr.menu_id, []);
+      }
+      recipesByMenu.get(mr.menu_id)!.push(mr);
+    }
+
+    // Transform to Menu objects
+    return menus.map((m) => ({
+      id: m.id,
+      occasionId: m.occasion_id,
+      title: m.name, // name → title
+      description: m.description || '',
+      enabledSections: (m.active_sections || []) as MenuSection[], // active_sections → enabledSections
+      recipes: buildRecipesStructure(recipesByMenu.get(m.id) || []),
+      createdAt: m.created_at,
+    }));
+  } catch (error) {
+    console.error('Error loading menus:', error);
     return [];
   }
 }
 
-export function saveMenu(
-  occasionId: number,
+export async function saveMenu(
+  occasionId: string,
   title: string,
   description: string,
   enabledSections: MenuSection[],
-): Menu {
-  const menu: Menu = {
-    id: Date.now(),
-    occasionId,
-    title,
-    description,
-    enabledSections,
-    recipes: {
-      apps: [],
-      mains: [],
-      sides: [],
-      desserts: [],
-      drinks: [],
-    },
-    createdAt: new Date().toISOString(),
-  };
-  if (typeof window !== "undefined") {
-    const list = loadMenus();
-    list.push(menu);
-    window.localStorage.setItem(MENUS_STORAGE_KEY, JSON.stringify(list));
+): Promise<Menu> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    throw new Error('Cannot save menu: no user session');
   }
-  return menu;
+
+  try {
+    const { data: menu, error } = await supabase
+      .from('menus')
+      .insert({
+        user_id: userId,
+        occasion_id: occasionId,
+        name: title, // title → name
+        description: description,
+        active_sections: enabledSections, // enabledSections → active_sections
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return {
+      id: menu.id,
+      occasionId: menu.occasion_id,
+      title: menu.name, // name → title
+      description: menu.description || '',
+      enabledSections: (menu.active_sections || []) as MenuSection[],
+      recipes: {
+        apps: [],
+        mains: [],
+        sides: [],
+        desserts: [],
+        drinks: [],
+      },
+      createdAt: menu.created_at,
+    };
+  } catch (error) {
+    console.error('Error saving menu:', error);
+    throw error;
+  }
 }
 
-export function updateMenu(
-  id: number,
+export async function updateMenu(
+  id: string,
   patch: Partial<Pick<Menu, "title" | "description" | "enabledSections" | "recipes">>,
-): Menu | null {
-  if (typeof window === "undefined") return null;
-  const list = loadMenus();
-  const idx = list.findIndex((m) => m.id === id);
-  if (idx === -1) return null;
-  const updated: Menu = { ...list[idx], ...patch };
-  list[idx] = updated;
-  window.localStorage.setItem(MENUS_STORAGE_KEY, JSON.stringify(list));
-  return updated;
+): Promise<Menu | null> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot update menu: no user session');
+    return null;
+  }
+
+  try {
+    // Build update object (only title, description, enabledSections)
+    const updateData: any = {};
+    if (patch.title !== undefined) updateData.name = patch.title; // title → name
+    if (patch.description !== undefined) updateData.description = patch.description;
+    if (patch.enabledSections !== undefined) updateData.active_sections = patch.enabledSections; // enabledSections → active_sections
+
+    if (Object.keys(updateData).length > 0) {
+      const { error } = await supabase
+        .from('menus')
+        .update(updateData)
+        .eq('id', id)
+        .eq('user_id', userId);
+
+      if (error) throw error;
+    }
+
+    // Re-fetch menu with recipes
+    return await findMenu(id);
+  } catch (error) {
+    console.error('Error updating menu:', error);
+    return null;
+  }
 }
 
-export function deleteMenu(id: number) {
-  if (typeof window === "undefined") return;
-  const list = loadMenus().filter((m) => m.id !== id);
-  window.localStorage.setItem(MENUS_STORAGE_KEY, JSON.stringify(list));
+export async function deleteMenu(id: string): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot delete menu: no user session');
+    return;
+  }
+
+  try {
+    const { error } = await supabase
+      .from('menus')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId);
+
+    if (error) throw error;
+  } catch (error) {
+    console.error('Error deleting menu:', error);
+  }
 }
 
-export function findMenu(id: number): Menu | null {
-  return loadMenus().find((m) => m.id === id) ?? null;
+export async function findMenu(id: string): Promise<Menu | null> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return null;
+  }
+
+  try {
+    // Fetch menu
+    const { data: menu, error: menuError } = await supabase
+      .from('menus')
+      .select('id, occasion_id, name, description, active_sections, created_at')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
+
+    if (menuError) throw menuError;
+
+    // Fetch menu_recipes
+    const { data: menuRecipes, error: recipesError } = await supabase
+      .from('menu_recipes')
+      .select('recipe_id, section')
+      .eq('menu_id', id)
+      .eq('user_id', userId);
+
+    if (recipesError) throw recipesError;
+
+    return {
+      id: menu.id,
+      occasionId: menu.occasion_id,
+      title: menu.name, // name → title
+      description: menu.description || '',
+      enabledSections: (menu.active_sections || []) as MenuSection[],
+      recipes: buildRecipesStructure(menuRecipes || []),
+      createdAt: menu.created_at,
+    };
+  } catch (error) {
+    console.error('Error finding menu:', error);
+    return null;
+  }
 }
 
-export function getMenusForOccasion(occasionId: number): Menu[] {
-  return loadMenus().filter((m) => m.occasionId === occasionId);
+export async function getMenusForOccasion(occasionId: string): Promise<Menu[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return [];
+  }
+
+  try {
+    // Fetch menus for occasion
+    const { data: menus, error: menusError } = await supabase
+      .from('menus')
+      .select('id, occasion_id, name, description, active_sections, created_at')
+      .eq('occasion_id', occasionId)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (menusError) throw menusError;
+    if (!menus || menus.length === 0) return [];
+
+    // Fetch menu_recipes for these menus
+    const menuIds = menus.map(m => m.id);
+    const { data: menuRecipes, error: recipesError } = await supabase
+      .from('menu_recipes')
+      .select('menu_id, recipe_id, section')
+      .in('menu_id', menuIds)
+      .eq('user_id', userId);
+
+    if (recipesError) throw recipesError;
+
+    // Group menu_recipes by menu_id
+    const recipesByMenu = new Map<string, any[]>();
+    for (const mr of menuRecipes || []) {
+      if (!recipesByMenu.has(mr.menu_id)) {
+        recipesByMenu.set(mr.menu_id, []);
+      }
+      recipesByMenu.get(mr.menu_id)!.push(mr);
+    }
+
+    // Transform to Menu objects
+    return menus.map((m) => ({
+      id: m.id,
+      occasionId: m.occasion_id,
+      title: m.name, // name → title
+      description: m.description || '',
+      enabledSections: (m.active_sections || []) as MenuSection[],
+      recipes: buildRecipesStructure(recipesByMenu.get(m.id) || []),
+      createdAt: m.created_at,
+    }));
+  } catch (error) {
+    console.error('Error loading menus for occasion:', error);
+    return [];
+  }
 }
 
 // ==================== MENU RECIPE MANAGEMENT ====================
 
-export function addRecipeToMenuSection(
-  menuId: number,
-  section: MenuSection,
-  recipeId: number | string, // Can be UUID or number
-): Menu | null {
-  if (typeof window === "undefined") return null;
-  const menu = findMenu(menuId);
-  if (!menu) return null;
-
-  // Don't add duplicates
-  if (menu.recipes[section].includes(recipeId)) return menu;
-
-  const updatedRecipes = {
-    ...menu.recipes,
-    [section]: [...menu.recipes[section], recipeId],
-  };
-
-  return updateMenu(menuId, { recipes: updatedRecipes });
-}
-
-export function removeRecipeFromMenuSection(
-  menuId: number,
+export async function addRecipeToMenuSection(
+  menuId: string,
   section: MenuSection,
   recipeId: number | string,
-): Menu | null {
-  if (typeof window === "undefined") return null;
-  const menu = findMenu(menuId);
-  if (!menu) return null;
+): Promise<Menu | null> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot add recipe to menu: no user session');
+    return null;
+  }
 
-  const updatedRecipes = {
-    ...menu.recipes,
-    [section]: menu.recipes[section].filter((id) => id !== recipeId),
-  };
+  try {
+    // Check if already exists
+    const { data: existing, error: checkError } = await supabase
+      .from('menu_recipes')
+      .select('id')
+      .eq('menu_id', menuId)
+      .eq('recipe_id', recipeId)
+      .eq('section', section)
+      .eq('user_id', userId)
+      .maybeSingle();
 
-  return updateMenu(menuId, { recipes: updatedRecipes });
+    if (checkError) throw checkError;
+
+    // If not exists, insert
+    if (!existing) {
+      const { error: insertError } = await supabase
+        .from('menu_recipes')
+        .insert({
+          menu_id: menuId,
+          recipe_id: recipeId,
+          section: section,
+          user_id: userId,
+        });
+
+      if (insertError) throw insertError;
+    }
+
+    // Re-fetch and return menu
+    return await findMenu(menuId);
+  } catch (error) {
+    console.error('Error adding recipe to menu section:', error);
+    return null;
+  }
 }
 
-export async function getRecipesForMenuSection(menuId: number, section: MenuSection): Promise<SavedRecipe[]> {
-  const menu = findMenu(menuId);
-  if (!menu) return [];
+export async function removeRecipeFromMenuSection(
+  menuId: string,
+  section: MenuSection,
+  recipeId: number | string,
+): Promise<Menu | null> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot remove recipe from menu: no user session');
+    return null;
+  }
 
-  const recipeIds = menu.recipes[section];
-  const allRecipes = await loadSavedRecipes();
+  try {
+    const { error } = await supabase
+      .from('menu_recipes')
+      .delete()
+      .eq('menu_id', menuId)
+      .eq('recipe_id', recipeId)
+      .eq('section', section)
+      .eq('user_id', userId);
 
-  return recipeIds
-    .map((id) => allRecipes.find((r) => r.id === id))
-    .filter((r): r is SavedRecipe => r !== undefined);
+    if (error) throw error;
+
+    // Re-fetch and return menu
+    return await findMenu(menuId);
+  } catch (error) {
+    console.error('Error removing recipe from menu section:', error);
+    return null;
+  }
+}
+
+export async function getRecipesForMenuSection(menuId: string, section: MenuSection): Promise<SavedRecipe[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return [];
+  }
+
+  try {
+    // Join menu_recipes with recipes and ingredients
+    const { data: menuRecipes, error: mrError } = await supabase
+      .from('menu_recipes')
+      .select('recipe_id')
+      .eq('menu_id', menuId)
+      .eq('section', section)
+      .eq('user_id', userId);
+
+    if (mrError) throw mrError;
+    if (!menuRecipes || menuRecipes.length === 0) return [];
+
+    const recipeIds = menuRecipes.map(mr => mr.recipe_id);
+
+    // Fetch recipes with ingredients
+    const { data: recipes, error: recipesError } = await supabase
+      .from('recipes')
+      .select(`
+        id,
+        title,
+        description,
+        steps,
+        created_at,
+        source,
+        ingredients (
+          name,
+          quantity,
+          sort_order
+        )
+      `)
+      .in('id', recipeIds)
+      .eq('user_id', userId);
+
+    if (recipesError) throw recipesError;
+
+    // Transform to SavedRecipe format
+    return (recipes || []).map((recipe: any) => ({
+      id: recipe.id,
+      title: recipe.title,
+      description: recipe.description,
+      category: '', // Will be populated by caller if needed
+      ingredients: (recipe.ingredients || [])
+        .sort((a: any, b: any) => a.sort_order - b.sort_order)
+        .map((ing: any) => ({
+          name: ing.name,
+          qty: ing.quantity,
+        })),
+      steps: recipe.steps || [],
+      createdAt: recipe.created_at,
+      source: recipe.source,
+    }));
+  } catch (error) {
+    console.error('Error loading recipes for menu section:', error);
+    return [];
+  }
+}
+
+// ==================== CLEANUP ====================
+
+export function cleanupMenusLocalStorage(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem('tipsyDinnerOccasions');
+  window.localStorage.removeItem('tipsyDinnerMenus');
 }

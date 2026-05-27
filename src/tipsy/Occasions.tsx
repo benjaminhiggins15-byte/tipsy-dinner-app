@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useState, useEffect, type CSSProperties, type KeyboardEvent } from "react";
 import {
   loadOccasions,
   saveOccasion,
@@ -34,6 +34,13 @@ const C = {
   divider: "rgba(35,60,0,0.06)",
   actionIcon: "rgba(35,60,0,0.2)",
   plusBorder: "rgba(35,60,0,0.2)",
+  accentBg: "rgba(35,60,0,0.06)",
+  borderLight: "rgba(35,60,0,0.08)",
+  border: "rgba(35,60,0,0.1)",
+  midBlue: "#233C00",
+  btnBlue: "#233C00",
+  muted: "rgba(35,60,0,0.3)",
+  navy: "#233C00",
 };
 
 const fontSerif = "'Fraunces', serif";
@@ -94,12 +101,27 @@ type Props = {
 };
 
 export default function Occasions({ back, push, isTabRoot = false }: Props) {
-  const [occasions, setOccasions] = useState<Occasion[]>(() => loadOccasions());
+  const [occasions, setOccasions] = useState<Occasion[]>([]);
+  const [menuCounts, setMenuCounts] = useState<Record<string, number>>({});
   const [showCreate, setShowCreate] = useState(false);
   const [editingOccasion, setEditingOccasion] = useState<Occasion | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
-  const refreshOccasions = () => {
-    setOccasions(loadOccasions());
+  useEffect(() => {
+    refreshOccasions();
+  }, []);
+
+  const refreshOccasions = async () => {
+    const loaded = await loadOccasions();
+    setOccasions(loaded);
+
+    // Load menu counts for all occasions
+    const counts: Record<string, number> = {};
+    for (const occasion of loaded) {
+      const menus = await getMenusForOccasion(occasion.id);
+      counts[occasion.id] = menus.length;
+    }
+    setMenuCounts(counts);
   };
 
   return (
@@ -171,8 +193,7 @@ export default function Occasions({ back, push, isTabRoot = false }: Props) {
         ) : (
           occasions.map((occasion, index) => {
             const IconComponent = getIconComponent(occasion.icon);
-            const menus = getMenusForOccasion(occasion.id);
-            const menuCount = menus.length;
+            const menuCount = menuCounts[occasion.id] || 0;
             return (
               <div
                 key={occasion.id}
@@ -248,12 +269,7 @@ export default function Occasions({ back, push, isTabRoot = false }: Props) {
                     </svg>
                   </button>
                   <button
-                    onClick={() => {
-                      if (window.confirm(`Delete ${occasion.name}? This will also remove all menus for this occasion.`)) {
-                        deleteOccasion(occasion.id);
-                        refreshOccasions();
-                      }
-                    }}
+                    onClick={() => setConfirmDeleteId(occasion.id)}
                     aria-label="Delete occasion"
                     style={{
                       background: "transparent",
@@ -319,6 +335,95 @@ export default function Occasions({ back, push, isTabRoot = false }: Props) {
           }}
         />
       )}
+
+      {/* Delete confirmation */}
+      {confirmDeleteId && (
+        <div
+          onClick={() => setConfirmDeleteId(null)}
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "rgba(35,60,0,0.25)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 20,
+            padding: 24,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: C.bg,
+              borderRadius: 16,
+              padding: "24px 20px",
+              width: "100%",
+              maxWidth: 280,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              border: `0.5px solid ${C.border}`,
+            }}
+          >
+            <div style={{
+              fontFamily: fontSerif,
+              fontSize: 20,
+              color: C.navy,
+              fontWeight: 400,
+              textAlign: "center",
+            }}>
+              Delete this occasion?
+            </div>
+            <div style={{
+              fontFamily: fontSans,
+              fontSize: 13,
+              color: C.midBlue,
+              textAlign: "center",
+              marginBottom: 12,
+            }}>
+              This will also remove all menus for this occasion. This can't be undone.
+            </div>
+            <button
+              onClick={() => setConfirmDeleteId(null)}
+              style={{
+                width: "100%",
+                padding: "12px",
+                borderRadius: 10,
+                background: "transparent",
+                border: `0.5px solid ${C.border}`,
+                color: C.midBlue,
+                fontFamily: fontSans,
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                await deleteOccasion(confirmDeleteId);
+                setConfirmDeleteId(null);
+                refreshOccasions();
+              }}
+              style={{
+                width: "100%",
+                padding: "12px",
+                borderRadius: 10,
+                background: "#B85C5C",
+                border: "none",
+                color: C.bg,
+                fontFamily: fontSans,
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -371,7 +476,7 @@ function CreateOccasionSheet({
       style={{
         position: "absolute",
         inset: 0,
-        background: "rgba(4,44,83,0.55)",
+        background: "rgba(35,60,0,0.25)",
         display: "flex",
         alignItems: "flex-end",
         zIndex: 10,
@@ -383,7 +488,7 @@ function CreateOccasionSheet({
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "100%",
-          background: C.white,
+          background: C.bg,
           borderTopLeftRadius: 20,
           borderTopRightRadius: 20,
           padding: "24px 20px calc(80px + env(safe-area-inset-bottom))",
@@ -452,7 +557,7 @@ function CreateOccasionSheet({
               width: 56,
               height: 56,
               borderRadius: "50%",
-              background: C.white,
+              background: C.bg,
               border: `1px solid ${C.border}`,
               display: "flex",
               alignItems: "center",
@@ -505,7 +610,7 @@ function CreateOccasionSheet({
           style={{
             width: "100%",
             background: C.btnBlue,
-            color: C.white,
+            color: C.bg,
             border: "none",
             borderRadius: 12,
             padding: "14px",
@@ -573,7 +678,7 @@ function EditOccasionSheet({
       style={{
         position: "absolute",
         inset: 0,
-        background: "rgba(4,44,83,0.55)",
+        background: "rgba(35,60,0,0.25)",
         display: "flex",
         alignItems: "flex-end",
         zIndex: 10,
@@ -585,7 +690,7 @@ function EditOccasionSheet({
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "100%",
-          background: C.white,
+          background: C.bg,
           borderTopLeftRadius: 20,
           borderTopRightRadius: 20,
           padding: "24px 20px calc(80px + env(safe-area-inset-bottom))",
@@ -657,7 +762,7 @@ function EditOccasionSheet({
               width: 56,
               height: 56,
               borderRadius: "50%",
-              background: C.white,
+              background: C.bg,
               border: `1px solid ${C.border}`,
               display: "flex",
               alignItems: "center",
@@ -710,7 +815,7 @@ function EditOccasionSheet({
           style={{
             width: "100%",
             background: C.btnBlue,
-            color: C.white,
+            color: C.bg,
             border: "none",
             borderRadius: 12,
             padding: "14px",
@@ -753,7 +858,7 @@ function EditOccasionSheet({
             style={{
               position: "fixed",
               inset: 0,
-              background: "rgba(4,44,83,0.55)",
+              background: "rgba(35,60,0,0.25)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -818,7 +923,7 @@ function EditOccasionSheet({
                   borderRadius: 10,
                   background: "#B85C5C",
                   border: "none",
-                  color: "#fff",
+                  color: C.bg,
                   fontFamily: fontSans,
                   fontSize: 13,
                   fontWeight: 500,

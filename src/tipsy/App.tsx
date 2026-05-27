@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, migrateRecipesFromLocalStorage, type Recipe, type Occasion, type Menu, type SavedRecipe, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection } from "./data";
+import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, type Recipe, type Occasion, type Menu, type SavedRecipe, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
@@ -39,9 +39,9 @@ type Screen =
   | { name: "recipes"; categoryKey: string; categoryLabel: string }
   | { name: "recipe"; recipe: Recipe; categoryLabel: string }
   | { name: "occasions" }
-  | { name: "menus"; occasionId: number; occasionName: string }
-  | { name: "menuinterior"; menuId: number }
-  | { name: "recipepicker"; menuId: number; section: MenuSection }
+  | { name: "menus"; occasionId: string; occasionName: string }
+  | { name: "menuinterior"; menuId: string }
+  | { name: "recipepicker"; menuId: string; section: MenuSection }
   | { name: "profile" }
   | { name: "profileedit"; fieldKey: "name" | "email" | "palate" | "inspiration" | "table" | "constraints" }
   | { name: "placeholder"; title: string };
@@ -267,11 +267,12 @@ export default function App() {
         console.error('Migration error:', err);
       });
 
-      // Remove old localStorage categories key (categories now in Supabase)
+      // Remove old localStorage keys (categories, occasions, menus now in Supabase)
       try {
         localStorage.removeItem('tipsyDinnerCategories');
+        cleanupMenusLocalStorage();
       } catch (err) {
-        console.error('Error removing old categories key:', err);
+        console.error('Error removing old localStorage keys:', err);
       }
     }
   }, [session]);

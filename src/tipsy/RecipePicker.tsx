@@ -2,19 +2,18 @@ import { useState, useEffect, type CSSProperties } from "react";
 import { loadCustomCategories, getRecipesForCategory, addRecipeToMenuSection, getRecipesForMenuSection, type MenuSection } from "./data";
 
 const C = {
-  bg: "#EEF4F8",
-  accent: "#E6F1FB",
-  border: "#85B7EB",
-  borderLight: "#C5DCF4",
-  navy: "#042C53",
-  midBlue: "#185FA5",
-  btnBlue: "#0C447C",
-  muted: "#5A7FA3",
-  white: "#ffffff",
+  bg: "#FAF7F2",
+  text: "#233C00",
+  textMuted: "rgba(35,60,0,0.35)",
+  cardBg: "rgba(35,60,0,0.06)",
+  border: "rgba(35,60,0,0.1)",
+  borderLight: "rgba(35,60,0,0.08)",
+  button: "#233C00",
+  buttonText: "#FAF7F2",
+  white: "#FAF7F2",
 };
 
-const fontSerif = "'Inter', sans-serif";
-const fontSans = "'DM Sans', sans-serif";
+const fontSans = "'Inter', sans-serif";
 
 const DURATION = 300;
 const EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
@@ -22,7 +21,7 @@ const EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
 type View = "categories" | { category: string; label: string };
 
 type Props = {
-  menuId: number;
+  menuId: string;
   section: MenuSection;
   onClose: () => void;
 };
@@ -30,8 +29,8 @@ type Props = {
 export default function RecipePicker({ menuId, section, onClose }: Props) {
   const [view, setView] = useState<View>("categories");
   const [transition, setTransition] = useState<{ from: View; to: View; direction: "forward" | "back" } | null>(null);
-  const [addedInSession, setAddedInSession] = useState<Set<number | string>>(new Set());
-  const [existingRecipeIds, setExistingRecipeIds] = useState<(number | string)[]>([]);
+  const [addedInSession, setAddedInSession] = useState<Set<string>>(new Set());
+  const [existingRecipeIds, setExistingRecipeIds] = useState<string[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
 
   useEffect(() => {
@@ -67,7 +66,7 @@ export default function RecipePicker({ menuId, section, onClose }: Props) {
     }, 0);
   };
 
-  const handleRecipeTap = (recipeId: number | string) => {
+  const handleRecipeTap = (recipeId: string) => {
     if (existingRecipeIds.includes(recipeId)) return; // Already in section, ignore
 
     addRecipeToMenuSection(menuId, section, recipeId);
@@ -135,7 +134,7 @@ export default function RecipePicker({ menuId, section, onClose }: Props) {
               background: "none",
               border: "none",
               cursor: "pointer",
-              color: C.midBlue,
+              color: C.text,
               display: "flex",
               alignItems: "center",
               padding: 0,
@@ -150,9 +149,9 @@ export default function RecipePicker({ menuId, section, onClose }: Props) {
           <div style={{ width: 12 }} />
         )}
         <div style={{
-          fontFamily: fontSerif,
+          fontFamily: fontSans,
           fontSize: 16,
-          color: C.navy,
+          color: C.text,
           position: "absolute",
           left: "50%",
           transform: "translateX(-50%)",
@@ -170,7 +169,7 @@ export default function RecipePicker({ menuId, section, onClose }: Props) {
             fontWeight: 600,
             letterSpacing: "0.08em",
             textTransform: "uppercase",
-            color: C.midBlue,
+            color: C.text,
             padding: 0,
           }}
         >
@@ -190,15 +189,15 @@ export default function RecipePicker({ menuId, section, onClose }: Props) {
           fontSize: 9,
           letterSpacing: "0.1em",
           textTransform: "uppercase",
-          color: C.muted,
+          color: C.textMuted,
           marginBottom: 2,
         }}>
           Adding to {SECTION_LABELS[section]}
         </div>
         <div style={{
-          fontFamily: fontSerif,
+          fontFamily: fontSans,
           fontSize: 20,
-          color: C.navy,
+          color: C.text,
           fontWeight: 400,
         }}>
           {view === "categories" ? "Choose a category" : view.label}
@@ -271,10 +270,10 @@ function getTransform(direction: "forward" | "back", layer: "from" | "to", phase
 function renderView(
   view: View,
   categories: any[],
-  existingRecipeIds: (number | string)[],
-  addedInSession: Set<number | string>,
+  existingRecipeIds: string[],
+  addedInSession: Set<string>,
   onCategoryTap: (key: string, label: string) => void,
-  onRecipeTap: (id: number | string) => void
+  onRecipeTap: (id: string) => void
 ) {
   if (view === "categories") {
     return (
@@ -301,7 +300,7 @@ function renderView(
             <div style={{
               position: "absolute",
               inset: 0,
-              background: "rgba(4, 44, 83, 0.22)",
+              background: "rgba(35, 60, 0, 0.2)",
             }} />
             <div style={{
               position: "absolute",
@@ -346,10 +345,10 @@ function ViewContent({
 }: {
   view: View;
   categories: any[];
-  existingRecipeIds: (number | string)[];
-  addedInSession: Set<number | string>;
+  existingRecipeIds: string[];
+  addedInSession: Set<string>;
   onCategoryTap: (key: string, label: string) => void;
-  onRecipeTap: (id: number | string) => void;
+  onRecipeTap: (id: string) => void;
 }) {
   return (
     <div style={{
@@ -383,10 +382,10 @@ function ViewLayer({
 }: {
   view: View;
   categories: any[];
-  existingRecipeIds: (number | string)[];
-  addedInSession: Set<number | string>;
+  existingRecipeIds: string[];
+  addedInSession: Set<string>;
   onCategoryTap: (key: string, label: string) => void;
-  onRecipeTap: (id: number | string) => void;
+  onRecipeTap: (id: string) => void;
   transform: string;
   transitionStyle: string;
   zIndex: number;
@@ -424,9 +423,9 @@ function RecipeList({
 }: {
   categoryKey: string;
   categoryLabel: string;
-  existingRecipeIds: (number | string)[];
-  addedInSession: Set<number | string>;
-  onRecipeTap: (id: number | string) => void;
+  existingRecipeIds: string[];
+  addedInSession: Set<string>;
+  onRecipeTap: (id: string) => void;
 }) {
   const [recipes, setRecipes] = useState<any[]>([]);
 
@@ -445,7 +444,7 @@ function RecipeList({
         padding: "40px 20px",
         fontFamily: fontSans,
         fontSize: 13,
-        color: C.muted,
+        color: C.textMuted,
         fontStyle: "italic",
       }}>
         No recipes in this category yet.
@@ -482,10 +481,10 @@ function RecipeList({
           >
             <div style={{ flex: 1 }}>
               <div style={{
-                fontFamily: fontSerif,
+                fontFamily: fontSans,
                 fontSize: 15,
                 fontWeight: 500,
-                color: C.navy,
+                color: C.text,
                 marginBottom: 2,
               }}>
                 {recipe.title || "Untitled"}
@@ -493,7 +492,7 @@ function RecipeList({
               <div style={{
                 fontFamily: fontSans,
                 fontSize: 11,
-                color: C.muted,
+                color: C.textMuted,
                 lineHeight: 1.4,
               }}>
                 {recipe.description || "No description"}
@@ -504,13 +503,13 @@ function RecipeList({
                 width: 24,
                 height: 24,
                 borderRadius: "50%",
-                background: C.btnBlue,
+                background: C.button,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 flexShrink: 0,
               }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.buttonText} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M20 6L9 17l-5-5" />
                 </svg>
               </div>

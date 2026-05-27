@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useState, useEffect, type CSSProperties, type KeyboardEvent } from "react";
 import {
   findMenu,
   updateMenu,
@@ -48,20 +48,56 @@ const SECTION_LABELS: Record<MenuSection, string> = {
 };
 
 type Screen =
-  | { name: "recipepicker"; menuId: number; section: MenuSection }
+  | { name: "recipepicker"; menuId: string; section: MenuSection }
   | { name: "recipe"; recipe: Recipe; categoryLabel: string }
   | { name: "placeholder"; title: string };
 
 type Props = {
-  menuId: number;
+  menuId: string;
   back: () => void;
   push: (screen: Screen) => void;
 };
 
 export default function MenuInterior({ menuId, back, push }: Props) {
-  const [menu, setMenu] = useState<Menu | null>(() => findMenu(menuId));
+  const [menu, setMenu] = useState<Menu | null>(null);
   const [expandedSections, setExpandedSections] = useState<Set<MenuSection>>(new Set());
+  const [sectionRecipes, setSectionRecipes] = useState<Record<string, SavedRecipe[]>>({});
+  const [loadingStates, setLoadingStates] = useState<Set<MenuSection>>(new Set());
   const [showEdit, setShowEdit] = useState(false);
+
+  // Load menu on mount
+  useEffect(() => {
+    async function loadMenu() {
+      const loadedMenu = await findMenu(menuId);
+      setMenu(loadedMenu);
+    }
+    loadMenu();
+  }, [menuId]);
+
+  // Load recipes for expanded sections
+  useEffect(() => {
+    async function loadRecipes() {
+      // Mark sections as loading
+      setLoadingStates(new Set(expandedSections));
+
+      for (const section of expandedSections) {
+        const recipes = await getRecipesForMenuSection(menuId, section);
+        setSectionRecipes(prev => ({ ...prev, [section]: recipes }));
+
+        // Remove section from loading state after it loads
+        setLoadingStates(prev => {
+          const next = new Set(prev);
+          next.delete(section);
+          return next;
+        });
+      }
+    }
+    if (expandedSections.size > 0) {
+      loadRecipes();
+    } else {
+      setLoadingStates(new Set());
+    }
+  }, [expandedSections, menuId]);
 
   if (!menu) {
     return (
@@ -81,9 +117,22 @@ export default function MenuInterior({ menuId, back, push }: Props) {
     setExpandedSections(next);
   };
 
-  const refreshMenu = () => {
-    const updated = findMenu(menuId);
+  const refreshMenu = async () => {
+    const updated = await findMenu(menuId);
     if (updated) setMenu(updated);
+
+    // Reload recipes for expanded sections
+    setLoadingStates(new Set(expandedSections));
+    for (const section of expandedSections) {
+      const recipes = await getRecipesForMenuSection(menuId, section);
+      setSectionRecipes(prev => ({ ...prev, [section]: recipes }));
+
+      setLoadingStates(prev => {
+        const next = new Set(prev);
+        next.delete(section);
+        return next;
+      });
+    }
   };
 
   // Only show sections that are enabled OR have recipes
@@ -180,9 +229,9 @@ export default function MenuInterior({ menuId, back, push }: Props) {
           </div>
         ) : (
           visibleSections.map((section) => {
-            const recipes = getRecipesForMenuSection(menuId, section);
+            const recipes = sectionRecipes[section] || [];
             const isExpanded = expandedSections.has(section);
-            const count = recipes.length;
+            const count = menu.recipes[section].length;
 
             return (
               <div
@@ -245,8 +294,13 @@ export default function MenuInterior({ menuId, back, push }: Props) {
                     borderRadius: "0 0 14px 14px",
                   }}>
                     {/* Recipe rows */}
-                    {recipes.map((recipe, idx) => {
-                      const category = findCustomCategory(recipe.category);
+                    {loadingStates.has(section) ? (
+                      <div style={{ padding: 16, textAlign: "center", fontFamily: fontSerif, fontStyle: "italic", fontSize: 13, color: C.textMuted }}>
+                        Loading recipes...
+                      </div>
+                    ) : (
+                      recipes.map((recipe, idx) => {
+                        const category = findCustomCategory(recipe.category);
                       const categoryLabel = category?.label ?? "Unknown";
                       return (
                         <div
@@ -323,7 +377,7 @@ export default function MenuInterior({ menuId, back, push }: Props) {
                           </button>
                         </div>
                       );
-                    })}
+                    }))}
 
                     {/* Add recipe row */}
                     <button
