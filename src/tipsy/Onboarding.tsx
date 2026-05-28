@@ -1,6 +1,19 @@
 import { useState, useEffect, type CSSProperties } from "react";
 
-type Props = { onComplete: () => void };
+type ProfileType = {
+  id: string;
+  palate: string;
+  inspiration: string;
+  constraints: string;
+  display_name: string;
+  onboarding_complete: boolean;
+};
+
+type Props = {
+  onComplete: () => void;
+  profile: ProfileType | null;
+  onUpdate: (updates: Partial<ProfileType>) => Promise<void>;
+};
 
 const labelStyle: CSSProperties = {
   fontFamily: "'Inter', sans-serif",
@@ -29,8 +42,8 @@ const btnStyle: CSSProperties = {
 };
 
 function QuestionScreen({
-  question, hint, storageKey, onNext,
-}: { label?: string; question: string; hint: string; storageKey: string; onNext: () => void }) {
+  question, hint, field, onUpdate, onNext,
+}: { label?: string; question: string; hint: string; field: "palate" | "inspiration" | "constraints"; onUpdate: (updates: Partial<ProfileType>) => Promise<void>; onNext: () => void }) {
   const [val, setVal] = useState("");
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: "44px 24px 28px" }}>
@@ -65,8 +78,8 @@ function QuestionScreen({
       <div style={{ flex: 1 }} />
       <button
         style={btnStyle}
-        onClick={() => {
-          try { localStorage.setItem(storageKey, val); } catch { /* noop */ }
+        onClick={async () => {
+          await onUpdate({ [field]: val });
           setVal("");
           onNext();
         }}
@@ -77,11 +90,14 @@ function QuestionScreen({
   );
 }
 
-function Loader({ onDone }: { onDone: () => void }) {
+function Loader({ onUpdate, onDone }: { onUpdate: (updates: Partial<ProfileType>) => Promise<void>; onDone: () => void }) {
   useEffect(() => {
-    const t = setTimeout(onDone, 2500);
+    const t = setTimeout(async () => {
+      await onUpdate({ onboarding_complete: true });
+      onDone();
+    }, 2500);
     return () => clearTimeout(t);
-  }, [onDone]);
+  }, [onDone, onUpdate]);
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", alignItems: "center", justifyContent: "center", gap: 28, padding: 32 }}>
       <style>{`@keyframes tipsyPulse {0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(1.08);opacity:1}}`}</style>
@@ -103,7 +119,7 @@ function Loader({ onDone }: { onDone: () => void }) {
   );
 }
 
-export default function Onboarding({ onComplete }: Props) {
+export default function Onboarding({ onComplete, profile, onUpdate }: Props) {
   const [step, setStep] = useState(1);
   const [transition, setTransition] = useState<{ from: number; to: number } | null>(null);
 
@@ -136,13 +152,10 @@ export default function Onboarding({ onComplete }: Props) {
   };
 
   const renderStep = (s: number) => {
-    if (s === 1) return <QuestionScreen key="s1" label="Taste" question="Your palate" hint="Cuisines, flavors, techniques — what makes your cooking yours?" storageKey="tipsyDinnerPalate" onNext={next} />;
-    if (s === 2) return <QuestionScreen key="s2" label="Inspiration" question="Your inspiration" hint="Sites, accounts, chefs, cookbooks — who shapes how you cook?" storageKey="tipsyDinnerInspiration" onNext={next} />;
-    if (s === 3) return <QuestionScreen key="s3" label="Constraints" question="Your no-gos" hint="Allergies, aversions, or anything that never makes your plate?" storageKey="tipsyDinnerConstraints" onNext={next} />;
-    return <Loader key="s4" onDone={() => {
-      try { localStorage.setItem("tipsyDinnerOnboardingComplete", "true"); } catch { /* noop */ }
-      onComplete();
-    }} />;
+    if (s === 1) return <QuestionScreen key="s1" label="Taste" question="Your palate" hint="Cuisines, flavors, techniques — what makes your cooking yours?" field="palate" onUpdate={onUpdate} onNext={next} />;
+    if (s === 2) return <QuestionScreen key="s2" label="Inspiration" question="Your inspiration" hint="Sites, accounts, chefs, cookbooks — who shapes how you cook?" field="inspiration" onUpdate={onUpdate} onNext={next} />;
+    if (s === 3) return <QuestionScreen key="s3" label="Constraints" question="Your no-gos" hint="Allergies, aversions, or anything that never makes your plate?" field="constraints" onUpdate={onUpdate} onNext={next} />;
+    return <Loader key="s4" onUpdate={onUpdate} onDone={onComplete} />;
   };
 
   const DURATION = 280;

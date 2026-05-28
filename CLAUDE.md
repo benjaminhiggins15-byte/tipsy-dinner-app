@@ -350,10 +350,16 @@ tipsyDinnerMenus
 - recipe_categories join table wired ✓
 - getSavedRecipesForCategory now filters correctly by category ✓
 - localStorage key tipsyDinnerCategories removed ✓
+- Occasions migrated to Supabase ✓
+- Menus migrated to Supabase ✓
+- menu_recipes join table wired ✓
+- localStorage keys tipsyDinnerOccasions and tipsyDinnerMenus removed ✓
 
 **Known issues (refinement pass later):**
 - Slight flash on screen transitions during async category/recipe loads
 - + button position shifts after category creation
+- Brief flash on Menu Interior load
+- RecipePicker category cards still showing legacy gradient color
 
 **Visual redesign order (follow this sequence):**
 1. Build — empty state
@@ -370,6 +376,5 @@ tipsyDinnerMenus
 
 **Not yet built:**
 - Splash screen
-- Supabase migration for menus data (occasions, menus) — recipes and categories complete
 - Streaming responses
 - Search

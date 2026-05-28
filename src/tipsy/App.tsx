@@ -29,6 +29,15 @@ type RecipeDraft = {
   steps: string[];
 };
 
+type ProfileType = {
+  id: string;
+  palate: string;
+  inspiration: string;
+  constraints: string;
+  display_name: string;
+  onboarding_complete: boolean;
+};
+
 type Screen =
   | { name: "cook"; newCategory?: { key: string; label: string }; draft?: RecipeDraft; resetKey?: number }
   | { name: "addown"; editRecipe?: Recipe; editCategoryLabel?: string; draft?: RecipeDraft & { trayOpen?: boolean; newCategory?: { key: string; label: string } } }
@@ -106,6 +115,8 @@ function renderScreen(
   finishCreateCategoryForRecipe?: (catKey: string, catLabel: string, draft: RecipeDraft, returnTo: "cook" | "addown") => void,
   finishSaveRecipe?: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void,
   onSignOut?: () => void,
+  profile?: ProfileType | null,
+  onUpdate?: (updates: Partial<ProfileType>) => Promise<void>,
 ) {
   switch (s.name) {
     case "cook": return (
@@ -116,6 +127,8 @@ function renderScreen(
         finishSaveRecipe={(r, k, l) => finishSaveRecipe?.(r, k, l)}
         screen={s}
         isTabRoot={isTabRoot}
+        profile={profile}
+        onUpdate={onUpdate}
       />
     );
     case "addown": return (
@@ -195,8 +208,8 @@ function renderScreen(
         onClose={back}
       />
     );
-    case "profile": return <Profile back={back} openEdit={(k) => push({ name: "profileedit", fieldKey: k })} isTabRoot={isTabRoot} onSignOut={onSignOut || (() => {})} />;
-    case "profileedit": return <ProfileEdit fieldKey={s.fieldKey} back={back} />;
+    case "profile": return <Profile back={back} openEdit={(k) => push({ name: "profileedit", fieldKey: k })} isTabRoot={isTabRoot} onSignOut={onSignOut!} profile={profile || null} onUpdate={onUpdate || (async () => {})} />;
+    case "profileedit": return <ProfileEdit fieldKey={s.fieldKey} back={back} profile={profile || null} onUpdate={onUpdate || (async () => {})} />;
     case "placeholder": return <Placeholder title={s.title} back={back} />;
   }
 }
@@ -223,37 +236,143 @@ export default function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [authScreen, setAuthScreen] = useState<"signup" | "signin">("signup");
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
+  const [profile, setProfile] = useState<ProfileType | null>(null);
+
+  // Profile helpers
+  const loadProfile = async (userId: string): Promise<ProfileType> => {
+    if (!userId) {
+      throw new Error('No userId provided - cannot load profile');
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (error) {
+        // If profile doesn't exist, create one
+        if (error.code === 'PGRST116') {
+          const newProfile: Partial<ProfileType> = {
+            id: userId,
+            palate: '',
+            inspiration: '',
+            constraints: '',
+            display_name: '',
+            onboarding_complete: false,
+          };
+          const { data: created, error: upsertError } = await supabase
+            .from('profiles')
+            .upsert(newProfile, { onConflict: 'id' })
+            .select()
+            .single();
+
+          if (upsertError) throw upsertError;
+          const profileData = created as ProfileType;
+          setProfile(profileData);
+          return profileData;
+        }
+        throw error;
+      }
+
+      const profileData = data as ProfileType;
+      setProfile(profileData);
+      return profileData;
+    } catch (err) {
+      console.error('Error loading profile:', err);
+      throw err;
+    }
+  };
+
+  const updateProfile = async (updates: Partial<ProfileType>, userId?: string): Promise<void> => {
+    try {
+      const effectiveUserId = userId || session?.user?.id;
+      if (!effectiveUserId) {
+        throw new Error('No active session - cannot update profile');
+      }
+
+      const { error } = await supabase
+        .from('profiles')
+        .upsert(
+          { id: effectiveUserId, ...updates },
+          { onConflict: 'id' }
+        );
+
+      if (error) throw error;
+
+      // Update local state
+      setProfile((prev) => (prev ? { ...prev, ...updates } : null));
+    } catch (err) {
+      console.error('Error updating profile:', err);
+      throw err;
+    }
+  };
+
+  const migrateFromLocalStorage = async (userId: string): Promise<void> => {
+    // Guard: skip migration if no userId provided
+    if (!userId) {
+      return;
+    }
+
+    try {
+      const palate = localStorage.getItem("tipsyDinnerPalate");
+      const inspiration = localStorage.getItem("tipsyDinnerInspiration");
+      const constraints = localStorage.getItem("tipsyDinnerConstraints");
+      const onboardingComplete = localStorage.getItem("tipsyDinnerOnboardingComplete") === "true";
+
+      // Only migrate if at least one key exists
+      if (palate || inspiration || constraints || onboardingComplete) {
+        const updates: Partial<ProfileType> = {};
+        if (palate) updates.palate = palate;
+        if (inspiration) updates.inspiration = inspiration;
+        if (constraints) updates.constraints = constraints;
+        if (onboardingComplete) updates.onboarding_complete = true;
+
+        // Upsert to Supabase
+        await updateProfile(updates, userId);
+
+        // Delete localStorage keys
+        localStorage.removeItem("tipsyDinnerPalate");
+        localStorage.removeItem("tipsyDinnerInspiration");
+        localStorage.removeItem("tipsyDinnerConstraints");
+        localStorage.removeItem("tipsyDinnerOnboardingComplete");
+
+        console.log("Migrated profile from localStorage to Supabase");
+      }
+    } catch (err) {
+      console.error("Migration error:", err);
+    }
+  };
 
   useEffect(() => {
-    // Get initial session
+    // Get initial session (no profile logic here)
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session) {
-        // Check onboarding status
-        try {
-          setShowOnboarding(localStorage.getItem("tipsyDinnerOnboardingComplete") !== "true");
-        } catch {
-          setShowOnboarding(false);
-        }
-      }
     });
 
     // Listen for auth changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
       setSession(session);
-      if (session) {
-        // Check onboarding status when user logs in
+
+      if (session && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
+        // Load profile, run migration, reload profile, check onboarding
         try {
-          setShowOnboarding(localStorage.getItem("tipsyDinnerOnboardingComplete") !== "true");
-        } catch {
+          await loadProfile(session.user.id);
+          await migrateFromLocalStorage(session.user.id);
+          const finalProfile = await loadProfile(session.user.id);
+          setShowOnboarding(!finalProfile.onboarding_complete);
+        } catch (err) {
+          console.error('Error initializing profile on sign in:', err);
           setShowOnboarding(false);
         }
-      } else {
+      } else if (!session) {
         // Reset to signin screen when logged out
         setAuthScreen("signin");
         setShowOnboarding(null);
+        setProfile(null);
       }
     });
 
@@ -604,7 +723,7 @@ export default function App() {
       );
     }
     if (view === "onboarding") {
-      return <Onboarding onComplete={() => setShowOnboarding(false)} />;
+      return <Onboarding onComplete={() => setShowOnboarding(false)} profile={profile} onUpdate={updateProfile} />;
     }
     return (
       <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative", background: "#FAF7F2" }}>
@@ -621,6 +740,8 @@ export default function App() {
           finishCreateCategoryForRecipe={finishCreateCategoryForRecipe}
           finishSaveRecipe={finishSaveRecipe}
           onSignOut={handleSignOut}
+          profile={profile}
+          updateProfile={async (updates) => updateProfile(updates, session?.user?.id)}
         />
         <BottomTabBar activeTab={activeTab} onTabClick={switchToTab} />
       </div>
@@ -705,8 +826,8 @@ export default function App() {
         )}
       </div>
       <button
-        onClick={() => {
-          try { localStorage.removeItem("tipsyDinnerOnboardingComplete"); } catch { /* noop */ }
+        onClick={async () => {
+          await updateProfile({ onboarding_complete: false });
           setTabStacks({
             build: [{ name: "cook" }],
             recipes: [{ name: "categories" }],
@@ -754,6 +875,8 @@ function ScreenStage({
   finishCreateCategoryForRecipe,
   finishSaveRecipe,
   onSignOut,
+  profile,
+  updateProfile,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back"; fromIsTabRoot?: boolean; toIsTabRoot?: boolean } | null;
@@ -767,6 +890,8 @@ function ScreenStage({
   finishCreateCategoryForRecipe: (catKey: string, catLabel: string, draft: RecipeDraft, returnTo: "cook" | "addown") => void;
   finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
   onSignOut: () => void;
+  profile: ProfileType | null;
+  updateProfile: (updates: Partial<ProfileType>) => Promise<void>;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
@@ -816,7 +941,7 @@ function ScreenStage({
     return (
       <div style={{ ...layerBase, position: "relative", height: "100%", paddingBottom: 64, background: "#FAF7F2" }}>
         <div style={{ ...layerBase, position: "relative", height: "100%" }}>
-          {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut)}
+          {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile)}
         </div>
       </div>
     );
@@ -854,10 +979,10 @@ function ScreenStage({
   return (
     <div style={{ position: "relative", height: "100%", background: "#FAF7F2" }}>
       <div style={{ ...layerBase, transform: fromTransform, transition: transitionStyle, zIndex: fromZ, pointerEvents: "none", paddingBottom: 64 }}>
-        {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut)}
+        {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile)}
       </div>
       <div style={{ ...layerBase, transform: toTransform, transition: transitionStyle, zIndex: toZ, pointerEvents: "none", paddingBottom: 64 }}>
-        {renderScreen(to, push, back, toIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut)}
+        {renderScreen(to, push, back, toIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile)}
       </div>
     </div>
   );
@@ -1499,12 +1624,14 @@ function BackArrow() {
 }
 
 /* ---------------- Cook ---------------- */
-function Cook({ back, push, finishSaveRecipe, screen, isTabRoot }: {
+function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpdate }: {
   back: () => void;
   push: (s: Screen) => void;
   finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
   screen: Extract<Screen, { name: "cook" }>;
   isTabRoot: boolean;
+  profile?: ProfileType | null;
+  onUpdate?: (updates: Partial<ProfileType>) => Promise<void>;
 }) {
   type Msg = { id: number; role: "user" | "ai"; text: string };
 
@@ -1574,10 +1701,10 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot }: {
     const updatedHistory = [...conversationHistory, { role: "user" as const, content: userText }];
     setConversationHistory(updatedHistory);
 
-    // Load user profile from localStorage
-    const palate = typeof window !== "undefined" ? localStorage.getItem("tipsyDinnerPalate") || "" : "";
-    const inspiration = typeof window !== "undefined" ? localStorage.getItem("tipsyDinnerInspiration") || "" : "";
-    const constraints = typeof window !== "undefined" ? localStorage.getItem("tipsyDinnerConstraints") || "" : "";
+    // Load user profile from state
+    const palate = profile?.palate || "";
+    const inspiration = profile?.inspiration || "";
+    const constraints = profile?.constraints || "";
 
     try {
       console.log("Calling Anthropic API...");
@@ -1843,9 +1970,9 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
     const updatedHistory = [...conversationHistory, { role: "user" as const, content: userText }];
     setConversationHistory(updatedHistory);
 
-    const palate = typeof window !== "undefined" ? localStorage.getItem("tipsyDinnerPalate") || "" : "";
-    const inspiration = typeof window !== "undefined" ? localStorage.getItem("tipsyDinnerInspiration") || "" : "";
-    const constraints = typeof window !== "undefined" ? localStorage.getItem("tipsyDinnerConstraints") || "" : "";
+    const palate = profile?.palate || "";
+    const inspiration = profile?.inspiration || "";
+    const constraints = profile?.constraints || "";
 
     (async () => {
       try {

@@ -1,6 +1,15 @@
 import { useState, type CSSProperties } from "react";
 import { supabase } from "../lib/supabase";
 
+type ProfileType = {
+  id: string;
+  palate: string;
+  inspiration: string;
+  constraints: string;
+  display_name: string;
+  onboarding_complete: boolean;
+};
+
 const KEYS = {
   name: "tipsyDinnerName",
   email: "tipsyDinnerEmail",
@@ -96,7 +105,7 @@ const FIELD_META: Record<FieldKey, { label: string; multiline: boolean }> = {
   constraints: { label: "Constraints", multiline: true },
 };
 
-export default function Profile({ back, openEdit, isTabRoot = false, onSignOut }: { back: () => void; openEdit: (k: FieldKey) => void; isTabRoot?: boolean; onSignOut: () => void }) {
+export default function Profile({ back, openEdit, isTabRoot = false, onSignOut, profile, onUpdate }: { back: () => void; openEdit: (k: FieldKey) => void; isTabRoot?: boolean; onSignOut: () => void; profile: ProfileType | null; onUpdate: (updates: Partial<ProfileType>) => Promise<void> }) {
   const handleSignOut = async () => {
     try {
       const { error } = await supabase.auth.signOut();
@@ -132,13 +141,13 @@ export default function Profile({ back, openEdit, isTabRoot = false, onSignOut }
       </div>
       <div style={{ flex: 1, overflowY: "auto" }}>
         <div style={sectionLabel}>Account</div>
-        <Row title="Name" subtitle={read(KEYS.name) || "—"} onClick={() => openEdit("name")} />
+        <Row title="Name" subtitle={profile?.display_name || read(KEYS.name) || "—"} onClick={() => openEdit("name")} />
         <Row title="Email" subtitle={read(KEYS.email) || "—"} onClick={() => openEdit("email")} />
 
         <div style={sectionLabel}>Your Kitchen</div>
-        <Row title="Your palate" subtitle={trim30(read(KEYS.palate))} onClick={() => openEdit("palate")} />
-        <Row title="Inspiration" subtitle={trim30(read(KEYS.inspiration))} onClick={() => openEdit("inspiration")} />
-        <Row title="Constraints" subtitle={trim30(read(KEYS.constraints))} onClick={() => openEdit("constraints")} />
+        <Row title="Your palate" subtitle={trim30(profile?.palate || "")} onClick={() => openEdit("palate")} />
+        <Row title="Inspiration" subtitle={trim30(profile?.inspiration || "")} onClick={() => openEdit("inspiration")} />
+        <Row title="Constraints" subtitle={trim30(profile?.constraints || "")} onClick={() => openEdit("constraints")} />
 
         <div style={sectionLabel}>Support</div>
         <Row title="Sign Out" onClick={handleSignOut} />
@@ -148,10 +157,20 @@ export default function Profile({ back, openEdit, isTabRoot = false, onSignOut }
   );
 }
 
-export function ProfileEdit({ fieldKey, back }: { fieldKey: FieldKey; back: () => void }) {
+export function ProfileEdit({ fieldKey, back, profile, onUpdate }: { fieldKey: FieldKey; back: () => void; profile: ProfileType | null; onUpdate: (updates: Partial<ProfileType>) => Promise<void> }) {
   const meta = FIELD_META[fieldKey];
   const storageKey = KEYS[fieldKey];
-  const [val, setVal] = useState(read(storageKey));
+
+  // Get initial value from profile if it's one of the migrated fields, otherwise from localStorage
+  const getInitialValue = () => {
+    if (fieldKey === "name") return profile?.display_name || read(storageKey);
+    if (fieldKey === "palate") return profile?.palate || "";
+    if (fieldKey === "inspiration") return profile?.inspiration || "";
+    if (fieldKey === "constraints") return profile?.constraints || "";
+    return read(storageKey);
+  };
+
+  const [val, setVal] = useState(getInitialValue());
   const inputBase: CSSProperties = {
     width: "100%",
     background: "rgba(35,60,0,0.05)",
@@ -194,8 +213,16 @@ export function ProfileEdit({ fieldKey, back }: { fieldKey: FieldKey; back: () =
         )}
         <div style={{ flex: 1 }} />
         <button
-          onClick={() => {
-            try { localStorage.setItem(storageKey, val); } catch { /* noop */ }
+          onClick={async () => {
+            // Use Supabase for migrated fields, localStorage for legacy fields
+            if (fieldKey === "name") {
+              await onUpdate({ display_name: val });
+            } else if (fieldKey === "palate" || fieldKey === "inspiration" || fieldKey === "constraints") {
+              await onUpdate({ [fieldKey]: val });
+            } else {
+              // Legacy fields (email, table) still use localStorage
+              try { localStorage.setItem(storageKey, val); } catch { /* noop */ }
+            }
             back();
           }}
           style={{
