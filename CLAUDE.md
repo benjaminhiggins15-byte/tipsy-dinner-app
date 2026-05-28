@@ -238,17 +238,23 @@ Four tabs, always visible, always at the bottom of every screen:
 
 ---
 
-## Data Layer (localStorage)
+## Data Layer
 
+**Supabase tables:**
+- `profiles` — user profile data (display_name, palate, inspiration, constraints, onboarding_complete)
+- `recipes` — saved recipes
+- `ingredients` — recipe ingredients with sort_order
+- `categories` — custom recipe categories
+- `recipe_categories` — join table for recipes ↔ categories
+- `occasions` — menu occasions
+- `menus` — saved menus
+- `menu_recipes` — join table for menus ↔ recipes
+
+**Legacy localStorage keys (still in use):**
 ```
-tipsyDinnerRecipes
-tipsyDinnerCategories
-tipsyDinnerOnboardingComplete
-tipsyDinnerPalate
-tipsyDinnerInspiration
-tipsyDinnerConstraints
-tipsyDinnerOccasions
-tipsyDinnerMenus
+tipsyDinnerName
+tipsyDinnerEmail
+tipsyDinnerTable
 ```
 
 ---
@@ -290,8 +296,8 @@ tipsyDinnerMenus
 
 **Routing logic:**
 1. No active session → show SignUp screen (can navigate to SignIn via pill button)
-2. Active session + no `tipsyDinnerOnboardingComplete` flag → show Onboarding flow
-3. Active session + onboarding complete → show Build screen (main app)
+2. Active session + `onboarding_complete` = false in profiles table → show Onboarding flow
+3. Active session + `onboarding_complete` = true → show Build screen (main app)
 
 **Auth methods:**
 - Email/password sign up and sign in
@@ -302,7 +308,8 @@ tipsyDinnerMenus
 - Legacy Welcome screen (name/email/password) removed — auth happens before onboarding
 - Onboarding now starts directly at first question ("Your palate")
 - Three questions total: palate, inspiration, constraints
-- Loader screen sets `tipsyDinnerOnboardingComplete` flag on completion
+- Each question writes to Supabase profiles table (palate, inspiration, constraints columns)
+- Loader screen sets `onboarding_complete` = true in profiles table on completion
 
 **Transitions:**
 - SignUp ↔ SignIn: slide left/right via AuthFlow component
@@ -354,6 +361,14 @@ tipsyDinnerMenus
 - Menus migrated to Supabase ✓
 - menu_recipes join table wired ✓
 - localStorage keys tipsyDinnerOccasions and tipsyDinnerMenus removed ✓
+- Profile data (display_name, palate, inspiration, constraints) migrated to Supabase ✓
+- onboarding_complete column added to profiles table ✓
+- Onboarding flow writes to Supabase on each question ✓
+- App.tsx session handling reads onboarding_complete from Supabase ✓
+- Profile page reads and writes to Supabase ✓
+- One-time localStorage migration wired and working ✓
+- localStorage keys tipsyDinnerPalate, tipsyDinnerInspiration, tipsyDinnerConstraints, tipsyDinnerOnboardingComplete removed ✓
+- Sign out working correctly ✓
 
 **Known issues (refinement pass later):**
 - Slight flash on screen transitions during async category/recipe loads
