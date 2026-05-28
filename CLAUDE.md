@@ -262,9 +262,10 @@ tipsyDinnerTable
 ## AI Layer
 
 - Model: claude-sonnet-4-5
-- Direct browser call with `dangerouslyAllowBrowser: true` (temporary)
-- API key: `VITE_ANTHROPIC_API_KEY` in `.env`
-- Streaming: not yet implemented — full response then display
+- Supabase Edge Function at `/functions/v1/ai-chat` handles all AI calls
+- API key stored server-side in Edge Function environment (`ANTHROPIC_API_KEY`)
+- Client authenticates with Supabase anon key (`VITE_SUPABASE_ANON_KEY`)
+- Streaming: fully implemented — responses appear word by word via Server-Sent Events
 - Two modes: Brainstorm and Recipe
 - Never enter Recipe mode early — only on explicit user choice
 - Recipe card never updated for technique, wine, or tangent questions
@@ -369,6 +370,11 @@ tipsyDinnerTable
 - One-time localStorage migration wired and working ✓
 - localStorage keys tipsyDinnerPalate, tipsyDinnerInspiration, tipsyDinnerConstraints, tipsyDinnerOnboardingComplete removed ✓
 - Sign out working correctly ✓
+- Anthropic API key moved to Supabase Edge Function ✓
+- Edge Function ai-chat deployed to Supabase ✓
+- VITE_ANTHROPIC_API_KEY removed from .env and codebase ✓
+- AI calls now route through Supabase, key never exposed to browser ✓
+- Streaming preserved — responses still appear word by word ✓
 
 **Known issues (refinement pass later):**
 - Slight flash on screen transitions during async category/recipe loads

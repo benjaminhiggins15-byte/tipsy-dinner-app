@@ -12,7 +12,6 @@ import SaveRecipeFlow from "./SaveRecipeFlow";
 import AuthFlow from "./AuthFlow";
 import { supabase } from "../lib/supabase";
 import type { Session } from "@supabase/supabase-js";
-import Anthropic from "@anthropic-ai/sdk";
 import watermarkSquare from "../Logos/watermark_square.png";
 import watermarkCircle from "../Logos/watermark_circle.png";
 import {
@@ -21,6 +20,42 @@ import {
   IconLayoutList,
   IconUser,
 } from "@tabler/icons-react";
+
+// Helper to parse Server-Sent Events from Anthropic streaming API
+async function* parseSSEStream(response: Response) {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("No response body");
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          const data = line.slice(6);
+          if (data === "[DONE]") continue;
+
+          try {
+            const parsed = JSON.parse(data);
+            yield parsed;
+          } catch (e) {
+            console.warn("Failed to parse SSE data:", data);
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
 
 type RecipeDraft = {
   title: string;
@@ -1707,18 +1742,13 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
     const constraints = profile?.constraints || "";
 
     try {
-      console.log("Calling Anthropic API...");
+      console.log("Calling AI chat API...");
 
-      // Initialize Anthropic client
-      const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
-      if (!apiKey) {
-        throw new Error("API key not found");
+      // Get Supabase anon key for authorization
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      if (!supabaseAnonKey) {
+        throw new Error("Supabase key not found");
       }
-
-      const anthropic = new Anthropic({
-        apiKey,
-        dangerouslyAllowBrowser: true,
-      });
 
       // Build system prompt
       const systemPrompt = `You are the cooking assistant inside Tipsy Dinner, a personal recipe app. Your job is to help the user figure out what they want to make, then create a recipe once they've landed on something. Think of yourself as a knowledgeable friend who happens to be standing in the kitchen with them — confident, direct, and warm, but never performative or gushing.
@@ -1769,12 +1799,28 @@ Use this format every time a recipe is created or updated. Never deviate from it
 
 In the recipe JSON, the ingredient name field must contain only the ingredient name — never include quantity, amount, or preparation notes in the name field. All quantity information including amount, unit, and preparation notes must go in the quantity field only.`;
 
-      const stream = await anthropic.messages.stream({
-        model: "claude-sonnet-4-5",
-        max_tokens: 2048,
-        system: systemPrompt,
-        messages: updatedHistory,
-      });
+      // Call Supabase Edge Function
+      const response = await fetch(
+        "https://xzpmmthreeyscidhwriv.supabase.co/functions/v1/ai-chat",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${supabaseAnonKey}`,
+          },
+          body: JSON.stringify({
+            messages: updatedHistory,
+            systemPrompt: systemPrompt,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Edge Function error: ${errorText}`);
+      }
+
+      const stream = parseSSEStream(response);
 
       // Create AI message immediately
       setTyping(false);
@@ -1976,13 +2022,8 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
 
     (async () => {
       try {
-        const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
-        if (!apiKey) throw new Error("API key not found");
-
-        const anthropic = new Anthropic({
-          apiKey,
-          dangerouslyAllowBrowser: true,
-        });
+        const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+        if (!supabaseAnonKey) throw new Error("Supabase key not found");
 
         const systemPrompt = `You are the cooking assistant inside Tipsy Dinner, a personal recipe app. Your job is to help the user figure out what they want to make, then create a recipe once they've landed on something. Think of yourself as a knowledgeable friend who happens to be standing in the kitchen with them — confident, direct, and warm, but never performative or gushing.
 Your two modes:
@@ -2032,12 +2073,27 @@ Use this format every time a recipe is created or updated. Never deviate from it
 
 In the recipe JSON, the ingredient name field must contain only the ingredient name — never include quantity, amount, or preparation notes in the name field. All quantity information including amount, unit, and preparation notes must go in the quantity field only.`;
 
-        const stream = await anthropic.messages.stream({
-          model: "claude-sonnet-4-5",
-          max_tokens: 2048,
-          system: systemPrompt,
-          messages: updatedHistory,
-        });
+        const response = await fetch(
+          "https://xzpmmthreeyscidhwriv.supabase.co/functions/v1/ai-chat",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${supabaseAnonKey}`,
+            },
+            body: JSON.stringify({
+              messages: updatedHistory,
+              systemPrompt: systemPrompt,
+            }),
+          }
+        );
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Edge Function error: ${errorText}`);
+        }
+
+        const stream = parseSSEStream(response);
 
         setTyping(false);
         const aiMessageId = ++idRef.current;
