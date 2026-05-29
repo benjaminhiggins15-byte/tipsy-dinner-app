@@ -92,26 +92,62 @@ type Props = {
 };
 
 export default function Menus({ occasionId, occasionName, back, push }: Props) {
-  const [menus, setMenus] = useState<Menu[]>([]);
-  const [occasion, setOccasion] = useState<Occasion | null>(null);
+  const [state, setState] = useState<{
+    menus: Menu[];
+    occasion: Occasion | null;
+    loading: boolean;
+  }>({
+    menus: [],
+    occasion: null,
+    loading: true,
+  });
   const [showCreate, setShowCreate] = useState(false);
   const [editingMenu, setEditingMenu] = useState<Menu | null>(null);
   const [editingOccasion, setEditingOccasion] = useState(false);
 
   useEffect(() => {
-    refreshMenus();
-    loadOccasion();
+    setState({ menus: [], occasion: null, loading: true });
+  }, [occasionId]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function initialLoad() {
+      const [loadedMenus, loadedOccasion] = await Promise.all([
+        getMenusForOccasion(occasionId),
+        findOccasion(occasionId)
+      ]);
+
+      if (ignore) return;
+
+      setState({
+        menus: loadedMenus,
+        occasion: loadedOccasion,
+        loading: false,
+      });
+    }
+
+    initialLoad();
+
+    return () => {
+      ignore = true;
+    };
   }, [occasionId]);
 
   const refreshMenus = async () => {
     const loaded = await getMenusForOccasion(occasionId);
-    setMenus(loaded);
+    setState(prev => ({
+      ...prev,
+      menus: loaded,
+    }));
   };
 
-  const loadOccasion = async () => {
-    const loaded = await findOccasion(occasionId);
-    setOccasion(loaded);
-  };
+  if (state.loading) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#FAF7F2", alignItems: "center", justifyContent: "center" }}>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#FAF7F2" }}>
@@ -157,7 +193,7 @@ export default function Menus({ occasionId, occasionName, back, push }: Props) {
               fontSize: 11,
               color: C.textMuted,
             }}>
-              {menus.length} {menus.length === 1 ? "menu" : "menus"}
+              {state.menus.length} {state.menus.length === 1 ? "menu" : "menus"}
             </div>
           </div>
         </div>
@@ -187,7 +223,7 @@ export default function Menus({ occasionId, occasionName, back, push }: Props) {
 
       {/* Body - Menu Cards */}
       <div style={{ flex: 1, overflowY: "auto", padding: "8px 20px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
-        {menus.length === 0 ? (
+        {state.menus.length === 0 ? (
           <div style={{
             display: "flex",
             alignItems: "center",
@@ -206,7 +242,7 @@ export default function Menus({ occasionId, occasionName, back, push }: Props) {
             </p>
           </div>
         ) : (
-          menus.map((menu) => (
+          state.menus.map((menu) => (
             <div
               key={menu.id}
               style={{
@@ -367,9 +403,9 @@ export default function Menus({ occasionId, occasionName, back, push }: Props) {
       )}
 
       {/* Edit Occasion Sheet */}
-      {editingOccasion && occasion && (
+      {editingOccasion && state.occasion && (
         <EditOccasionSheet
-          occasion={occasion}
+          occasion={state.occasion}
           onClose={() => setEditingOccasion(false)}
           onSaved={() => {
             setEditingOccasion(false);

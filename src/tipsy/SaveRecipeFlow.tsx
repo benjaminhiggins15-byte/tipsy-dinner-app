@@ -6,6 +6,7 @@ import {
   findMenu,
   type MenuSection,
   type Occasion,
+  type Menu,
 } from "./data";
 import {
   IconChefHat,
@@ -70,7 +71,7 @@ function getIconComponentByName(iconName: string) {
 
 type Props = {
   onClose: () => void;
-  onPick: (key: string, label: string, menuInfo?: { menuId: number; section: MenuSection }) => void;
+  onPick: (key: string, label: string, menuInfo?: { menuId: string; section: MenuSection }) => void;
   onNew: () => void;
   initialSelectedCategory?: { key: string; label: string } | null;
 };
@@ -80,12 +81,11 @@ export default function SaveRecipeFlow({ onClose, onPick, onNew, initialSelected
   const [slideDirection, setSlideDirection] = useState<"forward" | "back" | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<{ key: string; label: string } | null>(initialSelectedCategory || null);
   const [addToMenu, setAddToMenu] = useState(false);
-  const [selectedOccasion, setSelectedOccasion] = useState<number | null>(null);
-  const [selectedMenu, setSelectedMenu] = useState<number | null>(null);
+  const [selectedOccasion, setSelectedOccasion] = useState<string | null>(null);
+  const [selectedMenu, setSelectedMenu] = useState<string | null>(null);
   const [selectedSection, setSelectedSection] = useState<MenuSection | null>(null);
   const [allCats, setAllCats] = useState<any[]>([]);
-
-  const occasions = loadOccasions();
+  const [occasions, setOccasions] = useState<Occasion[]>([]);
 
   // Load categories on mount
   useEffect(() => {
@@ -94,6 +94,15 @@ export default function SaveRecipeFlow({ onClose, onPick, onNew, initialSelected
       setAllCats(cats);
     };
     loadCategories();
+  }, []);
+
+  // Load occasions on mount
+  useEffect(() => {
+    let ignore = false;
+    loadOccasions().then(loaded => {
+      if (!ignore) setOccasions(loaded);
+    });
+    return () => { ignore = true; };
   }, []);
 
   // Reorder categories so the initially selected one appears first
@@ -393,17 +402,41 @@ function SaveStep1({ cats, selectedCategory, onSelectCategory, onNew, onYes, onS
 
 function SaveStep2({ occasions, selectedOccasion, setSelectedOccasion, selectedMenu, setSelectedMenu, selectedSection, setSelectedSection, onBack, onSave }: {
   occasions: Occasion[];
-  selectedOccasion: number | null;
-  setSelectedOccasion: (id: number | null) => void;
-  selectedMenu: number | null;
-  setSelectedMenu: (id: number | null) => void;
+  selectedOccasion: string | null;
+  setSelectedOccasion: (id: string | null) => void;
+  selectedMenu: string | null;
+  setSelectedMenu: (id: string | null) => void;
   selectedSection: MenuSection | null;
   setSelectedSection: (section: MenuSection | null) => void;
   onBack: () => void;
   onSave: () => void;
 }) {
-  const menus = selectedOccasion ? getMenusForOccasion(selectedOccasion) : [];
-  const selectedMenuData = selectedMenu ? findMenu(selectedMenu) : null;
+  const [menus, setMenus] = useState<Menu[]>([]);
+  const [selectedMenuData, setSelectedMenuData] = useState<Menu | null>(null);
+
+  useEffect(() => {
+    if (!selectedOccasion) {
+      setMenus([]);
+      return;
+    }
+    let ignore = false;
+    getMenusForOccasion(selectedOccasion).then(loaded => {
+      if (!ignore) setMenus(loaded);
+    });
+    return () => { ignore = true; };
+  }, [selectedOccasion]);
+
+  useEffect(() => {
+    if (!selectedMenu) {
+      setSelectedMenuData(null);
+      return;
+    }
+    let ignore = false;
+    findMenu(selectedMenu).then(loaded => {
+      if (!ignore) setSelectedMenuData(loaded);
+    });
+    return () => { ignore = true; };
+  }, [selectedMenu]);
 
   const SECTION_LABELS: Record<string, string> = {
     apps: "Apps",

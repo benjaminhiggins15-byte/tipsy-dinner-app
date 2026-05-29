@@ -1,4 +1,4 @@
-import { useState, useEffect, type CSSProperties, type KeyboardEvent } from "react";
+import { useState, useEffect, useRef, type CSSProperties, type KeyboardEvent } from "react";
 import {
   loadOccasions,
   saveOccasion,
@@ -101,28 +101,73 @@ type Props = {
 };
 
 export default function Occasions({ back, push, isTabRoot = false }: Props) {
-  const [occasions, setOccasions] = useState<Occasion[]>([]);
-  const [menuCounts, setMenuCounts] = useState<Record<string, number>>({});
+  const [state, setState] = useState<{
+    occasions: Occasion[];
+    menuCounts: Record<string, number>;
+    loading: boolean;
+  }>({
+    occasions: [],
+    menuCounts: {},
+    loading: true,
+  });
   const [showCreate, setShowCreate] = useState(false);
   const [editingOccasion, setEditingOccasion] = useState<Occasion | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
-    refreshOccasions();
+    let ignore = false;
+
+    async function initialLoad() {
+      const loaded = await loadOccasions();
+      if (ignore) return;
+
+      const counts: Record<string, number> = {};
+      await Promise.all(
+        loaded.map(async (occasion) => {
+          const menus = await getMenusForOccasion(occasion.id);
+          counts[occasion.id] = menus.length;
+        })
+      );
+
+      if (ignore) return;
+      setState({
+        occasions: loaded,
+        menuCounts: counts,
+        loading: false,
+      });
+    }
+
+    initialLoad();
+
+    return () => {
+      ignore = true;
+    };
   }, []);
 
   const refreshOccasions = async () => {
     const loaded = await loadOccasions();
-    setOccasions(loaded);
 
     // Load menu counts for all occasions
     const counts: Record<string, number> = {};
-    for (const occasion of loaded) {
-      const menus = await getMenusForOccasion(occasion.id);
-      counts[occasion.id] = menus.length;
-    }
-    setMenuCounts(counts);
+    await Promise.all(
+      loaded.map(async (occasion) => {
+        const menus = await getMenusForOccasion(occasion.id);
+        counts[occasion.id] = menus.length;
+      })
+    );
+    setState(prev => ({
+      ...prev,
+      occasions: loaded,
+      menuCounts: counts,
+    }));
   };
+
+  if (state.loading) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#FAF7F2", alignItems: "center", justifyContent: "center" }}>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#FAF7F2" }}>
@@ -172,7 +217,7 @@ export default function Occasions({ back, push, isTabRoot = false }: Props) {
 
       {/* Body - Full-width rows */}
       <div style={{ flex: 1, overflowY: "auto", padding: "8px 20px 16px", position: "relative", zIndex: 1 }}>
-        {occasions.length === 0 ? (
+        {state.occasions.length === 0 ? (
           <div style={{
             display: "flex",
             alignItems: "center",
@@ -191,9 +236,9 @@ export default function Occasions({ back, push, isTabRoot = false }: Props) {
             </p>
           </div>
         ) : (
-          occasions.map((occasion, index) => {
+          state.occasions.map((occasion, index) => {
             const IconComponent = getIconComponent(occasion.icon);
-            const menuCount = menuCounts[occasion.id] || 0;
+            const menuCount = state.menuCounts[occasion.id] || 0;
             return (
               <div
                 key={occasion.id}
@@ -203,7 +248,7 @@ export default function Occasions({ back, push, isTabRoot = false }: Props) {
                   alignItems: "center",
                   gap: 16,
                   padding: "18px 4px",
-                  borderBottom: index === occasions.length - 1 ? "none" : `1px solid ${C.divider}`,
+                  borderBottom: index === state.occasions.length - 1 ? "none" : `1px solid ${C.divider}`,
                 }}
               >
                 <div style={{

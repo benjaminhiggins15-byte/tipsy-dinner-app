@@ -1952,12 +1952,11 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
     }
   };
 
-  const onPickCategory = async (catKey: string, catLabel: string, menuInfo?: { menuId: number; section: MenuSection }) => {
+  const onPickCategory = async (catKey: string, catLabel: string, menuInfo?: { menuId: string; section: MenuSection }) => {
     if (!currentRecipe) return;
 
-    const id = Date.now();
-    await saveRecipe({
-      id,
+    const recipeId = await saveRecipe({
+      id: Date.now(),
       title: currentRecipe.title,
       description: currentRecipe.description,
       category: catKey,
@@ -1968,7 +1967,7 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
 
     // If menu info provided, add recipe to menu section
     if (menuInfo) {
-      addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, id);
+      await addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, recipeId);
     }
 
     const recipe: Recipe = {
@@ -1978,7 +1977,7 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
       category: catLabel.toLowerCase(),
       ingredients: currentRecipe.ingredients,
       steps: currentRecipe.steps,
-      savedId: id,
+      savedId: recipeId,
       categoryKey: catKey,
     };
     setTrayOpen(false);

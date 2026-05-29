@@ -59,7 +59,10 @@ type Props = {
 };
 
 export default function MenuInterior({ menuId, back, push }: Props) {
-  const [menu, setMenu] = useState<Menu | null>(null);
+  const [menuState, setMenuState] = useState<{ menu: Menu | null; loading: boolean }>({
+    menu: null,
+    loading: true,
+  });
   const [expandedSections, setExpandedSections] = useState<Set<MenuSection>>(new Set());
   const [sectionRecipes, setSectionRecipes] = useState<Record<string, SavedRecipe[]>>({});
   const [loadingStates, setLoadingStates] = useState<Set<MenuSection>>(new Set());
@@ -69,37 +72,44 @@ export default function MenuInterior({ menuId, back, push }: Props) {
   useEffect(() => {
     async function loadMenu() {
       const loadedMenu = await findMenu(menuId);
-      setMenu(loadedMenu);
+      setMenuState({ menu: loadedMenu, loading: false });
     }
     loadMenu();
   }, [menuId]);
 
   // Load recipes for expanded sections
   useEffect(() => {
-    async function loadRecipes() {
-      // Mark sections as loading
-      setLoadingStates(new Set(expandedSections));
-
-      for (const section of expandedSections) {
-        const recipes = await getRecipesForMenuSection(menuId, section);
-        setSectionRecipes(prev => ({ ...prev, [section]: recipes }));
-
-        // Remove section from loading state after it loads
-        setLoadingStates(prev => {
-          const next = new Set(prev);
-          next.delete(section);
-          return next;
-        });
-      }
-    }
-    if (expandedSections.size > 0) {
-      loadRecipes();
-    } else {
+    if (expandedSections.size === 0) {
       setLoadingStates(new Set());
+      return;
     }
+
+    const sections = Array.from(expandedSections);
+    setLoadingStates(new Set(sections));
+
+    Promise.all(
+      sections.map(section =>
+        getRecipesForMenuSection(menuId, section)
+          .then(recipes => ({ section, recipes }))
+      )
+    ).then(results => {
+      const newRecipes: Record<string, any[]> = {};
+      results.forEach(({ section, recipes }) => {
+        newRecipes[section] = recipes;
+      });
+      setSectionRecipes(prev => ({ ...prev, ...newRecipes }));
+      setLoadingStates(new Set());
+    });
   }, [expandedSections, menuId]);
 
-  if (!menu) {
+  if (menuState.loading) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg, alignItems: "center", justifyContent: "center", padding: 24 }}>
+      </div>
+    );
+  }
+
+  if (!menuState.menu) {
     return (
       <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg, alignItems: "center", justifyContent: "center", padding: 24 }}>
         <p style={{ fontFamily: fontSans, fontSize: 13, color: C.midBlue }}>Menu not found.</p>
@@ -119,7 +129,7 @@ export default function MenuInterior({ menuId, back, push }: Props) {
 
   const refreshMenu = async () => {
     const updated = await findMenu(menuId);
-    if (updated) setMenu(updated);
+    if (updated) setMenuState({ menu: updated, loading: false });
 
     // Reload recipes for expanded sections
     setLoadingStates(new Set(expandedSections));
@@ -137,7 +147,7 @@ export default function MenuInterior({ menuId, back, push }: Props) {
 
   // Only show sections that are enabled OR have recipes
   const visibleSections = (["apps", "mains", "sides", "desserts", "drinks"] as MenuSection[]).filter(
-    (section) => menu.enabledSections.includes(section) || menu.recipes[section].length > 0
+    (section) => menuState.menu!.enabledSections.includes(section) || menuState.menu!.recipes[section].length > 0
   );
 
   return (
@@ -177,7 +187,7 @@ export default function MenuInterior({ menuId, back, push }: Props) {
               textTransform: "uppercase",
               color: C.text,
             }}>
-              {menu.title}
+              {menuState.menu.title}
             </div>
             <div style={{
               fontFamily: fontSans,
@@ -231,7 +241,7 @@ export default function MenuInterior({ menuId, back, push }: Props) {
           visibleSections.map((section) => {
             const recipes = sectionRecipes[section] || [];
             const isExpanded = expandedSections.has(section);
-            const count = menu.recipes[section].length;
+            const count = menuState.menu!.recipes[section].length;
 
             return (
               <div
@@ -295,8 +305,7 @@ export default function MenuInterior({ menuId, back, push }: Props) {
                   }}>
                     {/* Recipe rows */}
                     {loadingStates.has(section) ? (
-                      <div style={{ padding: 16, textAlign: "center", fontFamily: fontSerif, fontStyle: "italic", fontSize: 13, color: C.textMuted }}>
-                        Loading recipes...
+                      <div style={{ padding: 16 }}>
                       </div>
                     ) : (
                       recipes.map((recipe, idx) => {
@@ -420,7 +429,7 @@ export default function MenuInterior({ menuId, back, push }: Props) {
       {/* Edit Sheet */}
       {showEdit && (
         <EditMenuSheet
-          menu={menu}
+          menu={menuState.menu}
           onClose={() => setShowEdit(false)}
           onSaved={() => {
             setShowEdit(false);

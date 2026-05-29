@@ -248,11 +248,11 @@ export async function loadSavedRecipes(): Promise<SavedRecipe[]> {
 }
 
 // Save recipe to Supabase
-export async function saveRecipe(r: SavedRecipe, source: 'ai' | 'manual' = 'manual', categoryId?: string): Promise<void> {
+export async function saveRecipe(r: SavedRecipe, source: 'ai' | 'manual' = 'manual', categoryId?: string): Promise<string> {
   const userId = await getCurrentUserId();
   if (!userId) {
     console.error('Cannot save recipe: no user session');
-    return;
+    throw new Error('No user session');
   }
 
   try {
@@ -301,6 +301,8 @@ export async function saveRecipe(r: SavedRecipe, source: 'ai' | 'manual' = 'manu
 
       if (categoryError) throw categoryError;
     }
+
+    return recipe.id;
   } catch (error) {
     console.error('Error saving recipe:', error);
     throw error;
