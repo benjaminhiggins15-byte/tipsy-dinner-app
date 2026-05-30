@@ -6123,6 +6123,7 @@ function RecipeList({
     );
   }) });
 }
+const fullLogo = "/assets/Full_logo-Bq3_mZX9.png";
 const fieldLabel$1 = {
   fontFamily: "'Inter', sans-serif",
   fontSize: 10,
@@ -6255,7 +6256,7 @@ function SignUp({ onNavigateToSignIn, onSuccess }) {
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: { textAlign: "center", marginBottom: 32, marginTop: 8 }, children: /* @__PURE__ */ jsxRuntimeExports.jsx(
           "img",
           {
-            src: "/src/Logos/Full_Logo.png",
+            src: fullLogo,
             alt: "Tipsy Dinner",
             style: { height: 120, display: "block", margin: "0 auto" }
           }
@@ -6511,7 +6512,7 @@ function SignIn({ onNavigateToSignUp, onSuccess }) {
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: { textAlign: "center", marginBottom: 32, marginTop: 24 }, children: /* @__PURE__ */ jsxRuntimeExports.jsx(
           "img",
           {
-            src: "/src/Logos/Full_Logo.png",
+            src: fullLogo,
             alt: "Tipsy Dinner",
             style: { height: 120, display: "block", margin: "0 auto" }
           }

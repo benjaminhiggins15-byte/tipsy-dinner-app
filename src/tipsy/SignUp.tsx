@@ -1,5 +1,6 @@
 import { useState, useEffect, type CSSProperties } from "react";
 import { supabase } from "../lib/supabase";
+import fullLogo from "../Logos/Full_logo.png";
 
 type Props = {
   onNavigateToSignIn: () => void;
@@ -156,7 +157,7 @@ export default function SignUp({ onNavigateToSignIn, onSuccess }: Props) {
 
       <div style={{ textAlign: "center", marginBottom: 32, marginTop: 8 }}>
         <img
-          src="/src/Logos/Full_Logo.png"
+          src={fullLogo}
           alt="Tipsy Dinner"
           style={{ height: 120, display: "block", margin: "0 auto" }}
         />
