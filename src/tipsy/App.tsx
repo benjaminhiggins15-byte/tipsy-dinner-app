@@ -152,6 +152,9 @@ function renderScreen(
   onSignOut?: () => void,
   profile?: ProfileType | null,
   onUpdate?: (updates: Partial<ProfileType>) => Promise<void>,
+  recipesByCategory?: Record<string, Recipe[]>,
+  ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void>,
+  clearRecipeCache?: (categoryKey: string) => void,
 ) {
   switch (s.name) {
     case "cook": return (
@@ -175,6 +178,7 @@ function renderScreen(
         editCategoryLabel={s.editCategoryLabel}
         onSaveEdit={(updated, label) => replaceRecipe?.(updated, label)}
         onDeleted={() => finishDeleteRecipe?.()}
+        clearRecipeCache={clearRecipeCache}
         initialDraft={s.draft ? { ...s.draft, step: 4, trayOpen: s.draft.trayOpen } : undefined}
         onCreateCategoryForRecipe={(payload) => push({ name: "newcategoryforrecipe", draft: payload, returnTo: "addown" })}
       />
@@ -197,13 +201,14 @@ function renderScreen(
         onDeleted={() => finishDeleteCategory?.()}
       />
     );
-    case "categories": return <Categories push={push} back={back} isTabRoot={isTabRoot} />;
+    case "categories": return <Categories push={push} back={back} isTabRoot={isTabRoot} ensureRecipesLoaded={ensureRecipesLoaded} />;
     case "recipes": return (
       <Recipes
         categoryKey={s.categoryKey}
         categoryLabel={s.categoryLabel}
         push={push}
         back={back}
+        recipesByCategory={recipesByCategory ?? {}}
       />
     );
     case "recipe": return (
@@ -272,6 +277,7 @@ export default function App() {
   const [authScreen, setAuthScreen] = useState<"signup" | "signin">("signup");
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
   const [profile, setProfile] = useState<ProfileType | null>(null);
+  const [recipesByCategory, setRecipesByCategory] = useState<Record<string, Recipe[]>>({});
 
   // Profile helpers
   const loadProfile = async (userId: string): Promise<ProfileType> => {
@@ -342,6 +348,20 @@ export default function App() {
       console.error('Error updating profile:', err);
       throw err;
     }
+  };
+
+  const ensureRecipesLoaded = async (categoryKey: string, categoryLabel: string) => {
+    if (recipesByCategory[categoryKey]) return;
+    const recipes = await getRecipesForCategory(categoryKey, categoryLabel);
+    setRecipesByCategory(prev => ({ ...prev, [categoryKey]: recipes }));
+  };
+
+  const clearRecipeCache = (categoryKey: string) => {
+    setRecipesByCategory(prev => {
+      const next = { ...prev };
+      delete next[categoryKey];
+      return next;
+    });
   };
 
   const migrateFromLocalStorage = async (userId: string): Promise<void> => {
@@ -572,6 +592,14 @@ export default function App() {
       back();
       return;
     }
+    // Clear recipe cache for this category
+    if (updated.categoryKey) {
+      setRecipesByCategory(prev => {
+        const next = { ...prev };
+        delete next[updated.categoryKey!];
+        return next;
+      });
+    }
     const newPrev: Screen = { name: "recipe", recipe: updated, categoryLabel };
     const prevIsTabRoot = currentStack.length === 2;
     setTransition({ from: current, to: newPrev, direction: "back", fromIsTabRoot: isTabRoot, toIsTabRoot: prevIsTabRoot });
@@ -638,6 +666,14 @@ export default function App() {
       return;
     }
     const target = currentStack[idx];
+    // Clear recipe cache for this category
+    if (target.name === "recipes") {
+      setRecipesByCategory(prev => {
+        const next = { ...prev };
+        delete next[target.categoryKey];
+        return next;
+      });
+    }
     const targetIsTabRoot = idx === 0;
     setTransition({ from: current, to: target, direction: "back", fromIsTabRoot: isTabRoot, toIsTabRoot: targetIsTabRoot });
     updateCurrentTabStack((st) => st.slice(0, idx + 1));
@@ -670,6 +706,12 @@ export default function App() {
   // After a recipe is saved, switch to Recipes tab and navigate to the saved recipe
   const finishSaveRecipe = (recipe: Recipe, categoryKey: string, categoryLabel: string) => {
     if (transition) return;
+    // Clear recipe cache for this category
+    setRecipesByCategory(prev => {
+      const next = { ...prev };
+      delete next[categoryKey];
+      return next;
+    });
     const target: Screen = { name: "recipe", recipe, categoryLabel };
 
     // Build the Recipes tab stack: categories → recipes → recipe
@@ -978,7 +1020,7 @@ function ScreenStage({
     return (
       <div style={{ ...layerBase, position: "relative", height: "100%", paddingBottom: 64, background: "#FAF7F2" }}>
         <div style={{ ...layerBase, position: "relative", height: "100%" }}>
-          {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile)}
+          {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache)}
         </div>
       </div>
     );
@@ -1016,10 +1058,10 @@ function ScreenStage({
   return (
     <div style={{ position: "relative", height: "100%", background: "#FAF7F2" }}>
       <div style={{ ...layerBase, transform: fromTransform, transition: transitionStyle, zIndex: fromZ, pointerEvents: "none", paddingBottom: 64 }}>
-        {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile)}
+        {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache)}
       </div>
       <div style={{ ...layerBase, transform: toTransform, transition: transitionStyle, zIndex: toZ, pointerEvents: "none", paddingBottom: 64 }}>
-        {renderScreen(to, push, back, toIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile)}
+        {renderScreen(to, push, back, toIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache)}
       </div>
     </div>
   );
@@ -1103,7 +1145,7 @@ function BottomTabBar({ activeTab, onTabClick }: { activeTab: TabId; onTabClick:
 }
 
 /* ---------------- Categories ---------------- */
-function Categories({ push, back, isTabRoot }: { push: (s: Screen) => void; back: () => void; isTabRoot: boolean }) {
+function Categories({ push, back, isTabRoot, ensureRecipesLoaded }: { push: (s: Screen) => void; back: () => void; isTabRoot: boolean; ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void> }) {
   const [cats, setCats] = useState<{ key: string; label: string; gradient: string }[]>([]);
   const [recipeCounts, setRecipeCounts] = useState<Record<string, number>>({});
 
@@ -1164,7 +1206,10 @@ function Categories({ push, back, isTabRoot }: { push: (s: Screen) => void; back
             return (
               <div
                 key={c.key}
-                onClick={() => push({ name: "recipes", categoryKey: c.key, categoryLabel: c.label })}
+                onClick={async () => {
+                  await ensureRecipesLoaded?.(c.key, c.label);
+                  push({ name: "recipes", categoryKey: c.key, categoryLabel: c.label });
+                }}
                 style={{
                   background: "rgba(35,60,0,0.06)",
                   border: "1px solid rgba(35,60,0,0.1)",
@@ -1217,32 +1262,15 @@ function Recipes({
   categoryLabel,
   push,
   back,
+  recipesByCategory,
 }: {
   categoryKey: string;
   categoryLabel: string;
   push: (s: Screen) => void;
   back: () => void;
+  recipesByCategory: Record<string, Recipe[]>;
 }) {
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let ignore = false;
-    async function loadRecipes() {
-      const data = await getRecipesForCategory(categoryKey, categoryLabel);
-      if (ignore) return;
-      setRecipes(data);
-      setLoading(false);
-    }
-    loadRecipes();
-    return () => { ignore = true; };
-  }, [categoryKey, categoryLabel]);
-
-  if (loading && recipes.length === 0) {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#FAF7F2" }} />
-    );
-  }
+  const recipes = recipesByCategory[categoryKey] ?? [];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>

@@ -12,6 +12,7 @@ type Props = {
   editCategoryLabel?: string;
   onSaveEdit?: (updated: Recipe, categoryLabel: string) => void;
   onDeleted?: () => void;
+  clearRecipeCache?: (categoryKey: string) => void;
   onCreateCategoryForRecipe?: (payload: {
     title: string;
     description: string;
@@ -81,7 +82,7 @@ const trayEmoji: Record<string, string> = {
   soups: "🍲", salads: "🥗", sandwiches: "🥪", breakfast: "🍳",
 };
 
-export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, editCategoryLabel, onSaveEdit, onDeleted, onCreateCategoryForRecipe, initialDraft }: Props) {
+export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, editCategoryLabel, onSaveEdit, onDeleted, clearRecipeCache, onCreateCategoryForRecipe, initialDraft }: Props) {
   const isEdit = typeof editRecipe?.savedId === "number";
   const [showDelete, setShowDelete] = useState(false);
   const [step, setStep] = useState<Step>(initialDraft?.step ?? 1);
@@ -219,6 +220,9 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
     if (menuInfo) {
       addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, id);
     }
+
+    // Clear recipe cache for this category
+    clearRecipeCache?.(key);
 
     setSavedCategory({ key, label });
     setTrayOpen(false);
