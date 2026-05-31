@@ -381,6 +381,8 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+
     // Get initial session (no profile logic here)
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);

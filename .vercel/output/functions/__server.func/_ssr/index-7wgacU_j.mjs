@@ -11,7 +11,20 @@ import "tslib";
 import "../_libs/supabase__functions-js.mjs";
 const supabaseUrl = "https://xzpmmthreeyscidhwriv.supabase.co";
 const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh6cG1tdGhyZWV5c2NpZGh3cml2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2MzMwNDcsImV4cCI6MjA5NTIwOTA0N30.0lb3IjdLp2V9usQW9TLVucxEwnrKpL2uEXO0FQ8ldAo";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const isBrowser = typeof window !== "undefined";
+const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    storage: isBrowser ? window.localStorage : {
+      getItem: () => null,
+      setItem: () => {
+      },
+      removeItem: () => {
+      }
+    },
+    persistSession: isBrowser,
+    detectSessionInUrl: isBrowser
+  }
+});
 const GRADIENT_PALETTE = [
   "linear-gradient(135deg, #C17F4A 0%, #8B4513 100%)",
   "linear-gradient(135deg, #5B8FA8 0%, #2C5F7F 100%)",
@@ -7042,6 +7055,7 @@ function App() {
     }
   };
   reactExports.useEffect(() => {
+    if (typeof window === "undefined") return;
     supabase.auth.getSession().then(({ data: { session: session2 } }) => {
       setSession(session2);
     });
