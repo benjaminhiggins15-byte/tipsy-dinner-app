@@ -1108,26 +1108,28 @@ function Categories({ push, back, isTabRoot }: { push: (s: Screen) => void; back
   const [recipeCounts, setRecipeCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    const loadCategories = async () => {
+    let ignore = false;
+    async function loadCategories() {
       const categories = await getAllCategories();
-      setCats(categories);
-    };
-    loadCategories();
-  }, []);
+      if (ignore) return;
 
-  useEffect(() => {
-    const loadCounts = async () => {
+      // Fetch all recipe counts in parallel
       const counts: Record<string, number> = {};
-      for (const cat of cats) {
-        const recipes = await getRecipesForCategory(cat.key, "");
-        counts[cat.key] = recipes.length;
-      }
+      await Promise.all(
+        categories.map(async (cat) => {
+          const recipes = await getRecipesForCategory(cat.key, cat.label);
+          counts[cat.key] = recipes.length;
+        })
+      );
+
+      if (ignore) return;
+      // Single batched update — both categories and counts set together
+      setCats(categories);
       setRecipeCounts(counts);
-    };
-    if (cats.length > 0) {
-      loadCounts();
     }
-  }, [cats.length]);
+    loadCategories();
+    return () => { ignore = true; };
+  }, []);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>

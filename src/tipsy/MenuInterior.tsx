@@ -70,11 +70,14 @@ export default function MenuInterior({ menuId, back, push }: Props) {
 
   // Load menu on mount
   useEffect(() => {
+    let ignore = false;
     async function loadMenu() {
       const loadedMenu = await findMenu(menuId);
+      if (ignore) return;
       setMenuState({ menu: loadedMenu, loading: false });
     }
     loadMenu();
+    return () => { ignore = true; };
   }, [menuId]);
 
   // Load recipes for expanded sections
