@@ -1238,7 +1238,7 @@ function Recipes({
     return () => { ignore = true; };
   }, [categoryKey, categoryLabel]);
 
-  if (loading) {
+  if (loading && recipes.length === 0) {
     return (
       <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#FAF7F2" }} />
     );
