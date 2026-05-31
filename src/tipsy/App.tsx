@@ -1224,14 +1224,25 @@ function Recipes({
   back: () => void;
 }) {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const loadRecipes = async () => {
+    let ignore = false;
+    async function loadRecipes() {
       const data = await getRecipesForCategory(categoryKey, categoryLabel);
+      if (ignore) return;
       setRecipes(data);
-    };
+      setLoading(false);
+    }
     loadRecipes();
+    return () => { ignore = true; };
   }, [categoryKey, categoryLabel]);
+
+  if (loading) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#FAF7F2" }} />
+    );
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
