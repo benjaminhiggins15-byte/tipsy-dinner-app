@@ -821,6 +821,9 @@ export default function App() {
           onSignOut={handleSignOut}
           profile={profile}
           updateProfile={async (updates) => updateProfile(updates, session?.user?.id)}
+          recipesByCategory={recipesByCategory}
+          ensureRecipesLoaded={ensureRecipesLoaded}
+          clearRecipeCache={clearRecipeCache}
         />
         <BottomTabBar activeTab={activeTab} onTabClick={switchToTab} />
       </div>
@@ -956,6 +959,9 @@ function ScreenStage({
   onSignOut,
   profile,
   updateProfile,
+  recipesByCategory,
+  ensureRecipesLoaded,
+  clearRecipeCache,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back"; fromIsTabRoot?: boolean; toIsTabRoot?: boolean } | null;
@@ -971,6 +977,9 @@ function ScreenStage({
   onSignOut: () => void;
   profile: ProfileType | null;
   updateProfile: (updates: Partial<ProfileType>) => Promise<void>;
+  recipesByCategory: Record<string, Recipe[]>;
+  ensureRecipesLoaded: (categoryKey: string, categoryLabel: string) => Promise<void>;
+  clearRecipeCache: (categoryKey: string) => void;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
