@@ -14,5 +14,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     },
     persistSession: isBrowser,
     detectSessionInUrl: isBrowser,
+    autoRefreshToken: isBrowser,
+    storageKey: 'tipsy-dinner-auth',
   },
 })

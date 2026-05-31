@@ -188,10 +188,10 @@ export type SavedRecipe = {
 // Helper to get current user ID
 async function getCurrentUserId(): Promise<string | null> {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    return session?.user?.id ?? null;
+    const { data: { user } } = await supabase.auth.getUser();
+    return user?.id ?? null;
   } catch (error) {
-    console.error('Error getting user session:', error);
+    console.error('Error getting user:', error);
     return null;
   }
 }
