@@ -1018,7 +1018,17 @@ function ScreenStage({
       <div style={{ ...layerBase, transform: fromTransform, transition: transitionStyle, zIndex: fromZ, pointerEvents: "none", paddingBottom: 64 }}>
         {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile)}
       </div>
-      <div style={{ ...layerBase, transform: toTransform, transition: transitionStyle, zIndex: toZ, pointerEvents: "none", paddingBottom: 64 }}>
+      <div style={{
+        ...layerBase,
+        transform: toTransform,
+        opacity: animPhase === "end" ? 1 : 0,
+        transition: animPhase === "end"
+          ? `transform ${DURATION}ms cubic-bezier(0.4, 0, 0.2, 1), opacity 150ms ease-in ${DURATION - 50}ms`
+          : "none",
+        zIndex: toZ,
+        pointerEvents: "none",
+        paddingBottom: 64
+      }}>
         {renderScreen(to, push, back, toIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile)}
       </div>
     </div>
@@ -1237,12 +1247,6 @@ function Recipes({
     loadRecipes();
     return () => { ignore = true; };
   }, [categoryKey, categoryLabel]);
-
-  if (loading && recipes.length === 0) {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#FAF7F2" }} />
-    );
-  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
