@@ -907,39 +907,41 @@ export default function App() {
           renderTopLevelView(currentView)
         )}
       </div>
-      <button
-        onClick={async () => {
-          await updateProfile({ onboarding_complete: false });
-          setTabStacks({
-            build: [{ name: "cook" }],
-            recipes: [{ name: "categories" }],
-            menus: [{ name: "occasions" }],
-            profile: [{ name: "profile" }],
-          });
-          setActiveTab("build");
-          setShowOnboarding(true);
-        }}
-        style={{
-          position: "fixed",
-          bottom: 12,
-          right: 12,
-          zIndex: 9999,
-          background: "rgba(12,68,124,0.85)",
-          color: "#EEF4F8",
-          border: "none",
-          borderRadius: 100,
-          padding: "6px 12px",
-          fontFamily: "'DM Sans', sans-serif",
-          fontSize: 10,
-          fontWeight: 500,
-          letterSpacing: "0.12em",
-          textTransform: "uppercase",
-          cursor: "pointer",
-          opacity: 0.7,
-        }}
-      >
-        Reset onboarding
-      </button>
+      {import.meta.env.DEV && (
+        <button
+          onClick={async () => {
+            await updateProfile({ onboarding_complete: false });
+            setTabStacks({
+              build: [{ name: "cook" }],
+              recipes: [{ name: "categories" }],
+              menus: [{ name: "occasions" }],
+              profile: [{ name: "profile" }],
+            });
+            setActiveTab("build");
+            setShowOnboarding(true);
+          }}
+          style={{
+            position: "fixed",
+            bottom: 12,
+            right: 12,
+            zIndex: 9999,
+            background: "rgba(12,68,124,0.85)",
+            color: "#EEF4F8",
+            border: "none",
+            borderRadius: 100,
+            padding: "6px 12px",
+            fontFamily: "'DM Sans', sans-serif",
+            fontSize: 10,
+            fontWeight: 500,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            cursor: "pointer",
+            opacity: 0.7,
+          }}
+        >
+          Reset onboarding
+        </button>
+      )}
     </div>
   );
 }
