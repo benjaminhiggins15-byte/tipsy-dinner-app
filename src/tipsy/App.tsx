@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, type Recipe, type Occasion, type Menu, type SavedRecipe, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection } from "./data";
+import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, type Recipe, type Occasion, type Menu, type SavedRecipe, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
@@ -81,7 +81,7 @@ type Screen =
   | { name: "editcategory"; categoryKey: string }
   | { name: "categories" }
   | { name: "recipes"; categoryKey: string; categoryLabel: string }
-  | { name: "recipe"; recipe: Recipe; categoryLabel: string }
+  | { name: "recipe"; recipe: Recipe; categoryLabel: string; categoryKey: string }
   | { name: "occasions" }
   | { name: "menus"; occasionId: string; occasionName: string }
   | { name: "menuinterior"; menuId: string }
@@ -209,14 +209,17 @@ function renderScreen(
         push={push}
         back={back}
         recipesByCategory={recipesByCategory ?? {}}
+        clearRecipeCache={clearRecipeCache}
       />
     );
     case "recipe": return (
       <RecipeCard
         recipe={s.recipe}
         categoryLabel={s.categoryLabel}
+        categoryKey={s.categoryKey}
         back={back}
         push={push}
+        clearRecipeCache={clearRecipeCache}
       />
     );
     case "occasions": return (
@@ -1274,36 +1277,52 @@ function Recipes({
   push,
   back,
   recipesByCategory,
+  clearRecipeCache,
 }: {
   categoryKey: string;
   categoryLabel: string;
   push: (s: Screen) => void;
   back: () => void;
   recipesByCategory: Record<string, Recipe[]>;
+  clearRecipeCache?: (categoryKey: string) => void;
 }) {
   const recipes = recipesByCategory[categoryKey] ?? [];
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* Header */}
-      <div style={{ height: 56, display: "flex", alignItems: "center", padding: "0 24px", flexShrink: 0, gap: 12 }}>
-        <button
-          onClick={back}
-          aria-label="Back"
-          style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
-        >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.6)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
-        </button>
-        <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-          <div style={{ fontFamily: "Inter, sans-serif", fontSize: 13, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase", color: "#233C00" }}>
-            {categoryLabel}
-          </div>
-          <div style={{ fontFamily: "Inter, sans-serif", fontSize: 11, fontWeight: 400, color: "rgba(35,60,0,0.35)" }}>
-            {recipes.length} {recipes.length === 1 ? "recipe" : "recipes"}
+      <div style={{ height: 56, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button
+            onClick={back}
+            aria-label="Back"
+            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.6)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
+          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            <div style={{ fontFamily: "Inter, sans-serif", fontSize: 13, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase", color: "#233C00" }}>
+              {categoryLabel}
+            </div>
+            <div style={{ fontFamily: "Inter, sans-serif", fontSize: 11, fontWeight: 400, color: "rgba(35,60,0,0.35)" }}>
+              {recipes.length} {recipes.length === 1 ? "recipe" : "recipes"}
+            </div>
           </div>
         </div>
+        <button
+          onClick={() => setConfirmDelete(true)}
+          aria-label="Delete category"
+          style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="3 6 5 6 21 6" />
+            <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+            <path d="M10 11v6M14 11v6" />
+          </svg>
+        </button>
       </div>
 
       {/* Recipe List */}
@@ -1311,7 +1330,7 @@ function Recipes({
         {recipes.map((r, i) => (
           <div
             key={i}
-            onClick={() => push({ name: "recipe", recipe: r, categoryLabel })}
+            onClick={() => push({ name: "recipe", recipe: r, categoryLabel, categoryKey })}
             style={{
               height: 80,
               background: "rgba(35,60,0,0.06)",
@@ -1387,6 +1406,98 @@ function Recipes({
           </div>
         ))}
       </div>
+
+      {/* Delete confirmation modal */}
+      {confirmDelete && (
+        <div
+          onClick={() => setConfirmDelete(false)}
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "rgba(35,60,0,0.25)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 20,
+            padding: 24,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 16,
+              padding: "24px 20px",
+              width: "100%",
+              maxWidth: 280,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              border: "0.5px solid rgba(35,60,0,0.1)",
+            }}
+          >
+            <div style={{
+              fontFamily: "'Inter', sans-serif",
+              fontSize: 16,
+              fontWeight: 700,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+              color: "#233C00",
+              textAlign: "center",
+            }}>
+              Delete this category?
+            </div>
+            <div style={{
+              fontFamily: "'Inter', sans-serif",
+              fontSize: 13,
+              color: "#233C00",
+              textAlign: "center",
+              marginBottom: 12,
+            }}>
+              Your recipes will remain in your library.
+            </div>
+            <button
+              onClick={() => setConfirmDelete(false)}
+              style={{
+                width: "100%",
+                padding: "12px",
+                borderRadius: 10,
+                background: "transparent",
+                border: "0.5px solid rgba(35,60,0,0.1)",
+                color: "#233C00",
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                await deleteCustomCategory(categoryKey);
+                clearRecipeCache?.(categoryKey);
+                setConfirmDelete(false);
+                back();
+              }}
+              style={{
+                width: "100%",
+                padding: "12px",
+                borderRadius: 10,
+                background: "#B85C5C",
+                border: "none",
+                color: "#FAF7F2",
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1395,15 +1506,20 @@ function Recipes({
 function RecipeCard({
   recipe,
   categoryLabel,
+  categoryKey,
   back,
   push,
+  clearRecipeCache,
 }: {
   recipe: Recipe;
   categoryLabel: string;
+  categoryKey: string;
   back: () => void;
   push: (s: Screen) => void;
+  clearRecipeCache?: (categoryKey: string) => void;
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const ingredients = recipe.ingredients ?? [];
   const steps = recipe.steps ?? [];
   const editable = typeof recipe.savedId === "number";
@@ -1446,6 +1562,19 @@ function RecipeCard({
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
                     <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                  </svg>
+                </button>
+              )}
+              {editable && (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  aria-label="Delete"
+                  style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                    <path d="M10 11v6M14 11v6" />
                   </svg>
                 </button>
               )}
@@ -1672,6 +1801,100 @@ function RecipeCard({
           </div>
         </div>
       </div>
+
+      {/* Delete confirmation modal */}
+      {confirmDelete && (
+        <div
+          onClick={() => setConfirmDelete(false)}
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "rgba(35,60,0,0.25)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 20,
+            padding: 24,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 16,
+              padding: "24px 20px",
+              width: "100%",
+              maxWidth: 280,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              border: "0.5px solid rgba(35,60,0,0.1)",
+            }}
+          >
+            <div style={{
+              fontFamily: "'Inter', sans-serif",
+              fontSize: 16,
+              fontWeight: 700,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+              color: "#233C00",
+              textAlign: "center",
+            }}>
+              Delete this recipe?
+            </div>
+            <div style={{
+              fontFamily: "'Inter', sans-serif",
+              fontSize: 13,
+              color: "#233C00",
+              textAlign: "center",
+              marginBottom: 12,
+            }}>
+              This can't be undone.
+            </div>
+            <button
+              onClick={() => setConfirmDelete(false)}
+              style={{
+                width: "100%",
+                padding: "12px",
+                borderRadius: 10,
+                background: "transparent",
+                border: "0.5px solid rgba(35,60,0,0.1)",
+                color: "#233C00",
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                if (recipe.savedId) {
+                  await deleteSavedRecipe(recipe.savedId);
+                  clearRecipeCache?.(categoryKey);
+                  setConfirmDelete(false);
+                  back();
+                }
+              }}
+              style={{
+                width: "100%",
+                padding: "12px",
+                borderRadius: 10,
+                background: "#B85C5C",
+                border: "none",
+                color: "#FAF7F2",
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

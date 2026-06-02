@@ -105,6 +105,16 @@ export async function deleteCustomCategory(key: string): Promise<void> {
   }
 
   try {
+    // First delete all recipe_categories join rows for this category
+    const { error: joinError } = await supabase
+      .from('recipe_categories')
+      .delete()
+      .eq('category_id', key)
+      .eq('user_id', userId);
+
+    if (joinError) throw joinError;
+
+    // Then delete the category itself
     const { error } = await supabase
       .from('categories')
       .delete()
