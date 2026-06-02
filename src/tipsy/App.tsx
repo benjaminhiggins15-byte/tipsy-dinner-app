@@ -1522,7 +1522,7 @@ function RecipeCard({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const ingredients = recipe.ingredients ?? [];
   const steps = recipe.steps ?? [];
-  const editable = typeof recipe.savedId === "number";
+  const editable = recipe.savedId != null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
