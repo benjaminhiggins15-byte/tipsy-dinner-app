@@ -1134,8 +1134,8 @@ function BottomTabBar({ activeTab, onTabClick }: { activeTab: TabId; onTabClick:
         display: "flex",
         alignItems: "center",
         justifyContent: "space-around",
-        padding: "0 8px",
-        paddingBottom: "calc(6px + env(safe-area-inset-bottom))",
+        padding: "0 8px 6px",
+        paddingBottom: "env(safe-area-inset-bottom)",
         zIndex: 100,
       }}
     >
