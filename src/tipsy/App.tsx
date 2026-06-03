@@ -210,6 +210,7 @@ function renderScreen(
         back={back}
         recipesByCategory={recipesByCategory ?? {}}
         clearRecipeCache={clearRecipeCache}
+        ensureRecipesLoaded={ensureRecipesLoaded}
       />
     );
     case "recipe": return (
@@ -1311,6 +1312,7 @@ function Recipes({
   back,
   recipesByCategory,
   clearRecipeCache,
+  ensureRecipesLoaded,
 }: {
   categoryKey: string;
   categoryLabel: string;
@@ -1318,9 +1320,16 @@ function Recipes({
   back: () => void;
   recipesByCategory: Record<string, Recipe[]>;
   clearRecipeCache?: (categoryKey: string) => void;
+  ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void>;
 }) {
   const recipes = recipesByCategory[categoryKey] ?? [];
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  useEffect(() => {
+    if (!recipesByCategory[categoryKey]) {
+      ensureRecipesLoaded?.(categoryKey, categoryLabel);
+    }
+  }, [categoryKey, recipesByCategory[categoryKey], categoryLabel, ensureRecipesLoaded]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
