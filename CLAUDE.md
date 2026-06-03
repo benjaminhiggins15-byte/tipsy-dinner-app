@@ -375,8 +375,18 @@ tipsyDinnerTable
 - VITE_ANTHROPIC_API_KEY removed from .env and codebase ✓
 - AI calls now route through Supabase, key never exposed to browser ✓
 - Streaming preserved — responses still appear word by word ✓
+- RESET ONBOARDING button hidden in production (dev-only) ✓
+- Mobile viewport fixes — full-screen meta tag, height: 100% ✓
+- Delete functionality for recipes and categories with confirmation modals ✓
+- Recipe Card editable check fixed to handle UUID recipe IDs ✓
+- ScreenStage tree structure stabilized — transitions no longer cause unnecessary remounts ✓
+- Tab-return data loss bug FIXED — Supabase fires duplicate SIGNED_IN events on tab refocus; profileInitialized ref in onAuthStateChange ignores subsequent events after initial sign-in ✓
 
-**Known issues (refinement pass later):**
+**Known issues (next session priorities, in order):**
+- Nav bar too high in PWA/home-screen mode — add `padding-bottom: env(safe-area-inset-bottom)` to nav bar
+- Recipe List doesn't refresh after a recipe is deleted — cache clear works but list doesn't re-fetch on re-mount
+- Edit recipe doesn't pre-populate the Write Your Own flow — investigate how AddYourOwn.tsx handles the editRecipe prop
+- Add an "All Recipes" default category — design decision pending (real Supabase row vs virtual view)
 - Slight flash on screen transitions during async category/recipe loads
 - + button position shifts after category creation
 - Brief flash on Menu Interior load
