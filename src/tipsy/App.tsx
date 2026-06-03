@@ -282,6 +282,8 @@ export default function App() {
   const [profile, setProfile] = useState<ProfileType | null>(null);
   const [recipesByCategory, setRecipesByCategory] = useState<Record<string, Recipe[]>>({});
 
+  const profileInitialized = useRef(false);
+
   // Profile helpers
   const loadProfile = async (userId: string): Promise<ProfileType> => {
     if (!userId) {
@@ -418,6 +420,11 @@ export default function App() {
       setSession(session);
 
       if (session && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
+        if (profileInitialized.current) {
+          // Already initialized — this is a tab refocus, not a real sign-in
+          return;
+        }
+        profileInitialized.current = true;
         // Load profile, run migration, reload profile, check onboarding
         try {
           await loadProfile(session.user.id);
@@ -429,6 +436,7 @@ export default function App() {
           setShowOnboarding(false);
         }
       } else if (!session) {
+        profileInitialized.current = false; // Reset on logout
         // Reset to signin screen when logged out
         setAuthScreen("signin");
         setShowOnboarding(null);
@@ -853,61 +861,71 @@ export default function App() {
     willChange: "transform",
   };
 
+  // Unified top-level tree structure
+  const isTopLevelTransitioning = !!topLevelTransition;
+  const topLevelFrom = topLevelTransition?.from;
+  const topLevelDirection = topLevelTransition?.direction;
+
+  // Calculate transforms and z-index for top-level transition
+  let currentViewTransform = "translateX(0)";
+  let topLevelFromTransform = "translateX(0)";
+  let currentViewZ = 1;
+  let topLevelFromZ = 1;
+
+  if (isTopLevelTransitioning && topLevelDirection) {
+    if (topLevelDirection === "forward") {
+      currentViewTransform = topLevelAnimPhase === "start" ? "translateX(100%)" : "translateX(0)";
+      topLevelFromTransform = topLevelAnimPhase === "start" ? "translateX(0)" : "translateX(-25%)";
+      currentViewZ = 2;
+      topLevelFromZ = 1;
+    } else {
+      currentViewTransform = topLevelAnimPhase === "start" ? "translateX(-25%)" : "translateX(0)";
+      topLevelFromTransform = topLevelAnimPhase === "start" ? "translateX(0)" : "translateX(100%)";
+      currentViewZ = 1;
+      topLevelFromZ = 2;
+    }
+  }
+
+  const topLevelTransitionStyle = isTopLevelTransitioning && topLevelAnimPhase !== "start"
+    ? `transform ${DURATION}ms ${EASE}`
+    : "none";
+
   return (
     <div style={S.page}>
       <div style={S.phone}>
-        {currentView === null ? null : topLevelTransition ? (
+        {currentView === null ? null : (
           <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", background: "#FAF7F2" }}>
-            {(() => {
-              const { from, to, direction } = topLevelTransition;
+            {/* Base layer - always renders currentView (stable tree position) */}
+            <div
+              style={{
+                ...layerBase,
+                position: isTopLevelTransitioning ? "absolute" : "relative",
+                transform: currentViewTransform,
+                transition: topLevelTransitionStyle,
+                zIndex: currentViewZ,
+                pointerEvents: isTopLevelTransitioning ? "none" : "auto",
+              }}
+            >
+              {renderTopLevelView(currentView)}
+            </div>
 
-              let fromTransform = "translateX(0)";
-              let toTransform = "translateX(0)";
-
-              if (direction === "forward") {
-                fromTransform = topLevelAnimPhase === "start" ? "translateX(0)" : "translateX(-25%)";
-                toTransform = topLevelAnimPhase === "start" ? "translateX(100%)" : "translateX(0)";
-              } else {
-                fromTransform = topLevelAnimPhase === "start" ? "translateX(0)" : "translateX(100%)";
-                toTransform = topLevelAnimPhase === "start" ? "translateX(-25%)" : "translateX(0)";
-              }
-
-              const transitionStyle =
-                topLevelAnimPhase === "start" ? "none" : `transform ${DURATION}ms ${EASE}`;
-
-              const fromZ = direction === "forward" ? 1 : 2;
-              const toZ = direction === "forward" ? 2 : 1;
-
-              return (
-                <>
-                  <div
-                    style={{
-                      ...layerBase,
-                      transform: fromTransform,
-                      transition: transitionStyle,
-                      zIndex: fromZ,
-                      pointerEvents: "none",
-                    }}
-                  >
-                    {renderTopLevelView(from)}
-                  </div>
-                  <div
-                    style={{
-                      ...layerBase,
-                      transform: toTransform,
-                      transition: transitionStyle,
-                      zIndex: toZ,
-                      pointerEvents: "none",
-                    }}
-                  >
-                    {renderTopLevelView(to)}
-                  </div>
-                </>
-              );
-            })()}
+            {/* Overlay layer - only during transitions, renders from view */}
+            {isTopLevelTransitioning && topLevelFrom && (
+              <div
+                style={{
+                  ...layerBase,
+                  position: "absolute",
+                  inset: 0,
+                  transform: topLevelFromTransform,
+                  transition: topLevelTransitionStyle,
+                  zIndex: topLevelFromZ,
+                  pointerEvents: "none",
+                }}
+              >
+                {renderTopLevelView(topLevelFrom)}
+              </div>
+            )}
           </div>
-        ) : (
-          renderTopLevelView(currentView)
         )}
       </div>
       {import.meta.env.DEV && (
@@ -1030,53 +1048,66 @@ function ScreenStage({
     willChange: "transform",
   };
 
-  if (!transition) {
-    return (
-      <div style={{ ...layerBase, position: "relative", height: "100%", paddingBottom: 64, background: "#FAF7F2" }}>
-        <div style={{ ...layerBase, position: "relative", height: "100%" }}>
-          {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache)}
-        </div>
-      </div>
-    );
-  }
+  // Unified tree structure - always render current in same position
+  const isTransitioning = !!transition;
+  const from = transition?.from;
+  const direction = transition?.direction;
+  const fromIsTabRoot = transition?.fromIsTabRoot ?? isTabRoot;
 
-  // During transition: render two layers
-  const { from, to, direction } = transition;
-
-  // Forward: incoming (to) slides from right (100%) -> 0; outgoing (from) stays at 0 (or shifts slightly left)
-  // Back: outgoing (from) slides 0 -> right (100%); incoming (to) sits underneath at 0
+  // Calculate transforms and z-index for both layers
+  let currentTransform = "translateX(0)";
   let fromTransform = "translateX(0)";
-  let toTransform = "translateX(0)";
+  let currentZ = 1;
+  let fromZ = 1;
 
-  if (direction === "forward") {
-    fromTransform = animPhase === "start" ? "translateX(0)" : "translateX(-25%)";
-    toTransform = animPhase === "start" ? "translateX(100%)" : "translateX(0)";
-  } else {
-    fromTransform = animPhase === "start" ? "translateX(0)" : "translateX(100%)";
-    toTransform = animPhase === "start" ? "translateX(-25%)" : "translateX(0)";
+  if (isTransitioning && direction) {
+    if (direction === "forward") {
+      // current (= to) slides in from right, from slides left underneath
+      currentTransform = animPhase === "start" ? "translateX(100%)" : "translateX(0)";
+      fromTransform = animPhase === "start" ? "translateX(0)" : "translateX(-25%)";
+      currentZ = 2;  // incoming on top
+      fromZ = 1;
+    } else {  // "back"
+      // current (= to) sits underneath, from slides right on top
+      currentTransform = animPhase === "start" ? "translateX(-25%)" : "translateX(0)";
+      fromTransform = animPhase === "start" ? "translateX(0)" : "translateX(100%)";
+      currentZ = 1;
+      fromZ = 2;  // outgoing on top
+    }
   }
 
-  // No transition on the "start" frame — only after we've armed.
-  const transitionStyle =
-    animPhase === "start" ? "none" : `transform ${DURATION}ms ${EASE}`;
-
-  // Stacking: forward -> incoming on top; back -> outgoing on top
-  const fromZ = direction === "forward" ? 1 : 2;
-  const toZ = direction === "forward" ? 2 : 1;
-
-  // Outgoing layer should not capture clicks during animation
-  // Use transition-specific isTabRoot values if available (for tab switches)
-  const fromIsTabRoot = transition.fromIsTabRoot ?? isTabRoot;
-  const toIsTabRoot = transition.toIsTabRoot ?? isTabRoot;
+  const transitionStyle = isTransitioning && animPhase !== "start"
+    ? `transform ${DURATION}ms ${EASE}`
+    : "none";
 
   return (
     <div style={{ position: "relative", height: "100%", background: "#FAF7F2" }}>
-      <div style={{ ...layerBase, transform: fromTransform, transition: transitionStyle, zIndex: fromZ, pointerEvents: "none", paddingBottom: 64 }}>
-        {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache)}
+      {/* Base layer - always renders current screen (stable tree position) */}
+      <div style={{
+        ...layerBase,
+        position: isTransitioning ? "absolute" : "relative",
+        transform: currentTransform,
+        transition: transitionStyle,
+        zIndex: currentZ,
+        pointerEvents: isTransitioning ? "none" : "auto",
+        paddingBottom: 64
+      }}>
+        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache)}
       </div>
-      <div style={{ ...layerBase, transform: toTransform, transition: transitionStyle, zIndex: toZ, pointerEvents: "none", paddingBottom: 64 }}>
-        {renderScreen(to, push, back, toIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache)}
-      </div>
+
+      {/* Overlay layer - only during transitions, renders from screen */}
+      {isTransitioning && from && (
+        <div style={{
+          ...layerBase,
+          transform: fromTransform,
+          transition: transitionStyle,
+          zIndex: fromZ,
+          pointerEvents: "none",
+          paddingBottom: 64
+        }}>
+          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache)}
+        </div>
+      )}
     </div>
   );
 }
@@ -1184,7 +1215,9 @@ function Categories({ push, back, isTabRoot, ensureRecipesLoaded }: { push: (s: 
       setRecipeCounts(counts);
     }
     loadCategories();
-    return () => { ignore = true; };
+    return () => {
+      ignore = true;
+    };
   }, []);
 
   return (
