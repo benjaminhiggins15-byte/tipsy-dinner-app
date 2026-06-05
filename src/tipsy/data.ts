@@ -496,6 +496,64 @@ export async function getSavedRecipesForCategory(categoryId: string, label: stri
   }
 }
 
+// Get public recipe by share token (for anonymous viewing)
+export async function getPublicRecipeByToken(
+  token: string
+): Promise<(SavedRecipe & { cookTime?: string; serves?: string }) | null> {
+  try {
+    const { data: recipe, error } = await supabase
+      .from('recipes')
+      .select(`
+        id,
+        title,
+        description,
+        steps,
+        created_at,
+        source,
+        cook_time,
+        serves,
+        ingredients (
+          name,
+          quantity,
+          sort_order
+        )
+      `)
+      .eq('share_token', token)
+      .eq('is_public', true)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error loading public recipe:', error);
+      return null;
+    }
+
+    if (!recipe) {
+      return null;
+    }
+
+    return {
+      id: recipe.id,
+      title: recipe.title,
+      description: recipe.description,
+      category: '',
+      ingredients: (recipe.ingredients || [])
+        .sort((a: any, b: any) => a.sort_order - b.sort_order)
+        .map((ing: any) => ({
+          name: ing.name,
+          qty: ing.quantity,
+        })),
+      steps: recipe.steps || [],
+      createdAt: recipe.created_at,
+      source: recipe.source,
+      cookTime: recipe.cook_time,
+      serves: recipe.serves,
+    };
+  } catch (error) {
+    console.error('Error loading public recipe:', error);
+    return null;
+  }
+}
+
 // One-time migration from localStorage to Supabase
 export async function migrateRecipesFromLocalStorage(): Promise<boolean> {
   try {
