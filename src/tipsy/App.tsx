@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, type Recipe, type Occasion, type Menu, type SavedRecipe, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection } from "./data";
+import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, shareRecipe, type Recipe, type Occasion, type Menu, type SavedRecipe, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
@@ -1562,9 +1562,34 @@ function RecipeCard({
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [shareConfirm, setShareConfirm] = useState(false);
   const ingredients = recipe.ingredients ?? [];
   const steps = recipe.steps ?? [];
   const editable = recipe.savedId != null;
+
+  async function handleShare() {
+    if (!recipe.savedId) return;
+    const url = await shareRecipe(recipe.savedId.toString());
+    if (!url) return;
+
+    // Try native share sheet first
+    if (navigator.share) {
+      try {
+        await navigator.share({ url: url });
+      } catch (err) {
+        // User cancelled — silent fail
+      }
+    } else {
+      // Fallback: copy to clipboard
+      try {
+        await navigator.clipboard.writeText(url);
+        setShareConfirm(true);
+        setTimeout(() => setShareConfirm(false), 2000);
+      } catch (err) {
+        console.error('Clipboard write failed:', err);
+      }
+    }
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -1583,18 +1608,21 @@ function RecipeCard({
               </svg>
             </button>
             <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-              <button
-                aria-label="Share"
-                style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="18" cy="5" r="3" />
-                  <circle cx="6" cy="12" r="3" />
-                  <circle cx="18" cy="19" r="3" />
-                  <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-                  <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-                </svg>
-              </button>
+              {editable && (
+                <button
+                  onClick={handleShare}
+                  aria-label="Share"
+                  style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="18" cy="5" r="3" />
+                    <circle cx="6" cy="12" r="3" />
+                    <circle cx="18" cy="19" r="3" />
+                    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                    <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+                  </svg>
+                </button>
+              )}
               {editable && (
                 <button
                   onClick={() => push({ name: "addown", editRecipe: recipe, editCategoryLabel: categoryLabel })}
@@ -1935,6 +1963,28 @@ function RecipeCard({
               Delete
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Share confirmation toast */}
+      {shareConfirm && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "80px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "#233C00",
+            color: "#FEE7C0",
+            padding: "8px 16px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            fontFamily: "Inter, sans-serif",
+            fontWeight: 500,
+            zIndex: 1000,
+          }}
+        >
+          Link copied
         </div>
       )}
     </div>

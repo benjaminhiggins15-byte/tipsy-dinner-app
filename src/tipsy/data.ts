@@ -554,6 +554,62 @@ export async function getPublicRecipeByToken(
   }
 }
 
+// Share recipe by generating/reusing share token and returning public URL
+export async function shareRecipe(recipeId: string): Promise<string | null> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot share recipe: no user session');
+    return null;
+  }
+
+  try {
+    // Check if recipe already has share_token
+    const { data: existing, error: selectError } = await supabase
+      .from('recipes')
+      .select('share_token')
+      .eq('id', recipeId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (selectError) {
+      console.error('Error fetching recipe for share:', selectError);
+      return null;
+    }
+
+    if (!existing) {
+      // Recipe not found or not owned by this user
+      return null;
+    }
+
+    let token: string;
+
+    // If share_token exists, reuse it (stable links)
+    if (existing.share_token) {
+      token = existing.share_token;
+    } else {
+      // Generate new token and update recipe
+      token = crypto.randomUUID();
+
+      const { error: updateError } = await supabase
+        .from('recipes')
+        .update({
+          is_public: true,
+          share_token: token,
+        })
+        .eq('id', recipeId)
+        .eq('user_id', userId);
+
+      if (updateError) throw updateError;
+    }
+
+    // Build and return full shareable URL
+    return `${window.location.origin}/r/${token}`;
+  } catch (error) {
+    console.error('Error sharing recipe:', error);
+    return null;
+  }
+}
+
 // One-time migration from localStorage to Supabase
 export async function migrateRecipesFromLocalStorage(): Promise<boolean> {
   try {
