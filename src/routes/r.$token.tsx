@@ -227,7 +227,7 @@ function PublicRecipePage() {
                       fontSize: "14px",
                       fontWeight: 500,
                       fontVariantNumeric: "tabular-nums",
-                      color: "rgba(35,60,0,0.4)",
+                      color: "rgba(35,60,0,0.55)",
                       textAlign: "right",
                       flexShrink: 0,
                       maxWidth: "40%",
