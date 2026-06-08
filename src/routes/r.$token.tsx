@@ -28,7 +28,7 @@ function PublicRecipePage() {
       >
         <div
           style={{
-            maxWidth: "600px",
+            maxWidth: "640px",
             width: "100%",
             textAlign: "center",
           }}
@@ -37,10 +37,11 @@ function PublicRecipePage() {
             style={{
               fontFamily: "Inter, sans-serif",
               fontWeight: 700,
-              fontSize: "28px",
+              fontSize: "32px",
               letterSpacing: "0.04em",
               textTransform: "capitalize",
               color: "#233C00",
+              lineHeight: 1.1,
               marginBottom: "12px",
             }}
           >
@@ -50,9 +51,10 @@ function PublicRecipePage() {
             style={{
               fontFamily: "Inter, sans-serif",
               fontWeight: 400,
-              fontSize: "14px",
+              fontStyle: "italic",
+              fontSize: "15px",
               color: "rgba(35,60,0,0.55)",
-              lineHeight: 1.6,
+              lineHeight: 1.5,
             }}
           >
             This recipe may have been removed or the link is incorrect.
@@ -117,8 +119,9 @@ function PublicRecipePage() {
     >
       <div
         style={{
-          maxWidth: "600px",
+          maxWidth: "640px",
           width: "100%",
+          paddingTop: "56px",
         }}
       >
         {/* Title */}
@@ -126,7 +129,7 @@ function PublicRecipePage() {
           style={{
             fontFamily: "Inter, sans-serif",
             fontWeight: 700,
-            fontSize: "28px",
+            fontSize: "32px",
             letterSpacing: "0.04em",
             textTransform: "capitalize",
             color: "#233C00",
@@ -143,77 +146,38 @@ function PublicRecipePage() {
             style={{
               fontFamily: "Inter, sans-serif",
               fontWeight: 400,
-              fontSize: "14px",
+              fontStyle: "italic",
+              fontSize: "15px",
               color: "rgba(35,60,0,0.55)",
-              lineHeight: 1.6,
-              marginBottom: "18px",
+              lineHeight: 1.5,
+              marginBottom: "24px",
             }}
           >
             {recipe.description}
           </p>
         )}
 
-        {/* Meta row (cook time + serves) */}
+        {/* Meta row (cook time · serves) */}
         {(recipe.cookTime || recipe.serves) && (
-          <div style={{ display: "flex", gap: "24px", marginBottom: "32px" }}>
-            {recipe.cookTime && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                <div
-                  style={{
-                    fontFamily: "Inter, sans-serif",
-                    fontSize: "11px",
-                    fontWeight: 500,
-                    letterSpacing: "0.08em",
-                    textTransform: "uppercase",
-                    color: "rgba(35,60,0,0.3)",
-                  }}
-                >
-                  Cook Time
-                </div>
-                <div
-                  style={{
-                    fontFamily: "Inter, sans-serif",
-                    fontSize: "14px",
-                    fontWeight: 500,
-                    color: "#233C00",
-                  }}
-                >
-                  {recipe.cookTime}
-                </div>
-              </div>
-            )}
-            {recipe.serves && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                <div
-                  style={{
-                    fontFamily: "Inter, sans-serif",
-                    fontSize: "11px",
-                    fontWeight: 500,
-                    letterSpacing: "0.08em",
-                    textTransform: "uppercase",
-                    color: "rgba(35,60,0,0.3)",
-                  }}
-                >
-                  Serves
-                </div>
-                <div
-                  style={{
-                    fontFamily: "Inter, sans-serif",
-                    fontSize: "14px",
-                    fontWeight: 500,
-                    color: "#233C00",
-                  }}
-                >
-                  {recipe.serves}
-                </div>
-              </div>
-            )}
+          <div
+            style={{
+              fontFamily: "Inter, sans-serif",
+              fontSize: "13px",
+              fontWeight: 500,
+              color: "rgba(35,60,0,0.5)",
+              marginBottom: "40px",
+              marginTop: "16px",
+            }}
+          >
+            {recipe.cookTime}
+            {recipe.cookTime && recipe.serves && " · "}
+            {recipe.serves && `Serves ${recipe.serves}`}
           </div>
         )}
 
         {/* Ingredients section */}
         {ingredients.length > 0 && (
-          <div style={{ marginBottom: "40px" }}>
+          <div style={{ marginBottom: "48px" }}>
             <h2
               style={{
                 fontFamily: "Inter, sans-serif",
@@ -237,7 +201,7 @@ function PublicRecipePage() {
                     alignItems: "flex-start",
                     justifyContent: "space-between",
                     gap: "8px",
-                    padding: "12px 0",
+                    padding: "14px 0",
                     borderBottom:
                       idx === ingredients.length - 1
                         ? "none"
@@ -301,7 +265,7 @@ function PublicRecipePage() {
                     display: "flex",
                     gap: "14px",
                     alignItems: "flex-start",
-                    marginBottom: idx === steps.length - 1 ? 0 : "20px",
+                    marginBottom: idx === steps.length - 1 ? 0 : "24px",
                   }}
                 >
                   <span
