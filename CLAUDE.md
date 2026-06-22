@@ -1,5 +1,5 @@
 # Tipsy Dinner — CLAUDE.md
-Last updated: May 2026
+Last updated: June 2026
 
 ---
 
@@ -24,7 +24,7 @@ Target user: myself first. Elevated home cook. Cooks for two (wife) and for crow
 **Local dev:** `bun dev` from `~/Developer/tipsy-dinner-app`
 **Runs at:** localhost:8080 or 8081
 **GitHub:** github.com/benjaminhiggins15-byte/tipsy-dinner-app
-**Deployment:** Vercel (planned)
+**Deployment:** Vercel (live at tipsydinner.com)
 
 ---
 
@@ -381,8 +381,11 @@ tipsyDinnerTable
 - Recipe Card editable check fixed to handle UUID recipe IDs ✓
 - ScreenStage tree structure stabilized — transitions no longer cause unnecessary remounts ✓
 - Tab-return data loss bug FIXED — Supabase fires duplicate SIGNED_IN events on tab refocus; profileInitialized ref in onAuthStateChange ignores subsequent events after initial sign-in ✓
+- Full-screen layout — fixed 320×640 mockup frame removed; app now renders full-screen on real device viewport. S.page and S.phone in App.tsx use shared CSS class `td-fullscreen-height` (height:100vh with height:100dvh override). S.phone: width:100%, maxWidth:480, safe-area insets at container level via paddingTop/paddingBottom env(safe-area-inset-*). Verified on real phone via Vercel branch preview ✓
+- iOS input auto-zoom prevented — all input/textarea fields raised to fontSize:16 (TextInput, TextArea, EditInput, NameInput, inputStyleBase, Build chat textarea). Stops Safari auto-zoom-on-focus while preserving pinch-zoom ✓
 
 **Known issues (next session priorities, in order):**
+- Saving a menu fails — data/logic bug, deferred from layout pass, needs dedicated session
 - Recipe List doesn't refresh after a recipe is deleted — cache clear works but list doesn't re-fetch on re-mount
 - Edit recipe doesn't pre-populate the Write Your Own flow — investigate how AddYourOwn.tsx handles the editRecipe prop
 - Add an "All Recipes" default category — design decision pending (real Supabase row vs virtual view)
@@ -390,9 +393,7 @@ tipsyDinnerTable
 - + button position shifts after category creation
 - Brief flash on Menu Interior load
 - RecipePicker category cards still showing legacy gradient color
-
-**Deferred:**
-- Nav bar spacing + blue frame in PWA/home-screen (standalone) mode — app currently renders inside a fixed-size 320x640 mockup frame (S.phone in App.tsx), which causes a blue border and nav bar spacing issues when launched from the iPhone home screen. Only affects standalone/home-screen use, not Safari or shared web links. Proper fix is a dedicated responsive-layout pass: remove the fixed-size mockup frame so the app fills the full viewport on any device, then apply safe-area insets at the container level. Deferred — not a blocker for sharing. Tackle as its own session (Opus recommended given it touches core layout).
+- ScreenStage paddingBottom:64 (App.tsx ~lines 1094 & 1107) is hard-coded nav-bar clearance — tested fine in production, low priority, revisit only if content crowds behind nav bar on any device
 
 **Visual redesign order (follow this sequence):**
 1. Build — empty state
