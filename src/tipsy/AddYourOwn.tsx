@@ -372,7 +372,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                               border: `1px solid ${C.inputBorder}`,
                               borderRadius: 10,
                               padding: "12px 14px",
-                              fontSize: 15,
+                              fontSize: 16,
                               fontWeight: 500,
                               fontFamily: fontSans,
                               color: C.textVeryLight,
@@ -396,7 +396,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                               border: `1px solid ${C.inputBorder}`,
                               borderRadius: 10,
                               padding: "12px 14px",
-                              fontSize: 15,
+                              fontSize: 16,
                               fontWeight: 400,
                               fontFamily: fontSans,
                               color: C.text,
@@ -428,7 +428,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                       border: `1px solid ${C.inputBorder}`,
                       borderRadius: 10,
                       padding: "12px 14px",
-                      fontSize: 15,
+                      fontSize: 16,
                       fontWeight: 500,
                       fontFamily: fontSans,
                       color: C.textVeryLight,
@@ -536,7 +536,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                               border: `1px solid ${C.inputBorder}`,
                               borderRadius: 10,
                               padding: "12px 14px",
-                              fontSize: 14,
+                              fontSize: 16,
                               fontWeight: 400,
                               fontFamily: fontSans,
                               color: C.text,
@@ -754,7 +754,7 @@ function ValMsg({ children }: { children: React.ReactNode }) {
 const inputStyleBase: CSSProperties = {
   width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`,
   borderRadius: 10, padding: "12px 14px",
-  fontFamily: fontSans, fontSize: 15, fontWeight: 400, color: C.text, lineHeight: 1.4,
+  fontFamily: fontSans, fontSize: 16, fontWeight: 400, color: C.text, lineHeight: 1.4,
   outline: "none", WebkitAppearance: "none",
 };
 
@@ -798,7 +798,7 @@ function TextArea({ value, onChange, placeholder }: { value: string; onChange: (
         fontFamily: fontSerif,
         fontStyle: "italic",
         fontWeight: 300,
-        fontSize: 15,
+        fontSize: 16,
         resize: "none",
         lineHeight: 1.5,
         minHeight: 80,
@@ -896,7 +896,7 @@ function EditInput({
       style={{
         ...inputStyleBase,
         padding: "12px 14px",
-        fontSize: 15,
+        fontSize: 16,
         borderColor: focused ? C.inputBorderActive : C.inputBorder,
       }}
     />

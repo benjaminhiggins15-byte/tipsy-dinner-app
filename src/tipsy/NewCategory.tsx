@@ -229,7 +229,7 @@ function ValMsg({ children }: { children: React.ReactNode }) {
 const inputStyleBase: CSSProperties = {
   width: "100%", background: C.inputBg, border: `1px solid ${C.inputBorder}`,
   borderRadius: 10, padding: "14px 16px",
-  fontFamily: fontSans, fontSize: 15, color: C.green, fontWeight: 400,
+  fontFamily: fontSans, fontSize: 16, color: C.green, fontWeight: 400,
   outline: "none", WebkitAppearance: "none",
 };
 

@@ -178,7 +178,7 @@ export function ProfileEdit({ fieldKey, back, profile, onUpdate }: { fieldKey: F
     borderRadius: 12,
     padding: "12px 14px",
     fontFamily: "'Inter', sans-serif",
-    fontSize: 13,
+    fontSize: 16,
     color: "#233C00",
     outline: "none",
     lineHeight: 1.6,

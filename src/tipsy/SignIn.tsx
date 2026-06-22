@@ -25,7 +25,7 @@ const fieldInput: CSSProperties = {
   borderBottom: "1px solid rgba(35,60,0,0.2)",
   borderRadius: 0,
   fontFamily: "'Inter', sans-serif",
-  fontSize: 14,
+  fontSize: 16,
   color: "#233C00",
   outline: "none",
   padding: "0 2px",

@@ -718,7 +718,7 @@ const inputStyleBase: CSSProperties = {
   borderRadius: 10,
   padding: "11px 14px",
   fontFamily: fontSans,
-  fontSize: 13,
+  fontSize: 16,
   color: C.navy,
   outline: "none",
   WebkitAppearance: "none",

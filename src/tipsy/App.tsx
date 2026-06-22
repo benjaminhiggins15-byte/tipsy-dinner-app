@@ -3071,7 +3071,7 @@ function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
             border: "none",
             outline: "none",
             fontFamily: "Inter, sans-serif",
-            fontSize: 15,
+            fontSize: 16,
             color: "#233C00",
             resize: "none",
             overflowY: "auto",
