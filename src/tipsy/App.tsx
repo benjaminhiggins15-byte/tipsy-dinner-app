@@ -94,24 +94,21 @@ type TabId = "build" | "recipes" | "menus" | "profile";
 
 const S: Record<string, CSSProperties> = {
   page: {
-    minHeight: "100vh",
-    background: "#D8E8F2",
+    background: "#FAF7F2",
     display: "flex",
+    flexDirection: "column",
     alignItems: "center",
-    justifyContent: "center",
-    padding: "24px 12px",
   },
   phone: {
-    width: 320,
-    height: 640,
+    width: "100%",
+    maxWidth: 480,
     background: "#FAF7F2",
-    borderRadius: 32,
-    border: "none",
     overflow: "hidden",
     display: "flex",
     flexDirection: "column",
-    boxShadow: "0 20px 60px rgba(4,44,83,0.12)",
     position: "relative",
+    paddingTop: "env(safe-area-inset-top)",
+    paddingBottom: "env(safe-area-inset-bottom)",
   },
 };
 
@@ -892,8 +889,8 @@ export default function App() {
     : "none";
 
   return (
-    <div style={S.page}>
-      <div style={S.phone}>
+    <div style={S.page} className="td-fullscreen-height">
+      <div style={S.phone} className="td-fullscreen-height">
         {currentView === null ? null : (
           <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", background: "#FAF7F2" }}>
             {/* Base layer - always renders currentView (stable tree position) */}
@@ -1091,7 +1088,7 @@ function ScreenStage({
         transition: transitionStyle,
         zIndex: currentZ,
         pointerEvents: isTransitioning ? "none" : "auto",
-        paddingBottom: 64
+        paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
       }}>
         {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache)}
       </div>
@@ -1104,7 +1101,7 @@ function ScreenStage({
           transition: transitionStyle,
           zIndex: fromZ,
           pointerEvents: "none",
-          paddingBottom: 64
+          paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
         }}>
           {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache)}
         </div>
@@ -1135,7 +1132,6 @@ function BottomTabBar({ activeTab, onTabClick }: { activeTab: TabId; onTabClick:
         alignItems: "center",
         justifyContent: "space-around",
         padding: "0 8px 6px",
-        paddingBottom: "env(safe-area-inset-bottom)",
         zIndex: 100,
       }}
     >

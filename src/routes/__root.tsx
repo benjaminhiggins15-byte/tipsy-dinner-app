@@ -72,6 +72,12 @@ function RootShell({ children }: { children: React.ReactNode }) {
     <html lang="en">
       <head>
         <HeadContent />
+        <style>{`
+          .td-fullscreen-height {
+            height: 100vh;
+            height: 100dvh;
+          }
+        `}</style>
       </head>
       <body>
         {children}
