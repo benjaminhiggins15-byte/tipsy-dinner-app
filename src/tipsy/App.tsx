@@ -2676,24 +2676,26 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
                 Write a recipe
               </button>
             )}
-            <button
-              onClick={() => setShowRefreshConfirm(true)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 36,
-                height: 36,
-                background: "transparent",
-                border: "none",
-                cursor: "pointer",
-                color: "rgba(35,60,0,0.5)",
-                padding: 0,
-              }}
-              aria-label="Refresh chat"
-            >
-              <IconRefresh size={20} stroke={1.5} />
-            </button>
+            {!isEmpty && (
+              <button
+                onClick={() => setShowRefreshConfirm(true)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 36,
+                  height: 36,
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "rgba(35,60,0,0.5)",
+                  padding: 0,
+                }}
+                aria-label="Refresh chat"
+              >
+                <IconRefresh size={20} stroke={1.5} />
+              </button>
+            )}
           </div>
         </div>
       )}
