@@ -748,10 +748,30 @@ export default function App() {
 
   // Clear Build conversation and start fresh
   const clearBuildConversation = () => {
+    if (transition) return; // Guard against concurrent transitions
+
+    // Clear lifted state
     setBuildMessages([]);
     setBuildConversationHistory([]);
     setBuildCurrentRecipe(null);
     buildMessageIdRef.current = 0;
+
+    // Trigger transition to fresh Build screen (same pattern as double-tap Build reset)
+    const currentBuildScreen = tabStacks.build[tabStacks.build.length - 1];
+    const freshCook: Screen = { name: "cook", resetKey: Date.now() };
+
+    setTransition({
+      from: currentBuildScreen,
+      to: freshCook,
+      direction: "back",
+      fromIsTabRoot: true,
+      toIsTabRoot: true
+    });
+
+    setTabStacks(prev => ({
+      ...prev,
+      build: [freshCook]
+    }));
   };
 
   // After a recipe is saved, switch to Recipes tab and navigate to the saved recipe
