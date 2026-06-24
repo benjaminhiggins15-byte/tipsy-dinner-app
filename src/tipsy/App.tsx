@@ -19,6 +19,7 @@ import {
   IconBook,
   IconLayoutList,
   IconUser,
+  IconRefresh,
 } from "@tabler/icons-react";
 
 // Helper to parse Server-Sent Events from Anthropic streaming API
@@ -62,6 +63,17 @@ type RecipeDraft = {
   description: string;
   ingredients: { name: string; qty: string }[];
   steps: string[];
+};
+
+type BuildMessage = {
+  id: number;
+  role: "user" | "ai";
+  text: string;
+};
+
+type ConversationMessage = {
+  role: "user" | "assistant";
+  content: string;
 };
 
 type ProfileType = {
@@ -152,6 +164,14 @@ function renderScreen(
   recipesByCategory?: Record<string, Recipe[]>,
   ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void>,
   clearRecipeCache?: (categoryKey: string) => void,
+  buildMessages?: BuildMessage[],
+  setBuildMessages?: (messages: BuildMessage[] | ((prev: BuildMessage[]) => BuildMessage[])) => void,
+  buildConversationHistory?: ConversationMessage[],
+  setBuildConversationHistory?: (history: ConversationMessage[] | ((prev: ConversationMessage[]) => ConversationMessage[])) => void,
+  buildCurrentRecipe?: RecipeDraft | null,
+  setBuildCurrentRecipe?: (recipe: RecipeDraft | null) => void,
+  clearBuildConversation?: () => void,
+  buildMessageIdRef?: React.MutableRefObject<number>,
 ) {
   switch (s.name) {
     case "cook": return (
@@ -164,6 +184,14 @@ function renderScreen(
         isTabRoot={isTabRoot}
         profile={profile}
         onUpdate={onUpdate}
+        messages={buildMessages || []}
+        setMessages={setBuildMessages || (() => {})}
+        conversationHistory={buildConversationHistory || []}
+        setConversationHistory={setBuildConversationHistory || (() => {})}
+        currentRecipe={buildCurrentRecipe || null}
+        setCurrentRecipe={setBuildCurrentRecipe || (() => {})}
+        onClearConversation={clearBuildConversation || (() => {})}
+        messageIdRef={buildMessageIdRef || { current: 0 }}
       />
     );
     case "addown": return (
@@ -279,6 +307,12 @@ export default function App() {
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
   const [profile, setProfile] = useState<ProfileType | null>(null);
   const [recipesByCategory, setRecipesByCategory] = useState<Record<string, Recipe[]>>({});
+
+  // Build conversation state - lifted to survive tab switches
+  const [buildMessages, setBuildMessages] = useState<BuildMessage[]>([]);
+  const [buildConversationHistory, setBuildConversationHistory] = useState<ConversationMessage[]>([]);
+  const [buildCurrentRecipe, setBuildCurrentRecipe] = useState<RecipeDraft | null>(null);
+  const buildMessageIdRef = useRef(0);
 
   const profileInitialized = useRef(false);
 
@@ -712,6 +746,14 @@ export default function App() {
     }
   };
 
+  // Clear Build conversation and start fresh
+  const clearBuildConversation = () => {
+    setBuildMessages([]);
+    setBuildConversationHistory([]);
+    setBuildCurrentRecipe(null);
+    buildMessageIdRef.current = 0;
+  };
+
   // After a recipe is saved, switch to Recipes tab and navigate to the saved recipe
   const finishSaveRecipe = (recipe: Recipe, categoryKey: string, categoryLabel: string) => {
     if (transition) return;
@@ -833,6 +875,14 @@ export default function App() {
           recipesByCategory={recipesByCategory}
           ensureRecipesLoaded={ensureRecipesLoaded}
           clearRecipeCache={clearRecipeCache}
+          buildMessages={buildMessages}
+          setBuildMessages={setBuildMessages}
+          buildConversationHistory={buildConversationHistory}
+          setBuildConversationHistory={setBuildConversationHistory}
+          buildCurrentRecipe={buildCurrentRecipe}
+          setBuildCurrentRecipe={setBuildCurrentRecipe}
+          clearBuildConversation={clearBuildConversation}
+          buildMessageIdRef={buildMessageIdRef}
         />
         <BottomTabBar activeTab={activeTab} onTabClick={switchToTab} />
       </div>
@@ -983,6 +1033,14 @@ function ScreenStage({
   recipesByCategory,
   ensureRecipesLoaded,
   clearRecipeCache,
+  buildMessages,
+  setBuildMessages,
+  buildConversationHistory,
+  setBuildConversationHistory,
+  buildCurrentRecipe,
+  setBuildCurrentRecipe,
+  clearBuildConversation,
+  buildMessageIdRef,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back"; fromIsTabRoot?: boolean; toIsTabRoot?: boolean } | null;
@@ -1001,6 +1059,14 @@ function ScreenStage({
   recipesByCategory: Record<string, Recipe[]>;
   ensureRecipesLoaded: (categoryKey: string, categoryLabel: string) => Promise<void>;
   clearRecipeCache: (categoryKey: string) => void;
+  buildMessages: BuildMessage[];
+  setBuildMessages: (messages: BuildMessage[] | ((prev: BuildMessage[]) => BuildMessage[])) => void;
+  buildConversationHistory: ConversationMessage[];
+  setBuildConversationHistory: (history: ConversationMessage[] | ((prev: ConversationMessage[]) => ConversationMessage[])) => void;
+  buildCurrentRecipe: RecipeDraft | null;
+  setBuildCurrentRecipe: (recipe: RecipeDraft | null) => void;
+  clearBuildConversation: () => void;
+  buildMessageIdRef: React.MutableRefObject<number>;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
@@ -1090,7 +1156,7 @@ function ScreenStage({
         pointerEvents: isTransitioning ? "none" : "auto",
         paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
       }}>
-        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache)}
+        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef)}
       </div>
 
       {/* Overlay layer - only during transitions, renders from screen */}
@@ -1103,7 +1169,7 @@ function ScreenStage({
           pointerEvents: "none",
           paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
         }}>
-          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache)}
+          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef)}
         </div>
       )}
     </div>
@@ -2024,7 +2090,7 @@ function BackArrow() {
 }
 
 /* ---------------- Cook ---------------- */
-function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpdate }: {
+function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpdate, messages, setMessages, conversationHistory, setConversationHistory, currentRecipe, setCurrentRecipe, onClearConversation, messageIdRef }: {
   back: () => void;
   push: (s: Screen) => void;
   finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
@@ -2032,32 +2098,31 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
   isTabRoot: boolean;
   profile?: ProfileType | null;
   onUpdate?: (updates: Partial<ProfileType>) => Promise<void>;
+  messages: BuildMessage[];
+  setMessages: (messages: BuildMessage[] | ((prev: BuildMessage[]) => BuildMessage[])) => void;
+  conversationHistory: ConversationMessage[];
+  setConversationHistory: (history: ConversationMessage[] | ((prev: ConversationMessage[]) => ConversationMessage[])) => void;
+  currentRecipe: RecipeDraft | null;
+  setCurrentRecipe: (recipe: RecipeDraft | null) => void;
+  onClearConversation: () => void;
+  messageIdRef: React.MutableRefObject<number>;
 }) {
-  type Msg = { id: number; role: "user" | "ai"; text: string };
 
   const [trayOpen, setTrayOpen] = useState(!!screen.newCategory);
   const [newCategorySelection, setNewCategorySelection] = useState<{ key: string; label: string } | null>(screen.newCategory || null);
-  const [messages, setMessages] = useState<Msg[]>([]);
   const [typing, setTyping] = useState(false);
   const [input, setInput] = useState("");
-  const [recipeRevealed, setRecipeRevealed] = useState(!!screen.draft);
-  const [miniBarVisible, setMiniBarVisible] = useState(!!screen.draft);
-  const [miniTitleVisible, setMiniTitleVisible] = useState(!!screen.draft);
+  const [recipeRevealed, setRecipeRevealed] = useState(!!currentRecipe);
+  const [miniBarVisible, setMiniBarVisible] = useState(!!currentRecipe);
+  const [miniTitleVisible, setMiniTitleVisible] = useState(!!currentRecipe);
   const [expanded, setExpanded] = useState(false);
   const [generatingRecipe, setGeneratingRecipe] = useState(false);
-  const [currentRecipe, setCurrentRecipe] = useState<{
-    title: string;
-    description: string;
-    ingredients: { name: string; qty: string }[];
-    steps: string[];
-  } | null>(screen.draft || null);
-  const [conversationHistory, setConversationHistory] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
   const [recipePulse, setRecipePulse] = useState(false);
+  const [showRefreshConfirm, setShowRefreshConfirm] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomBarRef = useRef<HTMLDivElement | null>(null);
   const [bottomBarHeight, setBottomBarHeight] = useState(0);
-  const idRef = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -2091,7 +2156,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
     }
 
     const userText = input.trim();
-    const userMsg: Msg = { id: ++idRef.current, role: "user", text: userText };
+    const userMsg: BuildMessage = { id: ++messageIdRef.current, role: "user", text: userText };
     setMessages((m) => [...m, userMsg]);
     setInput("");
     setTyping(true);
@@ -2189,7 +2254,7 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
 
       // Create AI message immediately
       setTyping(false);
-      const aiMessageId = ++idRef.current;
+      const aiMessageId = ++messageIdRef.current;
       setMessages((m) => [...m, { id: aiMessageId, role: "ai", text: "" }]);
 
       let fullText = "";
@@ -2309,7 +2374,7 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
       setMessages((m) => [
         ...m,
         {
-          id: ++idRef.current,
+          id: ++messageIdRef.current,
           role: "ai",
           text: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
         },
@@ -2372,7 +2437,7 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
     if (typing) return;
     // Directly send the chip text as a message
     const userText = text.trim();
-    const userMsg: Msg = { id: ++idRef.current, role: "user", text: userText };
+    const userMsg: BuildMessage = { id: ++messageIdRef.current, role: "user", text: userText };
     setMessages((m) => [...m, userMsg]);
     setTyping(true);
     setGeneratingRecipe(false);
@@ -2460,7 +2525,7 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
         const stream = parseSSEStream(response);
 
         setTyping(false);
-        const aiMessageId = ++idRef.current;
+        const aiMessageId = ++messageIdRef.current;
         setMessages((m) => [...m, { id: aiMessageId, role: "ai", text: "" }]);
 
         let fullText = "";
@@ -2565,7 +2630,7 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
         setMessages((m) => [
           ...m,
           {
-            id: ++idRef.current,
+            id: ++messageIdRef.current,
             role: "ai",
             text: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
           },
@@ -2590,26 +2655,46 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
               }}
             />
           </div>
-          {isEmpty && (
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {isEmpty && (
+              <button
+                onClick={() => push({ name: "addown" })}
+                style={{
+                  fontSize: 10,
+                  fontWeight: 500,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "rgba(35,60,0,0.6)",
+                  border: "1px solid rgba(35,60,0,0.2)",
+                  borderRadius: 20,
+                  padding: "7px 14px",
+                  background: "transparent",
+                  cursor: "pointer",
+                  fontFamily: "Inter, sans-serif",
+                }}
+              >
+                Write a recipe
+              </button>
+            )}
             <button
-              onClick={() => push({ name: "addown" })}
+              onClick={() => setShowRefreshConfirm(true)}
               style={{
-                fontSize: 10,
-                fontWeight: 500,
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                color: "rgba(35,60,0,0.6)",
-                border: "1px solid rgba(35,60,0,0.2)",
-                borderRadius: 20,
-                padding: "7px 14px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 36,
+                height: 36,
                 background: "transparent",
+                border: "none",
                 cursor: "pointer",
-                fontFamily: "Inter, sans-serif",
+                color: "rgba(35,60,0,0.5)",
+                padding: 0,
               }}
+              aria-label="Refresh chat"
             >
-              Write a recipe
+              <IconRefresh size={20} stroke={1.5} />
             </button>
-          )}
+          </div>
         </div>
       )}
 
@@ -2879,6 +2964,98 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
           onNew={onPickNewCategory}
           initialSelectedCategory={newCategorySelection}
         />
+      )}
+
+      {/* Refresh confirmation modal */}
+      {showRefreshConfirm && (
+        <div
+          onClick={() => setShowRefreshConfirm(false)}
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "rgba(35,60,0,0.25)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 20,
+            padding: 24,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 16,
+              padding: "24px 20px",
+              width: "100%",
+              maxWidth: 280,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              border: "0.5px solid rgba(35,60,0,0.1)",
+            }}
+          >
+            <div style={{
+              fontFamily: "'Inter', sans-serif",
+              fontSize: 16,
+              fontWeight: 700,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+              color: "#233C00",
+              textAlign: "center",
+            }}>
+              Refresh this chat?
+            </div>
+            <div style={{
+              fontFamily: "'Inter', sans-serif",
+              fontSize: 13,
+              color: "#233C00",
+              textAlign: "center",
+              marginBottom: 12,
+            }}>
+              This will clear the conversation and start fresh.
+            </div>
+            <button
+              onClick={() => setShowRefreshConfirm(false)}
+              style={{
+                width: "100%",
+                padding: "12px",
+                borderRadius: 10,
+                background: "transparent",
+                border: "0.5px solid rgba(35,60,0,0.1)",
+                color: "#233C00",
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                onClearConversation();
+                setShowRefreshConfirm(false);
+              }}
+              style={{
+                width: "100%",
+                padding: "12px",
+                borderRadius: 10,
+                background: "#FEE7C0",
+                border: "none",
+                color: "#233C00",
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 13,
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.04em",
+                cursor: "pointer",
+              }}
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
