@@ -818,15 +818,20 @@ ${stepsXML}
     switchToTab("build");
   };
 
-  // Clear Build conversation and start fresh
-  const clearBuildConversation = () => {
-    if (transition) return; // Guard against concurrent transitions
-
-    // Clear lifted state
+  // Clear Build state only (no transition, no navigation) — for atomic clear+seed
+  const clearBuildStateOnly = () => {
     setBuildMessages([]);
     setBuildConversationHistory([]);
     setBuildCurrentRecipe(null);
     buildMessageIdRef.current = 0;
+  };
+
+  // Clear Build conversation and start fresh (with animated transition)
+  const clearBuildConversation = () => {
+    if (transition) return; // Guard against concurrent transitions
+
+    // Clear lifted state
+    clearBuildStateOnly();
 
     // Trigger transition to fresh Build screen (same pattern as double-tap Build reset)
     const currentBuildScreen = tabStacks.build[tabStacks.build.length - 1];
@@ -1791,31 +1796,53 @@ function RecipeCard({
   };
 
   const handleCollisionConfirm = () => {
-    if (!chatQuestion.trim() || !transferToRecipeChat || !recipe.savedId || !clearBuildConversation) return;
+    if (!chatQuestion.trim() || !recipe.savedId) return;
 
-    // Clear existing conversation
-    clearBuildConversation();
+    const savedRecipe: SavedRecipe = {
+      id: recipe.savedId!,
+      title: recipe.title,
+      description: recipe.description,
+      category: categoryKey,
+      ingredients: recipe.ingredients ?? [],
+      steps: recipe.steps ?? [],
+      createdAt: new Date().toISOString(),
+    };
 
-    // Small delay to let state settle
-    setTimeout(() => {
-      const savedRecipe: SavedRecipe = {
-        id: recipe.savedId!,
-        title: recipe.title,
-        description: recipe.description,
-        category: categoryKey,
-        ingredients: recipe.ingredients ?? [],
-        steps: recipe.steps ?? [],
-        createdAt: new Date().toISOString(),
-      };
+    // Transform to RecipeDraft for mini player
+    const recipeDraft: RecipeDraft = {
+      title: savedRecipe.title,
+      description: savedRecipe.description,
+      ingredients: savedRecipe.ingredients,
+      steps: savedRecipe.steps,
+    };
 
-      transferToRecipeChat(savedRecipe, chatQuestion, () => {
-        setShowChatInput(false);
-      });
+    // Build recipe XML for AI context
+    const recipeXML = recipeToXML(savedRecipe);
+    const recipeContextMessage = `Here is the recipe the user is asking about:\n\n${recipeXML}`;
 
-      setShowChatInput(false);
-      setChatQuestion("");
-      setShowCollisionWarning(false);
-    }, 100);
+    // Atomically seed the new conversation (clear + seed in one operation, no race)
+    buildMessageIdRef.current = 0;
+    const userMessage: BuildMessage = {
+      id: ++buildMessageIdRef.current,
+      role: "user",
+      text: chatQuestion.trim(),
+    };
+
+    setBuildCurrentRecipe(recipeDraft);
+    setBuildMessages([userMessage]);
+    setBuildConversationHistory([
+      { role: "assistant", content: recipeContextMessage },
+      { role: "user", content: chatQuestion.trim() },
+    ]);
+    buildAutoFireAI.current = true;
+
+    // Navigate to Build
+    switchToTab("build");
+
+    // Clean up local state
+    setShowChatInput(false);
+    setChatQuestion("");
+    setShowCollisionWarning(false);
   };
 
   return (
@@ -2221,75 +2248,53 @@ function RecipeCard({
 
       {/* Slide-up chat input */}
       {showChatInput && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: 0,
-            left: 0,
-            right: 0,
-            background: "#FAF7F2",
-            borderTop: "1px solid rgba(35,60,0,0.08)",
-            padding: "12px 16px 24px",
-            zIndex: 50,
-            animation: "slideUpFromNav 300ms ease-out",
-            maxWidth: "480px",
-            margin: "0 auto",
-          }}
-        >
-          <style>{`
-            @keyframes slideUpFromNav {
-              from {
-                transform: translateY(100%);
-              }
-              to {
-                transform: translateY(0);
-              }
-            }
-          `}</style>
+        <>
+          {/* Backdrop to dismiss */}
           <div
+            onClick={() => {
+              setShowChatInput(false);
+              setChatQuestion("");
+            }}
             style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              marginBottom: "8px",
+              position: "fixed",
+              inset: 0,
+              background: "rgba(35,60,0,0.15)",
+              zIndex: 49,
+            }}
+          />
+          {/* Input bar */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: "fixed",
+              bottom: 64, // sits above nav bar
+              left: 0,
+              right: 0,
+              zIndex: 50,
+              animation: "slideUpFromNav 300ms ease-out",
+              maxWidth: "480px",
+              margin: "0 auto",
             }}
           >
-            <div
-              style={{
-                fontFamily: "Inter, sans-serif",
-                fontSize: "12px",
-                fontWeight: 500,
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                color: "rgba(35,60,0,0.5)",
-              }}
-            >
-              Ask about this recipe
-            </div>
-            <button
-              onClick={() => {
-                setShowChatInput(false);
-                setChatQuestion("");
-              }}
-              style={{
-                background: "transparent",
-                border: "none",
-                cursor: "pointer",
-                padding: "4px",
-                color: "rgba(35,60,0,0.5)",
-              }}
-            >
-              ✕
-            </button>
+            <style>{`
+              @keyframes slideUpFromNav {
+                from {
+                  transform: translateY(100%);
+                }
+                to {
+                  transform: translateY(0);
+                }
+              }
+            `}</style>
+            <CookInputBar
+              value={chatQuestion}
+              onChange={setChatQuestion}
+              onSend={handleChatSend}
+              placeholder="ask anything"
+              disabled={false}
+            />
           </div>
-          <CookInputBar
-            value={chatQuestion}
-            onChange={setChatQuestion}
-            onSend={handleChatSend}
-            placeholder="what would you like to know?"
-            disabled={false}
-          />
-        </div>
+        </>
       )}
 
       {/* Collision warning modal */}
