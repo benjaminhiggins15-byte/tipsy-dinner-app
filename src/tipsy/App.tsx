@@ -20,6 +20,7 @@ import {
   IconLayoutList,
   IconUser,
   IconRefresh,
+  IconMessageCircle,
 } from "@tabler/icons-react";
 
 // Helper to parse Server-Sent Events from Anthropic streaming API
@@ -172,6 +173,7 @@ function renderScreen(
   setBuildCurrentRecipe?: (recipe: RecipeDraft | null) => void,
   clearBuildConversation?: () => void,
   buildMessageIdRef?: React.MutableRefObject<number>,
+  transferToRecipeChat?: (recipe: SavedRecipe, question: string, onCollisionCancel: () => void) => void,
 ) {
   switch (s.name) {
     case "cook": return (
@@ -246,6 +248,9 @@ function renderScreen(
         back={back}
         push={push}
         clearRecipeCache={clearRecipeCache}
+        transferToRecipeChat={transferToRecipeChat}
+        buildMessagesCount={buildMessages?.length || 0}
+        clearBuildConversation={clearBuildConversation}
       />
     );
     case "occasions": return (
@@ -313,6 +318,7 @@ export default function App() {
   const [buildConversationHistory, setBuildConversationHistory] = useState<ConversationMessage[]>([]);
   const [buildCurrentRecipe, setBuildCurrentRecipe] = useState<RecipeDraft | null>(null);
   const buildMessageIdRef = useRef(0);
+  const buildAutoFireAI = useRef(false); // Flag to auto-fire AI on Build mount
 
   const profileInitialized = useRef(false);
 
@@ -746,6 +752,72 @@ export default function App() {
     }
   };
 
+  // Helper: Convert SavedRecipe to recipe XML format for AI context
+  const recipeToXML = (recipe: { title: string; description: string; ingredients: { name: string; qty: string }[]; steps: string[] }): string => {
+    const ingredientsXML = recipe.ingredients.map(ing =>
+      `<item><name>${ing.name}</name><qty>${ing.qty}</qty></item>`
+    ).join('\n');
+    const stepsXML = recipe.steps.map(step => `<step>${step}</step>`).join('\n');
+
+    return `<recipe>
+<title>${recipe.title}</title>
+<description>${recipe.description}</description>
+<ingredients>
+${ingredientsXML}
+</ingredients>
+<steps>
+${stepsXML}
+</steps>
+</recipe>`;
+  };
+
+  // Transfer to Build with a recipe and question
+  const transferToRecipeChat = (recipe: SavedRecipe, question: string, onCollisionCancel: () => void) => {
+    if (transition) return;
+
+    // Check for collision with existing conversation
+    if (buildMessages.length > 0) {
+      // Will be handled by caller showing modal
+      return;
+    }
+
+    // Transform SavedRecipe to RecipeDraft for mini player
+    const recipeDraft: RecipeDraft = {
+      title: recipe.title,
+      description: recipe.description,
+      ingredients: recipe.ingredients,
+      steps: recipe.steps,
+    };
+
+    // Set the recipe as the in-progress recipe (shows in mini player)
+    setBuildCurrentRecipe(recipeDraft);
+
+    // Create user message (visible in chat)
+    const userMessage: BuildMessage = {
+      id: ++buildMessageIdRef.current,
+      role: "user",
+      text: question.trim(),
+    };
+    setBuildMessages([userMessage]);
+
+    // Build conversation history with recipe context
+    // The recipe XML goes into history for the AI but NOT as a visible message
+    const recipeXML = recipeToXML(recipe);
+    const recipeContextMessage = `Here is the recipe the user is asking about:\n\n${recipeXML}`;
+
+    // Seed history: recipe context (as assistant) + user question
+    setBuildConversationHistory([
+      { role: "assistant", content: recipeContextMessage },
+      { role: "user", content: question.trim() },
+    ]);
+
+    // Set flag to auto-fire AI call when Cook mounts
+    buildAutoFireAI.current = true;
+
+    // Navigate to Build tab
+    switchToTab("build");
+  };
+
   // Clear Build conversation and start fresh
   const clearBuildConversation = () => {
     if (transition) return; // Guard against concurrent transitions
@@ -903,6 +975,7 @@ export default function App() {
           setBuildCurrentRecipe={setBuildCurrentRecipe}
           clearBuildConversation={clearBuildConversation}
           buildMessageIdRef={buildMessageIdRef}
+          transferToRecipeChat={transferToRecipeChat}
         />
         <BottomTabBar activeTab={activeTab} onTabClick={switchToTab} />
       </div>
@@ -1061,6 +1134,7 @@ function ScreenStage({
   setBuildCurrentRecipe,
   clearBuildConversation,
   buildMessageIdRef,
+  transferToRecipeChat,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back"; fromIsTabRoot?: boolean; toIsTabRoot?: boolean } | null;
@@ -1087,6 +1161,7 @@ function ScreenStage({
   setBuildCurrentRecipe: (recipe: RecipeDraft | null) => void;
   clearBuildConversation: () => void;
   buildMessageIdRef: React.MutableRefObject<number>;
+  transferToRecipeChat: (recipe: SavedRecipe, question: string, onCollisionCancel: () => void) => void;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
@@ -1176,7 +1251,7 @@ function ScreenStage({
         pointerEvents: isTransitioning ? "none" : "auto",
         paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
       }}>
-        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef)}
+        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat)}
       </div>
 
       {/* Overlay layer - only during transitions, renders from screen */}
@@ -1189,7 +1264,7 @@ function ScreenStage({
           pointerEvents: "none",
           paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
         }}>
-          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef)}
+          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat)}
         </div>
       )}
     </div>
@@ -1634,6 +1709,9 @@ function RecipeCard({
   back,
   push,
   clearRecipeCache,
+  transferToRecipeChat,
+  buildMessagesCount,
+  clearBuildConversation,
 }: {
   recipe: Recipe;
   categoryLabel: string;
@@ -1641,10 +1719,16 @@ function RecipeCard({
   back: () => void;
   push: (s: Screen) => void;
   clearRecipeCache?: (categoryKey: string) => void;
+  transferToRecipeChat?: (recipe: SavedRecipe, question: string, onCollisionCancel: () => void) => void;
+  buildMessagesCount?: number;
+  clearBuildConversation?: () => void;
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [shareConfirm, setShareConfirm] = useState(false);
+  const [showChatInput, setShowChatInput] = useState(false);
+  const [chatQuestion, setChatQuestion] = useState("");
+  const [showCollisionWarning, setShowCollisionWarning] = useState(false);
   const ingredients = recipe.ingredients ?? [];
   const steps = recipe.steps ?? [];
   const editable = recipe.savedId != null;
@@ -1672,6 +1756,67 @@ function RecipeCard({
       }
     }
   }
+
+  const handleChatIconClick = () => {
+    setShowChatInput(true);
+  };
+
+  const handleChatSend = () => {
+    if (!chatQuestion.trim() || !transferToRecipeChat || !recipe.savedId) return;
+
+    // Check for collision
+    if (buildMessagesCount && buildMessagesCount > 0) {
+      setShowCollisionWarning(true);
+      return;
+    }
+
+    // Convert Recipe to SavedRecipe format for transfer
+    const savedRecipe: SavedRecipe = {
+      id: recipe.savedId,
+      title: recipe.title,
+      description: recipe.description,
+      category: categoryKey,
+      ingredients: recipe.ingredients ?? [],
+      steps: recipe.steps ?? [],
+      createdAt: new Date().toISOString(),
+    };
+
+    transferToRecipeChat(savedRecipe, chatQuestion, () => {
+      setShowChatInput(false);
+    });
+
+    // Close the input after transfer
+    setShowChatInput(false);
+    setChatQuestion("");
+  };
+
+  const handleCollisionConfirm = () => {
+    if (!chatQuestion.trim() || !transferToRecipeChat || !recipe.savedId || !clearBuildConversation) return;
+
+    // Clear existing conversation
+    clearBuildConversation();
+
+    // Small delay to let state settle
+    setTimeout(() => {
+      const savedRecipe: SavedRecipe = {
+        id: recipe.savedId!,
+        title: recipe.title,
+        description: recipe.description,
+        category: categoryKey,
+        ingredients: recipe.ingredients ?? [],
+        steps: recipe.steps ?? [],
+        createdAt: new Date().toISOString(),
+      };
+
+      transferToRecipeChat(savedRecipe, chatQuestion, () => {
+        setShowChatInput(false);
+      });
+
+      setShowChatInput(false);
+      setChatQuestion("");
+      setShowCollisionWarning(false);
+    }, 100);
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -2048,6 +2193,198 @@ function RecipeCard({
         </div>
       )}
 
+      {/* Floating chat icon */}
+      {editable && transferToRecipeChat && (
+        <button
+          onClick={handleChatIconClick}
+          style={{
+            position: "fixed",
+            bottom: "80px", // Above nav bar
+            right: "20px",
+            width: "56px",
+            height: "56px",
+            borderRadius: "50%",
+            background: "#1E3A42",
+            border: "none",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 10,
+            boxShadow: "0 4px 12px rgba(35,60,0,0.2)",
+          }}
+          aria-label="Chat about this recipe"
+        >
+          <IconMessageCircle size={24} stroke={1.5} color="#FEE7C0" />
+        </button>
+      )}
+
+      {/* Slide-up chat input */}
+      {showChatInput && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            background: "#FAF7F2",
+            borderTop: "1px solid rgba(35,60,0,0.08)",
+            padding: "12px 16px 24px",
+            zIndex: 50,
+            animation: "slideUpFromNav 300ms ease-out",
+            maxWidth: "480px",
+            margin: "0 auto",
+          }}
+        >
+          <style>{`
+            @keyframes slideUpFromNav {
+              from {
+                transform: translateY(100%);
+              }
+              to {
+                transform: translateY(0);
+              }
+            }
+          `}</style>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: "8px",
+            }}
+          >
+            <div
+              style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: "12px",
+                fontWeight: 500,
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                color: "rgba(35,60,0,0.5)",
+              }}
+            >
+              Ask about this recipe
+            </div>
+            <button
+              onClick={() => {
+                setShowChatInput(false);
+                setChatQuestion("");
+              }}
+              style={{
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                padding: "4px",
+                color: "rgba(35,60,0,0.5)",
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          <CookInputBar
+            value={chatQuestion}
+            onChange={setChatQuestion}
+            onSend={handleChatSend}
+            placeholder="what would you like to know?"
+            disabled={false}
+          />
+        </div>
+      )}
+
+      {/* Collision warning modal */}
+      {showCollisionWarning && (
+        <div
+          onClick={() => setShowCollisionWarning(false)}
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "rgba(35,60,0,0.25)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 20,
+            padding: 24,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 16,
+              padding: "24px 20px",
+              width: "100%",
+              maxWidth: 280,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              border: "0.5px solid rgba(35,60,0,0.1)",
+            }}
+          >
+            <div
+              style={{
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 16,
+                fontWeight: 700,
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+                color: "#233C00",
+                textAlign: "center",
+              }}
+            >
+              Start new chat?
+            </div>
+            <div
+              style={{
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 13,
+                color: "#233C00",
+                textAlign: "center",
+                marginBottom: 12,
+              }}
+            >
+              Starting a new chat will clear your current conversation.
+            </div>
+            <button
+              onClick={() => setShowCollisionWarning(false)}
+              style={{
+                width: "100%",
+                padding: "12px",
+                borderRadius: 10,
+                background: "transparent",
+                border: "0.5px solid rgba(35,60,0,0.1)",
+                color: "#233C00",
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCollisionConfirm}
+              style={{
+                width: "100%",
+                padding: "12px",
+                borderRadius: 10,
+                background: "#FEE7C0",
+                border: "none",
+                color: "#233C00",
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 13,
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.04em",
+                cursor: "pointer",
+              }}
+            >
+              Start new chat
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Share confirmation toast */}
       {shareConfirm && (
         <div
@@ -2166,6 +2503,241 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
       return () => clearTimeout(timer);
     }
   }, [recipePulse]);
+
+  // Auto-fire AI call when transferring from recipe chat
+  const autoFireRef = useRef(false);
+  useEffect(() => {
+    // Check if this is a transferred conversation that needs auto-fire
+    // Condition: conversationHistory has user question + recipe context, but no AI response yet
+    const needsAutoFire =
+      !autoFireRef.current &&
+      !typing &&
+      messages.length === 1 &&
+      messages[0].role === "user" &&
+      conversationHistory.length >= 2 &&
+      conversationHistory[conversationHistory.length - 1].role === "user";
+
+    if (needsAutoFire) {
+      autoFireRef.current = true; // Mark as fired to prevent re-firing
+      // Fire AI call with the existing conversation history
+      fireAICall(conversationHistory);
+    }
+  }, [messages, conversationHistory, typing]);
+
+  const fireAICall = async (history: ConversationMessage[]) => {
+    setTyping(true);
+    setGeneratingRecipe(false);
+
+    // Load user profile from state
+    const palate = profile?.palate || "";
+    const inspiration = profile?.inspiration || "";
+    const constraints = profile?.constraints || "";
+
+    try {
+      console.log("Calling AI chat API (auto-fire)...");
+
+      // Get Supabase anon key for authorization
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      if (!supabaseAnonKey) {
+        throw new Error("Supabase key not found");
+      }
+
+      // Build system prompt (same as sendMessage)
+      const systemPrompt = `You are the cooking assistant inside Tipsy Dinner, a personal recipe app. Your job is to help the user figure out what they want to make, then create a recipe once they've landed on something. Think of yourself as a knowledgeable friend who happens to be standing in the kitchen with them — confident, direct, and warm, but never performative or gushing.
+Your two modes:
+Brainstorm mode — helping the user land on a dish. Stay here until they've chosen something specific and want a recipe built.
+Recipe mode — only enter this when the user has chosen a specific dish and indicated they want the recipe. Never jump here early.
+Brainstorm mode rules:
+If the request is broad or the cuisine direction is still open, ask one focused question before offering suggestions. Broad means anything where cuisine type, protein, occasion, or dietary direction is still unknown. Do not offer suggestions until you have enough to make them meaningful.
+Once you have enough to go on, always open with one short natural line before the suggestions — something like 'a few ideas' or 'here's where I'd go' — then offer three to five specific, concrete suggestions. Never lead directly with a bolded dish name. There must always be a line of prose before the list. Not "a pasta dish" but "cacio e pepe with lemon zest." Make them sound genuinely good. Format each suggestion with the dish name in bold, followed by an em dash, then the description on the same line. Example: **Grilled little gem wedges** — halved, charred face-down until edges crisp, hit with olive oil and flaky salt. Never bold full sentences or descriptive copy — only the dish name itself.
+If the user says "show me more," offer another round of equally specific suggestions in the same format.
+Close each round of suggestions with a short directional question. Vary the phrasing. Never use the same closing line twice in a conversation.
+If the user gives you a very short or one-word answer and it's enough to go on, acknowledge it briefly in one short phrase before moving into suggestions — something like 'good call' or 'light bites it is' — then go straight into the list. Only ask a follow-up if the answer genuinely isn't enough to proceed.
+When the user lands on a dish, confirm and move to recipe mode. If they pick more than one dish, start with one and sequence them — never build multiple recipes at once.
+Recipe mode rules:
+Only enter recipe mode when the user has chosen a specific dish and wants it built.
+Open with a natural one to two sentence handoff before the ingredient list. This is the moment to sound most like a person. Never lead cold with an ingredient list.
+Format: dish title, one-line description, then ingredients and steps. Ingredients as a clean list. Steps in plain prose, not numbered bullets.
+When updating a recipe based on user feedback, always confirm it with a short natural line above the updated recipe block — something like 'done, doubled below' or 'updated the recipe below.' Never let an updated recipe block appear with no text above it. No re-explanation of what changed unless the user asks.
+Technique and tangent questions:
+Answer wine pairing, technique, equipment, and any other cooking questions naturally as part of the conversation. Never preface these with a comment about what kind of question it is. Just answer it like a person would.
+Do not trigger a recipe card update for conversational tangents. Only update the card when the user is explicitly iterating on the recipe itself.
+General rules:
+No markdown formatting except bold for dish names in brainstorm lists. Never use asterisks for anything other than bolding item names in lists. No headers, no bullet points in responses. Plain conversational prose everywhere else.
+Never pepper the user with questions. One question maximum before committing to something useful.
+Anchor to the user's stated parameters throughout the entire conversation. If they say light and summery, every suggestion stays light and summery until they explicitly change direction.
+Never acknowledge what type of question is being asked. Never categorize a request before answering it. Just answer.
+Never reference the user's profile explicitly. Let it shape every suggestion invisibly.
+User profile:
+Palate: ${palate || "Not specified"}
+Inspiration: ${inspiration || "Not specified"}
+Constraints: ${constraints || "Not specified"}
+When you are ready to present a recipe, use this exact format:
+
+<recipe>
+<title>Recipe Title Here</title>
+<description>One-sentence description</description>
+<ingredients>
+<item><name>Ingredient name</name><qty>Amount</qty></item>
+<item><name>Another ingredient</name><qty>Amount</qty></item>
+</ingredients>
+<steps>
+<step>First step instructions</step>
+<step>Second step instructions</step>
+</steps>
+</recipe>
+
+Use this format every time a recipe is created or updated. Never deviate from it. The text above the recipe block should always be a natural one to two sentence handoff as described above — never let the recipe block appear with no text above it.
+
+In the recipe JSON, the ingredient name field must contain only the ingredient name — never include quantity, amount, or preparation notes in the name field. All quantity information including amount, unit, and preparation notes must go in the quantity field only.`;
+
+      // Call Supabase Edge Function
+      const response = await fetch(
+        "https://xzpmmthreeyscidhwriv.supabase.co/functions/v1/ai-chat",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${supabaseAnonKey}`,
+          },
+          body: JSON.stringify({
+            messages: history,
+            systemPrompt: systemPrompt,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Edge Function error: ${errorText}`);
+      }
+
+      const stream = parseSSEStream(response);
+
+      // Create AI message immediately
+      setTyping(false);
+      const aiMessageId = ++messageIdRef.current;
+      setMessages((m) => [...m, { id: aiMessageId, role: "ai", text: "" }]);
+
+      let fullText = "";
+
+      for await (const chunk of stream) {
+        if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
+          fullText += chunk.delta.text;
+
+          // Detect if recipe generation has started
+          if (!generatingRecipe && fullText.includes("<recipe>")) {
+            setGeneratingRecipe(true);
+          }
+
+          // Strip recipe XML from display text
+          let displayText = fullText;
+          displayText = displayText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "");
+          const recipeStartIndex = displayText.indexOf("<recipe>");
+          if (recipeStartIndex !== -1) {
+            displayText = displayText.substring(0, recipeStartIndex);
+          }
+          displayText = displayText.trim();
+
+          setMessages((m) => m.map(msg =>
+            msg.id === aiMessageId ? { ...msg, text: displayText } : msg
+          ));
+        }
+      }
+
+      console.log("Anthropic response received");
+
+      if (!fullText) {
+        throw new Error("Empty response from API");
+      }
+
+      // Parse for recipe XML
+      const recipeMatch = fullText.match(/<recipe>([\s\S]*?)<\/recipe>/);
+      let parsedRecipe = null;
+
+      if (recipeMatch) {
+        const recipeXml = recipeMatch[1];
+
+        const titleMatch = recipeXml.match(/<title>(.*?)<\/title>/);
+        const descMatch = recipeXml.match(/<description>(.*?)<\/description>/);
+        const ingredientsMatch = recipeXml.match(/<ingredients>([\s\S]*?)<\/ingredients>/);
+        const stepsMatch = recipeXml.match(/<steps>([\s\S]*?)<\/steps>/);
+
+        const ingredients: { name: string; qty: string }[] = [];
+        if (ingredientsMatch) {
+          const itemMatches = [
+            ...ingredientsMatch[1].matchAll(
+              /<item>[\s\S]*?<name>(.*?)<\/name>[\s\S]*?<qty>(.*?)<\/qty>[\s\S]*?<\/item>/g
+            ),
+          ];
+          for (const match of itemMatches) {
+            ingredients.push({ name: match[1].trim(), qty: match[2].trim() });
+          }
+        }
+
+        const steps: string[] = [];
+        if (stepsMatch) {
+          const stepMatches = [...stepsMatch[1].matchAll(/<step>(.*?)<\/step>/g)];
+          for (const match of stepMatches) {
+            steps.push(match[1].trim());
+          }
+        }
+
+        if (titleMatch && descMatch && ingredients.length > 0 && steps.length > 0) {
+          parsedRecipe = {
+            title: titleMatch[1].trim(),
+            description: descMatch[1].trim(),
+            ingredients,
+            steps,
+          };
+          console.log("Recipe parsed:", parsedRecipe.title);
+        }
+      }
+
+      // Final update to ensure clean text without recipe XML
+      const displayText = fullText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "").trim();
+      setMessages((m) => m.map(msg =>
+        msg.id === aiMessageId ? { ...msg, text: displayText || "..." } : msg
+      ));
+
+      // Update conversation history
+      setConversationHistory([...history, { role: "assistant", content: fullText }]);
+
+      // Handle recipe if present (update the existing recipe)
+      if (parsedRecipe) {
+        setCurrentRecipe(parsedRecipe);
+        setGeneratingRecipe(false);
+
+        // Trigger mini player animation
+        if (!recipeRevealed) {
+          setRecipeRevealed(true);
+          setTimeout(() => {
+            setMiniBarVisible(true);
+            setTimeout(() => {
+              setMiniTitleVisible(true);
+              setRecipePulse(true);
+            }, 200);
+          }, 300);
+        } else {
+          setMiniBarVisible(true);
+          setMiniTitleVisible(true);
+          setRecipePulse(true);
+        }
+      }
+    } catch (error) {
+      console.error("Error in auto-fire AI call:", error);
+      setTyping(false);
+      setGeneratingRecipe(false);
+      setMessages((m) => [
+        ...m,
+        {
+          id: ++messageIdRef.current,
+          role: "ai",
+          text: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
+        },
+      ]);
+    }
+  };
 
   const sendMessage = async () => {
     if (!input.trim() || typing) return;
