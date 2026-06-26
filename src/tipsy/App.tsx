@@ -1733,7 +1733,6 @@ function RecipeCard({
   const [shareConfirm, setShareConfirm] = useState(false);
   const [showChatInput, setShowChatInput] = useState(false);
   const [chatQuestion, setChatQuestion] = useState("");
-  const [showCollisionWarning, setShowCollisionWarning] = useState(false);
   const ingredients = recipe.ingredients ?? [];
   const steps = recipe.steps ?? [];
   const editable = recipe.savedId != null;
@@ -1767,35 +1766,6 @@ function RecipeCard({
   };
 
   const handleChatSend = () => {
-    if (!chatQuestion.trim() || !transferToRecipeChat || !recipe.savedId) return;
-
-    // Check for collision
-    if (buildMessagesCount && buildMessagesCount > 0) {
-      setShowCollisionWarning(true);
-      return;
-    }
-
-    // Convert Recipe to SavedRecipe format for transfer
-    const savedRecipe: SavedRecipe = {
-      id: recipe.savedId,
-      title: recipe.title,
-      description: recipe.description,
-      category: categoryKey,
-      ingredients: recipe.ingredients ?? [],
-      steps: recipe.steps ?? [],
-      createdAt: new Date().toISOString(),
-    };
-
-    transferToRecipeChat(savedRecipe, chatQuestion, () => {
-      setShowChatInput(false);
-    });
-
-    // Close the input after transfer
-    setShowChatInput(false);
-    setChatQuestion("");
-  };
-
-  const handleCollisionConfirm = () => {
     if (!chatQuestion.trim() || !recipe.savedId) return;
 
     const savedRecipe: SavedRecipe = {
@@ -1820,7 +1790,7 @@ function RecipeCard({
     const recipeXML = recipeToXML(savedRecipe);
     const recipeContextMessage = `Here is the recipe the user is asking about:\n\n${recipeXML}`;
 
-    // Atomically seed the new conversation (clear + seed in one operation, no race)
+    // Atomically seed the conversation (replaces any existing conversation silently)
     buildMessageIdRef.current = 0;
     const userMessage: BuildMessage = {
       id: ++buildMessageIdRef.current,
@@ -1842,7 +1812,6 @@ function RecipeCard({
     // Clean up local state
     setShowChatInput(false);
     setChatQuestion("");
-    setShowCollisionWarning(false);
   };
 
   return (
@@ -2249,7 +2218,7 @@ function RecipeCard({
       {/* Slide-up chat input */}
       {showChatInput && (
         <>
-          {/* Backdrop to dismiss */}
+          {/* Backdrop to dismiss (covers content area only, not nav bar) */}
           <div
             onClick={() => {
               setShowChatInput(false);
@@ -2257,29 +2226,32 @@ function RecipeCard({
             }}
             style={{
               position: "fixed",
-              inset: 0,
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 64,
               background: "rgba(35,60,0,0.15)",
               zIndex: 49,
             }}
           />
-          {/* Input bar */}
+          {/* Input bar (flush above nav bar) */}
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
               position: "fixed",
-              bottom: 64, // sits above nav bar
+              bottom: 64,
               left: 0,
               right: 0,
-              zIndex: 50,
-              animation: "slideUpFromNav 300ms ease-out",
               maxWidth: "480px",
               margin: "0 auto",
+              zIndex: 50,
+              animation: "slideUpFromNav 300ms ease-out",
             }}
           >
             <style>{`
               @keyframes slideUpFromNav {
                 from {
-                  transform: translateY(100%);
+                  transform: translateY(calc(100% + 64px));
                 }
                 to {
                   transform: translateY(0);
@@ -2295,99 +2267,6 @@ function RecipeCard({
             />
           </div>
         </>
-      )}
-
-      {/* Collision warning modal */}
-      {showCollisionWarning && (
-        <div
-          onClick={() => setShowCollisionWarning(false)}
-          style={{
-            position: "absolute",
-            inset: 0,
-            background: "rgba(35,60,0,0.25)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 20,
-            padding: 24,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: "#FAF7F2",
-              borderRadius: 16,
-              padding: "24px 20px",
-              width: "100%",
-              maxWidth: 280,
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-              border: "0.5px solid rgba(35,60,0,0.1)",
-            }}
-          >
-            <div
-              style={{
-                fontFamily: "'Inter', sans-serif",
-                fontSize: 16,
-                fontWeight: 700,
-                letterSpacing: "0.04em",
-                textTransform: "uppercase",
-                color: "#233C00",
-                textAlign: "center",
-              }}
-            >
-              Start new chat?
-            </div>
-            <div
-              style={{
-                fontFamily: "'Inter', sans-serif",
-                fontSize: 13,
-                color: "#233C00",
-                textAlign: "center",
-                marginBottom: 12,
-              }}
-            >
-              Starting a new chat will clear your current conversation.
-            </div>
-            <button
-              onClick={() => setShowCollisionWarning(false)}
-              style={{
-                width: "100%",
-                padding: "12px",
-                borderRadius: 10,
-                background: "transparent",
-                border: "0.5px solid rgba(35,60,0,0.1)",
-                color: "#233C00",
-                fontFamily: "'Inter', sans-serif",
-                fontSize: 13,
-                fontWeight: 500,
-                cursor: "pointer",
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleCollisionConfirm}
-              style={{
-                width: "100%",
-                padding: "12px",
-                borderRadius: 10,
-                background: "#FEE7C0",
-                border: "none",
-                color: "#233C00",
-                fontFamily: "'Inter', sans-serif",
-                fontSize: 13,
-                fontWeight: 700,
-                textTransform: "uppercase",
-                letterSpacing: "0.04em",
-                cursor: "pointer",
-              }}
-            >
-              Start new chat
-            </button>
-          </div>
-        </div>
       )}
 
       {/* Share confirmation toast */}
