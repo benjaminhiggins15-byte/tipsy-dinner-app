@@ -249,8 +249,6 @@ function renderScreen(
         push={push}
         clearRecipeCache={clearRecipeCache}
         transferToRecipeChat={transferToRecipeChat}
-        buildMessagesCount={buildMessages?.length || 0}
-        clearBuildConversation={clearBuildConversation}
       />
     );
     case "occasions": return (
@@ -775,11 +773,9 @@ ${stepsXML}
   const transferToRecipeChat = (recipe: SavedRecipe, question: string, onCollisionCancel: () => void) => {
     if (transition) return;
 
-    // Check for collision with existing conversation
-    if (buildMessages.length > 0) {
-      // Will be handled by caller showing modal
-      return;
-    }
+    // Atomically seed new conversation (silently replaces any existing conversation)
+    // Reset message ID counter for fresh conversation
+    buildMessageIdRef.current = 0;
 
     // Transform SavedRecipe to RecipeDraft for mini player
     const recipeDraft: RecipeDraft = {
@@ -1715,8 +1711,6 @@ function RecipeCard({
   push,
   clearRecipeCache,
   transferToRecipeChat,
-  buildMessagesCount,
-  clearBuildConversation,
 }: {
   recipe: Recipe;
   categoryLabel: string;
@@ -1725,8 +1719,6 @@ function RecipeCard({
   push: (s: Screen) => void;
   clearRecipeCache?: (categoryKey: string) => void;
   transferToRecipeChat?: (recipe: SavedRecipe, question: string, onCollisionCancel: () => void) => void;
-  buildMessagesCount?: number;
-  clearBuildConversation?: () => void;
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1766,8 +1758,9 @@ function RecipeCard({
   };
 
   const handleChatSend = () => {
-    if (!chatQuestion.trim() || !recipe.savedId) return;
+    if (!chatQuestion.trim() || !transferToRecipeChat || !recipe.savedId) return;
 
+    // Build SavedRecipe object from card data
     const savedRecipe: SavedRecipe = {
       id: recipe.savedId!,
       title: recipe.title,
@@ -1778,36 +1771,10 @@ function RecipeCard({
       createdAt: new Date().toISOString(),
     };
 
-    // Transform to RecipeDraft for mini player
-    const recipeDraft: RecipeDraft = {
-      title: savedRecipe.title,
-      description: savedRecipe.description,
-      ingredients: savedRecipe.ingredients,
-      steps: savedRecipe.steps,
-    };
-
-    // Build recipe XML for AI context
-    const recipeXML = recipeToXML(savedRecipe);
-    const recipeContextMessage = `Here is the recipe the user is asking about:\n\n${recipeXML}`;
-
-    // Atomically seed the conversation (replaces any existing conversation silently)
-    buildMessageIdRef.current = 0;
-    const userMessage: BuildMessage = {
-      id: ++buildMessageIdRef.current,
-      role: "user",
-      text: chatQuestion.trim(),
-    };
-
-    setBuildCurrentRecipe(recipeDraft);
-    setBuildMessages([userMessage]);
-    setBuildConversationHistory([
-      { role: "assistant", content: recipeContextMessage },
-      { role: "user", content: chatQuestion.trim() },
-    ]);
-    buildAutoFireAI.current = true;
-
-    // Navigate to Build
-    switchToTab("build");
+    // Transfer to Build with question (App-level function handles seeding + navigation)
+    transferToRecipeChat(savedRecipe, chatQuestion, () => {
+      setShowChatInput(false);
+    });
 
     // Clean up local state
     setShowChatInput(false);
