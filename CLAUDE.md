@@ -77,15 +77,15 @@ All content sits above this at `z-index: 1`. The gradient fades naturally into t
 
 ## Logo Assets
 
-Three versions in `src/assets/`:
+Three versions in `src/Logos/`:
 - `Full_Logo.png` — full "tipsy DINNER" wordmark lockup. Used on splash screen only.
 - `watermark_square.png` — square tD monogram on green background. Used in Build screen top-left and mini player.
 - `watermark_circle.png` — circular tD monogram. Available if needed.
 
 **Import example:**
 ```js
-import tDSquare from '../assets/watermark_square.png'
-import fullLogo from '../assets/Full_Logo.png'
+import tDSquare from '../Logos/watermark_square.png'
+import fullLogo from '../Logos/Full_Logo.png'
 ```
 
 **Logo usage rules:**
@@ -319,6 +319,62 @@ tipsyDinnerTable
 
 ---
 
+## Build Conversation Persistence
+
+**Why**: Previously, Build's conversation state lived in the Cook component and was destroyed on unmount (e.g., when switching tabs or saving a recipe). Users lost their conversation mid-flow.
+
+**Solution**: Build conversation state is lifted to App-level (lines 314-319 in `App.tsx`):
+- `buildMessages` — visible chat messages
+- `buildConversationHistory` — full history sent to AI (includes system messages not shown as bubbles)
+- `buildCurrentRecipe` — in-progress recipe shown in mini player
+- `buildMessageIdRef` — message ID counter
+- `buildAutoFireAI` — flag to trigger AI on Build mount (used by recipe chat transfer)
+
+These survive tab switches, navigation, and save flows. Cook receives them as props and renders/updates them, but doesn't own them.
+
+**Clear functions**:
+- `clearBuildStateOnly()` (line 818) — resets the four state pieces above, no transition or navigation. Used when seeding needs to atomically replace state.
+- `clearBuildConversation()` (line 826) — calls `clearBuildStateOnly()`, then triggers a 300ms slide-back transition to a fresh Cook screen (with new `resetKey`). This is what the refresh button uses.
+
+**Refresh button**:
+- Top-right of Build's active state, hidden when `isEmpty` (line 3122: `{!isEmpty && (...)}`).
+- Tapping opens a confirmation modal (lines 3415-3502) reusing the delete-confirm pattern.
+- On confirm, calls `onClearConversation` prop (wired to `clearBuildConversation`), which runs the animated clear.
+
+---
+
+## Chat from Recipe Card
+
+**Entry point**: Floating chat icon on saved recipes in the in-app Recipe Card (line 2160: `{editable && transferToRecipeChat && (...)}` — gated on `recipe.savedId`). NOT present on the public route `r.$token.tsx` (separate component, must stay chrome-free).
+
+**Interaction flow**:
+1. User taps chat icon → slides up a `CookInputBar` docked flush above nav bar (bottom: 64px, line 2209)
+2. User types question and taps send
+3. `handleChatSend` (line 1760 in RecipeCard) builds `SavedRecipe` object, calls `transferToRecipeChat` prop
+4. Slide-up bar closes, user lands in Build with seeded conversation, AI auto-fires
+
+**Dismiss**: Tap-outside-to-close via backdrop (lines 2188-2198, covers content area only, not nav). Tapping inside the bar stops propagation so it doesn't close.
+
+**Transfer path** (`transferToRecipeChat`, line 773):
+- **IMPORTANT**: RecipeCard is a module-level component with NO closure access to App scope. Seeding/navigation logic must go through props like `transferToRecipeChat`. Never call App-level functions (`setBuildMessages`, `switchToTab`, `recipeToXML`, etc.) directly from RecipeCard — they're undefined there and will crash silently.
+- Single transfer path for both empty and active Build (no collision warning).
+- Atomically seeds:
+  - In-progress recipe (mini player): `setBuildCurrentRecipe(recipeDraft)` (line 789)
+  - User's question as first message: `setBuildMessages([userMessage])` (line 797)
+  - Full recipe injected into conversation history as XML: `setBuildConversationHistory([assistantContext, userMessage])` (lines 805-808)
+- Recipe XML format: `recipeToXML()` helper (line 754) converts recipe to structured XML matching the system prompt's recipe format. The XML lives ONLY in `conversationHistory` sent to the API, never rendered as a visible chat bubble.
+- Navigates to Build: `switchToTab("build")` (line 814)
+
+**Auto-fire on arrival**:
+- Cook's `useEffect` (lines 2360-2376) detects seeded conversation on mount.
+- Triggers when: `messages.length === 1`, `messages[0].role === "user"`, `conversationHistory.length >= 2`, last history entry is from user.
+- Guarded by `autoFireRef` to prevent double-firing.
+- Immediately fires AI call with the seeded history (line 2374: `fireAICall(conversationHistory)`).
+
+**Why inject full recipe**: Users ask recipe-specific questions ("can I substitute X?", "how long does step 2 take?"). The AI needs ingredients and steps in context to answer accurately. Recipe context is transparent to the user (not shown as a chat bubble), but present in every AI request.
+
+---
+
 ## Session Rules for Claude Code
 
 - Design decisions are made in Claude.ai first — never figure out design in Claude Code
@@ -383,6 +439,8 @@ tipsyDinnerTable
 - Tab-return data loss bug FIXED — Supabase fires duplicate SIGNED_IN events on tab refocus; profileInitialized ref in onAuthStateChange ignores subsequent events after initial sign-in ✓
 - Full-screen layout — fixed 320×640 mockup frame removed; app now renders full-screen on real device viewport. S.page and S.phone in App.tsx use shared CSS class `td-fullscreen-height` (height:100vh with height:100dvh override). S.phone: width:100%, maxWidth:480, safe-area insets at container level via paddingTop/paddingBottom env(safe-area-inset-*). Verified on real phone via Vercel branch preview ✓
 - iOS input auto-zoom prevented — all input/textarea fields raised to fontSize:16 (TextInput, TextArea, EditInput, NameInput, inputStyleBase, Build chat textarea). Stops Safari auto-zoom-on-focus while preserving pinch-zoom ✓
+- Build conversation persistence — Build state (messages, history, current recipe) lifted to App scope, survives tab switches and save flows. Refresh button with animated clear (300ms slide transition). clearBuildConversation + clearBuildStateOnly helpers ✓
+- Chat from recipe card — floating chat icon on saved recipes, slide-up input bar, transfers to Build with full recipe context injected as XML, auto-fires AI on arrival. Single transfer path (no collision warning). RecipeCard → transferToRecipeChat prop pattern (module-level component, no App-scope closure) ✓
 
 **Known issues (next session priorities, in order):**
 - Saving a menu fails — data/logic bug, deferred from layout pass, needs dedicated session
@@ -410,5 +468,4 @@ tipsyDinnerTable
 
 **Not yet built:**
 - Splash screen
-- Streaming responses
 - Search
