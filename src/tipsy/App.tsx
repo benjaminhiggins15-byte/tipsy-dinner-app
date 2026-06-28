@@ -86,6 +86,25 @@ type ProfileType = {
   onboarding_complete: boolean;
 };
 
+// Helper: Convert recipe to XML format for AI context (used in App and Cook components)
+const recipeToXML = (recipe: { title: string; description: string; ingredients: { name: string; qty: string }[]; steps: string[] }): string => {
+  const ingredientsXML = recipe.ingredients.map(ing =>
+    `<item><name>${ing.name}</name><qty>${ing.qty}</qty></item>`
+  ).join('\n');
+  const stepsXML = recipe.steps.map(step => `<step>${step}</step>`).join('\n');
+
+  return `<recipe>
+<title>${recipe.title}</title>
+<description>${recipe.description}</description>
+<ingredients>
+${ingredientsXML}
+</ingredients>
+<steps>
+${stepsXML}
+</steps>
+</recipe>`;
+};
+
 type Screen =
   | { name: "cook"; newCategory?: { key: string; label: string }; draft?: RecipeDraft; resetKey?: number }
   | { name: "addown"; editRecipe?: Recipe; editCategoryLabel?: string; draft?: RecipeDraft & { trayOpen?: boolean; newCategory?: { key: string; label: string } } }
@@ -748,25 +767,6 @@ export default function App() {
         }];
       });
     }
-  };
-
-  // Helper: Convert SavedRecipe to recipe XML format for AI context
-  const recipeToXML = (recipe: { title: string; description: string; ingredients: { name: string; qty: string }[]; steps: string[] }): string => {
-    const ingredientsXML = recipe.ingredients.map(ing =>
-      `<item><name>${ing.name}</name><qty>${ing.qty}</qty></item>`
-    ).join('\n');
-    const stepsXML = recipe.steps.map(step => `<step>${step}</step>`).join('\n');
-
-    return `<recipe>
-<title>${recipe.title}</title>
-<description>${recipe.description}</description>
-<ingredients>
-${ingredientsXML}
-</ingredients>
-<steps>
-${stepsXML}
-</steps>
-</recipe>`;
   };
 
   // Transfer to Build with a recipe and question
