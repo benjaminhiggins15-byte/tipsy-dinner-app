@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, shareRecipe, type Recipe, type Occasion, type Menu, type SavedRecipe, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection } from "./data";
+import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, shareRecipe, type Recipe, type Occasion, type Menu, type SavedRecipe, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
@@ -64,6 +64,7 @@ type RecipeDraft = {
   description: string;
   ingredients: { name: string; qty: string }[];
   steps: string[];
+  sourceId?: string; // Optional: tracks the saved recipe this draft originated from (for update-vs-save-as-new)
 };
 
 type BuildMessage = {
@@ -783,6 +784,7 @@ export default function App() {
       description: recipe.description,
       ingredients: recipe.ingredients,
       steps: recipe.steps,
+      sourceId: String(recipe.id), // Preserve origin for update-vs-save-as-new choice
     };
 
     // Set the recipe as the in-progress recipe (shows in mini player)
@@ -2313,6 +2315,9 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
 
   const [trayOpen, setTrayOpen] = useState(!!screen.newCategory);
   const [newCategorySelection, setNewCategorySelection] = useState<{ key: string; label: string } | null>(screen.newCategory || null);
+  const [showUpdateChoice, setShowUpdateChoice] = useState(false); // Two-button choice for update vs save-as-new
+  const [showNameInput, setShowNameInput] = useState(false); // Name input for save-as-new
+  const [saveAsNewName, setSaveAsNewName] = useState(""); // Temporary name for save-as-new
   const [typing, setTyping] = useState(false);
   const [input, setInput] = useState("");
   const [recipeRevealed, setRecipeRevealed] = useState(!!currentRecipe);
@@ -2835,6 +2840,84 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
     }
   };
 
+  const onUpdateRecipe = async () => {
+    if (!currentRecipe || !currentRecipe.sourceId) return;
+
+    try {
+      // Step 5: Edge case handling - if updateSavedRecipe returns null, the recipe was deleted
+      const updatedRecipe = await updateSavedRecipe(currentRecipe.sourceId, {
+        title: currentRecipe.title,
+        description: currentRecipe.description,
+        ingredients: currentRecipe.ingredients,
+        steps: currentRecipe.steps,
+      });
+
+      if (!updatedRecipe) {
+        // Recipe was deleted - fall back to save-as-new path
+        console.log("Recipe no longer exists, falling back to save-as-new");
+        setTrayOpen(true);
+        return;
+      }
+
+      // Re-anchor: keep sourceId pointing at the updated recipe (same ID)
+      setCurrentRecipe({
+        ...currentRecipe,
+        sourceId: String(updatedRecipe.id), // Explicitly re-anchor for next save
+      });
+
+      // Query the first category this recipe is in (for navigation)
+      const userId = (await supabase.auth.getUser()).data.user?.id;
+      if (userId) {
+        const { data: categoryData } = await supabase
+          .from('recipe_categories')
+          .select('category_id, categories!inner(name)')
+          .eq('recipe_id', updatedRecipe.id)
+          .eq('user_id', userId)
+          .limit(1)
+          .single();
+
+        if (categoryData) {
+          const catKey = categoryData.category_id;
+          const catLabel = (categoryData.categories as any).name;
+
+          // Clear recipe cache for this category
+          setRecipesByCategory(prev => {
+            const next = { ...prev };
+            delete next[catKey];
+            return next;
+          });
+
+          // Build Recipe object for navigation
+          const recipe: Recipe = {
+            title: updatedRecipe.title,
+            description: updatedRecipe.description,
+            color: "linear-gradient(135deg, #C5DCF4 0%, #85B7EB 100%)",
+            category: catLabel.toLowerCase(),
+            ingredients: updatedRecipe.ingredients,
+            steps: updatedRecipe.steps,
+            savedId: updatedRecipe.id,
+            categoryKey: catKey,
+          };
+
+          finishSaveRecipe(recipe, catKey, catLabel);
+          return;
+        }
+      }
+
+      // Fallback: if no category found, just navigate to categories
+      setTabStacks((stacks) => ({
+        ...stacks,
+        build: [{ name: "cook" }],
+        recipes: [{ name: "categories" }],
+      }));
+      setActiveTab("recipes");
+    } catch (error) {
+      console.error("Error updating recipe:", error);
+      // On error, fall back to save-as-new
+      setTrayOpen(true);
+    }
+  };
+
   const onPickCategory = async (catKey: string, catLabel: string, menuInfo?: { menuId: string; section: MenuSection }) => {
     if (!currentRecipe) return;
 
@@ -2847,6 +2930,11 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
       steps: currentRecipe.steps,
       createdAt: new Date().toISOString(),
     }, 'ai', catKey); // AI-generated recipe with category association
+
+    // F&F-BET (swappable): For save-as-new, base stays anchored to original sourceId.
+    // This allows spinning off multiple siblings from one base in a single chat session.
+    // currentRecipe.sourceId is intentionally NOT updated here (would re-anchor to new recipe).
+    // To reverse behavior: add `setCurrentRecipe({ ...currentRecipe, sourceId: recipeId })` here.
 
     // If menu info provided, add recipe to menu section
     if (menuInfo) {
@@ -3322,7 +3410,15 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
         <ExpandedRecipeOverlay
           open={expanded}
           bottomOffset={bottomBarHeight}
-          onSave={() => setTrayOpen(true)}
+          onSave={() => {
+            // If recipe has a sourceId, show update-vs-save-as-new choice
+            // Otherwise, go straight to normal save flow
+            if (currentRecipe.sourceId) {
+              setShowUpdateChoice(true);
+            } else {
+              setTrayOpen(true);
+            }
+          }}
           recipe={currentRecipe}
         />
       )}
@@ -3414,6 +3510,185 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
           disabled={typing}
         />
       </div>
+
+      {/* Update-vs-Save-as-New choice sheet */}
+      {showUpdateChoice && currentRecipe && (
+        <div
+          onClick={() => setShowUpdateChoice(false)}
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "rgba(35, 60, 0, 0.08)",
+            zIndex: 80,
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: "center",
+            animation: "tipsy-fade 0.22s ease",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#FAF7F2",
+              borderRadius: "24px 24px 0 0",
+              padding: "16px 20px 24px",
+              width: "100%",
+              animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
+            }}
+          >
+            {/* Handle */}
+            <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(35,60,0,0.15)", margin: "0 auto 20px" }} />
+
+            {/* Buttons */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {/* Primary: Update */}
+              <button
+                onClick={async () => {
+                  setShowUpdateChoice(false);
+                  // Update path (Step 4)
+                  await onUpdateRecipe();
+                }}
+                style={{
+                  width: "100%",
+                  padding: "16px 20px",
+                  background: "#233C00",
+                  color: "#FAF7F2",
+                  border: "none",
+                  borderRadius: 14,
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 15,
+                  fontWeight: 500,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  cursor: "pointer",
+                }}
+              >
+                Update {currentRecipe.title}
+              </button>
+
+              {/* Secondary: Save as new */}
+              <button
+                onClick={() => {
+                  setShowUpdateChoice(false);
+                  setSaveAsNewName(currentRecipe.title); // Prefill with base recipe's title
+                  setShowNameInput(true);
+                }}
+                style={{
+                  width: "100%",
+                  padding: "16px 20px",
+                  background: "rgba(35,60,0,0.06)",
+                  color: "#233C00",
+                  border: "1px solid rgba(35,60,0,0.12)",
+                  borderRadius: 14,
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 15,
+                  fontWeight: 500,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  cursor: "pointer",
+                }}
+              >
+                Save as new
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Name input sheet for save-as-new */}
+      {showNameInput && currentRecipe && (
+        <div
+          onClick={() => setShowNameInput(false)}
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "rgba(35, 60, 0, 0.08)",
+            zIndex: 80,
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: "center",
+            animation: "tipsy-fade 0.22s ease",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#FAF7F2",
+              borderRadius: "24px 24px 0 0",
+              padding: "16px 20px 24px",
+              width: "100%",
+              animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
+            }}
+          >
+            {/* Handle */}
+            <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(35,60,0,0.15)", margin: "0 auto 20px" }} />
+
+            {/* Label */}
+            <div style={{
+              fontFamily: "Inter, sans-serif",
+              fontSize: 10,
+              fontWeight: 500,
+              textTransform: "uppercase",
+              letterSpacing: "0.1em",
+              color: "rgba(35,60,0,0.35)",
+              marginBottom: 10,
+            }}>
+              Recipe name
+            </div>
+
+            {/* Name input */}
+            <input
+              type="text"
+              value={saveAsNewName}
+              onChange={(e) => setSaveAsNewName(e.target.value)}
+              autoFocus
+              style={{
+                width: "100%",
+                padding: "14px 16px",
+                background: "rgba(35,60,0,0.05)",
+                border: "1px solid rgba(35,60,0,0.12)",
+                borderRadius: 10,
+                fontFamily: "Inter, sans-serif",
+                fontSize: 16,
+                color: "#233C00",
+                outline: "none",
+                marginBottom: 16,
+              }}
+            />
+
+            {/* Continue button */}
+            <button
+              onClick={() => {
+                if (!saveAsNewName.trim()) return;
+                setShowNameInput(false);
+                // Update the currentRecipe title with the new name, then open save flow
+                setCurrentRecipe({
+                  ...currentRecipe,
+                  title: saveAsNewName.trim(),
+                });
+                setTrayOpen(true);
+              }}
+              disabled={!saveAsNewName.trim()}
+              style={{
+                width: "100%",
+                padding: "16px 20px",
+                background: saveAsNewName.trim() ? "#233C00" : "rgba(35,60,0,0.2)",
+                color: "#FAF7F2",
+                border: "none",
+                borderRadius: 14,
+                fontFamily: "Inter, sans-serif",
+                fontSize: 15,
+                fontWeight: 500,
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+                cursor: saveAsNewName.trim() ? "pointer" : "not-allowed",
+              }}
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Bottom sheet: pick a category to save the AI recipe */}
       {trayOpen && (

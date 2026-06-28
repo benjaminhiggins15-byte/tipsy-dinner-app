@@ -269,7 +269,12 @@ tipsyDinnerTable
 - Two modes: Brainstorm and Recipe
 - Never enter Recipe mode early — only on explicit user choice
 - Recipe card never updated for technique, wine, or tangent questions
-- Tone: warm, confident, restrained. No asterisks, no markdown, no bullet points. Plain conversational prose only.
+
+**System prompt:**
+- The system prompt is duplicated across three AI-call sites in the Cook component (`fireAICall`, `sendMessage`, `handleChipClick`). All three copies must be kept in sync.
+- User profile (palate, inspiration, constraints) is interpolated into the prompt at all call sites.
+- When a pre-existing saved recipe is in scope (`currentRecipe !== null`), the recipe is serialized via `recipeToXML` and appended to the system prompt as reference context. If no recipe is in scope, the system prompt is unchanged.
+- Formatting guidance (General rules section): instructs the model to format for readability. Named-dish/item lists use bold-name — em-dash — description format (one per line). Broader clustered options use a short framing line plus bold theme labels with specifics in prose (only where grouping is natural). Single-thought / judgment / yes-no answers stay in flowing conversational prose. No headers, no bullet points; asterisks only for bolding names or theme labels. This guidance applies in all modes and whether or not a recipe is loaded in context.
 
 **Microcopy voice:**
 - "pour a glass — what are we cooking?" (input placeholder)
@@ -356,22 +361,28 @@ These survive tab switches, navigation, and save flows. Cook receives them as pr
 **Dismiss**: Tap-outside-to-close via backdrop (lines 2188-2198, covers content area only, not nav). Tapping inside the bar stops propagation so it doesn't close.
 
 **Transfer path** (`transferToRecipeChat`, line 773):
-- **IMPORTANT**: RecipeCard is a module-level component with NO closure access to App scope. Seeding/navigation logic must go through props like `transferToRecipeChat`. Never call App-level functions (`setBuildMessages`, `switchToTab`, `recipeToXML`, etc.) directly from RecipeCard — they're undefined there and will crash silently.
+- **IMPORTANT**: RecipeCard is a module-level component with NO closure access to App scope. Seeding/navigation logic must go through props like `transferToRecipeChat`. Never call App-level functions (`setBuildMessages`, `switchToTab`, etc.) directly from RecipeCard — they're undefined there and will crash silently.
 - Single transfer path for both empty and active Build (no collision warning).
 - Atomically seeds:
   - In-progress recipe (mini player): `setBuildCurrentRecipe(recipeDraft)` (line 789)
   - User's question as first message: `setBuildMessages([userMessage])` (line 797)
-  - Full recipe injected into conversation history as XML: `setBuildConversationHistory([assistantContext, userMessage])` (lines 805-808)
-- Recipe XML format: `recipeToXML()` helper (line 754) converts recipe to structured XML matching the system prompt's recipe format. The XML lives ONLY in `conversationHistory` sent to the API, never rendered as a visible chat bubble.
+  - Conversation history with just the user question: `setBuildConversationHistory([{ role: "user", content: question.trim() }])` (line 805)
 - Navigates to Build: `switchToTab("build")` (line 814)
+
+**Recipe-to-AI context injection**:
+- `recipeToXML()` helper (App.tsx line 90) is a module-level function that converts a recipe to structured XML matching the system prompt's `<recipe>` format. It was moved to module level to be accessible from both the App component (`transferToRecipeChat`) and the Cook component (AI-call sites: `fireAICall`, `sendMessage`, `handleChipClick`).
+- When a pre-existing saved recipe is pulled into chat, the recipe is supplied to the model as **system-prompt reference context**, NOT as a seeded assistant-role message in `conversationHistory`.
+- At each AI-call site in Cook, the system prompt is conditionally extended: if `currentRecipe` exists, the recipe is serialized via `recipeToXML` and appended to the system prompt string with the framing `"The user is asking about this saved recipe; use it as reference:\n\n${recipeXML}"`. If no recipe is in scope, the system prompt is unchanged (blank Build is unaffected).
+- Preserved invariants: recipe invisibility (recipe never enters the `messages`/display array), recipe XML stripping logic (strips `<recipe>` tags from AI response text), the `<recipe>` XML schema, and the Build-from-scratch flow where an AI-authored recipe legitimately remains an assistant message in `conversationHistory`.
 
 **Auto-fire on arrival**:
 - Cook's `useEffect` (lines 2360-2376) detects seeded conversation on mount.
-- Triggers when: `messages.length === 1`, `messages[0].role === "user"`, `conversationHistory.length >= 2`, last history entry is from user.
+- Triggers when: `messages.length === 1`, `messages[0].role === "user"`, `conversationHistory.length === 1`, `conversationHistory[0].role === "user"`, and `currentRecipe !== null`. The `currentRecipe` check is critical — it distinguishes a recipe-loaded chat from an empty Build.
 - Guarded by `autoFireRef` to prevent double-firing.
+- `currentRecipe` is included in the `useEffect` dependency array.
 - Immediately fires AI call with the seeded history (line 2374: `fireAICall(conversationHistory)`).
 
-**Why inject full recipe**: Users ask recipe-specific questions ("can I substitute X?", "how long does step 2 take?"). The AI needs ingredients and steps in context to answer accurately. Recipe context is transparent to the user (not shown as a chat bubble), but present in every AI request.
+**Why inject full recipe**: Users ask recipe-specific questions ("can I substitute X?", "how long does step 2 take?"). The AI needs ingredients and steps in context to answer accurately. Recipe context is transparent to the user (not shown as a chat bubble), but present in the system prompt on every turn of that conversation.
 
 ---
 
