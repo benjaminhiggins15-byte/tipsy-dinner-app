@@ -2898,14 +2898,8 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
           const catKey = categoryData.category_id;
           const catLabel = (categoryData.categories as any).name;
 
-          // Clear recipe cache for this category
-          setRecipesByCategory(prev => {
-            const next = { ...prev };
-            delete next[catKey];
-            return next;
-          });
-
           // Build Recipe object for navigation
+          // (finishSaveRecipe handles cache clearing — no need to duplicate it here)
           const recipe: Recipe = {
             title: updatedRecipe.title,
             description: updatedRecipe.description,
@@ -2922,13 +2916,10 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
         }
       }
 
-      // Fallback: if no category found, just navigate to categories
-      setTabStacks((stacks) => ({
-        ...stacks,
-        build: [{ name: "cook" }],
-        recipes: [{ name: "categories" }],
-      }));
-      setActiveTab("recipes");
+      // Fallback: if no category found, update succeeded but can't navigate
+      // (Recipe has no categories, or query failed — rare edge case)
+      console.log('[UPD] Update succeeded but no category found for navigation - staying in Build');
+      // User can navigate manually; recipe is successfully updated in database
     } catch (error) {
       console.error('[UPD] Error in onUpdateRecipe:', error);
       // On error, fall back to save-as-new
