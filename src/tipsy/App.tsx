@@ -787,6 +787,10 @@ export default function App() {
       sourceId: String(recipe.id), // Preserve origin for update-vs-save-as-new choice
     };
 
+    // [SRCID] Log 1: At load, inside transferToRecipeChat
+    console.log('[SRCID] transferToRecipeChat - incoming recipe.id:', recipe.id, 'typeof:', typeof recipe.id);
+    console.log('[SRCID] transferToRecipeChat - built recipeDraft.sourceId:', recipeDraft.sourceId);
+
     // Set the recipe as the in-progress recipe (shows in mini player)
     setBuildCurrentRecipe(recipeDraft);
 
@@ -875,6 +879,11 @@ export default function App() {
     const t = setTimeout(() => setTransition(null), DURATION);
     return () => clearTimeout(t);
   }, [transition]);
+
+  // [SRCID] Log 2: Watch buildCurrentRecipe state changes
+  useEffect(() => {
+    console.log('[SRCID] buildCurrentRecipe state changed - sourceId:', buildCurrentRecipe?.sourceId);
+  }, [buildCurrentRecipe]);
 
   const topLevelTransKey = topLevelTransition
     ? `${topLevelTransition.from}->${topLevelTransition.to}:${topLevelTransition.direction}`
@@ -3411,6 +3420,15 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
           open={expanded}
           bottomOffset={bottomBarHeight}
           onSave={() => {
+            // [SRCID] Log 3: At save button tap, log the object the gate reads
+            console.log('[SRCID] Save button tapped - gate reads variable: currentRecipe (Cook component prop)');
+            console.log('[SRCID] Save button tapped - currentRecipe object:', currentRecipe);
+            console.log('[SRCID] Save button tapped - currentRecipe.sourceId:', currentRecipe.sourceId);
+
+            // [SRCID] Log 4: Before branch decision, log the boolean
+            const hasSourceId = !!currentRecipe.sourceId;
+            console.log('[SRCID] Gate decision boolean (sourceId present?):', hasSourceId);
+
             // If recipe has a sourceId, show update-vs-save-as-new choice
             // Otherwise, go straight to normal save flow
             if (currentRecipe.sourceId) {
