@@ -2557,6 +2557,7 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
             description: descMatch[1].trim(),
             ingredients,
             steps,
+            sourceId: currentRecipe?.sourceId, // Preserve origin across AI edits (undefined for from-scratch builds)
           };
           console.log("Recipe parsed:", parsedRecipe.title);
         }
@@ -2797,6 +2798,7 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
             description: descMatch[1].trim(),
             ingredients,
             steps,
+            sourceId: currentRecipe?.sourceId, // Preserve origin across AI edits (undefined for from-scratch builds)
           };
           console.log("Recipe parsed:", parsedRecipe.title);
         }
@@ -3150,6 +3152,7 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
               description: descMatch[1].trim(),
               ingredients,
               steps,
+              sourceId: currentRecipe?.sourceId, // Preserve origin across AI edits (undefined for from-scratch builds)
             };
           }
         }
