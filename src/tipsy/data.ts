@@ -428,7 +428,6 @@ export async function updateSavedRecipe(
         id,
         title,
         description,
-        category,
         steps,
         created_at,
         source,
@@ -449,7 +448,7 @@ export async function updateSavedRecipe(
       id: recipe.id,
       title: recipe.title,
       description: recipe.description,
-      category: recipe.category,
+      category: '', // Categories stored in recipe_categories join table, not on recipes row (matches loadSavedRecipes pattern)
       ingredients: (recipe.ingredients || [])
         .sort((a: any, b: any) => a.sort_order - b.sort_order)
         .map((ing: any) => ({
