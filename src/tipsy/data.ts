@@ -351,10 +351,19 @@ export async function updateSavedRecipe(
       if (updateError) throw updateError;
     }
 
-    // Update ingredients if provided
-    if (patch.ingredients !== undefined) {
+    // Update ingredients if provided (match saveRecipe's gate: truthy AND length > 0)
+    if (patch.ingredients && patch.ingredients.length > 0) {
       console.log('[UPDING] Ingredient update starting - incoming array length:', patch.ingredients.length);
       console.log('[UPDING] Incoming ingredients:', JSON.stringify(patch.ingredients));
+
+      // Fetch existing ingredients as backup (for best-effort restoration on failure)
+      const { data: oldIngredients } = await supabase
+        .from('ingredients')
+        .select('name, quantity, sort_order')
+        .eq('recipe_id', id)
+        .order('sort_order');
+
+      console.log('[UPDING] Fetched old ingredients as backup:', oldIngredients?.length || 0);
 
       // Delete existing ingredients
       const { data: deleteData, error: deleteError } = await supabase
@@ -365,10 +374,11 @@ export async function updateSavedRecipe(
       console.log('[UPDING] DELETE result - data:', deleteData, 'error:', deleteError);
       if (deleteError) throw deleteError;
 
-      // Insert new ingredients
-      if (patch.ingredients.length > 0) {
+      // Insert new ingredients (with user_id to satisfy RLS policy)
+      try {
         const ingredientsToInsert = patch.ingredients.map((ing, index) => ({
           recipe_id: id,
+          user_id: userId, // FIX: Add user_id to satisfy RLS insert policy (matches saveRecipe pattern)
           name: ing.name,
           quantity: ing.qty,
           sort_order: index,
@@ -382,8 +392,32 @@ export async function updateSavedRecipe(
 
         console.log('[UPDING] INSERT result - data:', insertData, 'error:', insertError);
         if (insertError) throw insertError;
-      } else {
-        console.log('[UPDING] Skipping INSERT - ingredients array length is 0');
+      } catch (insertError) {
+        // INSERT failed - attempt best-effort restoration of old ingredients
+        console.error('[UPDING] INSERT failed, attempting to restore old ingredients:', insertError);
+        if (oldIngredients && oldIngredients.length > 0) {
+          try {
+            const restoreData = oldIngredients.map(ing => ({
+              recipe_id: id,
+              user_id: userId,
+              name: ing.name,
+              quantity: ing.quantity,
+              sort_order: ing.sort_order,
+            }));
+            const { error: restoreError } = await supabase
+              .from('ingredients')
+              .insert(restoreData);
+            if (restoreError) {
+              console.error('[UPDING] Restoration failed:', restoreError);
+            } else {
+              console.log('[UPDING] Successfully restored old ingredients');
+            }
+          } catch (restoreErr) {
+            console.error('[UPDING] Restoration attempt threw:', restoreErr);
+          }
+        }
+        // Re-throw original error after restoration attempt
+        throw insertError;
       }
     }
 
