@@ -324,11 +324,13 @@ export async function updateSavedRecipe(
   id: number | string,
   patch: Partial<Pick<SavedRecipe, "title" | "description" | "ingredients" | "steps">>,
 ): Promise<SavedRecipe | null> {
+  console.log('[UPD] updateSavedRecipe called - id:', id, 'typeof:', typeof id);
   const userId = await getCurrentUserId();
   if (!userId) {
     console.error('Cannot update recipe: no user session');
     return null;
   }
+  console.log('[UPD] userId:', userId);
 
   try {
     // Build update object (only fields that are provided)
@@ -339,12 +341,13 @@ export async function updateSavedRecipe(
 
     // Update recipe
     if (Object.keys(updateData).length > 0) {
-      const { error: updateError } = await supabase
+      const { data: updateResult, error: updateError } = await supabase
         .from('recipes')
         .update(updateData)
         .eq('id', id)
         .eq('user_id', userId);
 
+      console.log('[UPD] UPDATE query result - data:', updateResult, 'error:', updateError);
       if (updateError) throw updateError;
     }
 
@@ -396,9 +399,10 @@ export async function updateSavedRecipe(
       .eq('user_id', userId)
       .single();
 
+    console.log('[UPD] FETCH query result - data:', recipe, 'error:', fetchError);
     if (fetchError) throw fetchError;
 
-    return {
+    const result = {
       id: recipe.id,
       title: recipe.title,
       description: recipe.description,
@@ -413,8 +417,10 @@ export async function updateSavedRecipe(
       createdAt: recipe.created_at,
       source: recipe.source,
     };
+    console.log('[UPD] updateSavedRecipe returning:', result);
+    return result;
   } catch (error) {
-    console.error('Error updating recipe:', error);
+    console.error('[UPD] Error updating recipe:', error);
     return null;
   }
 }

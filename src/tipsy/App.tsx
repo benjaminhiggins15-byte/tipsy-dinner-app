@@ -2852,7 +2852,10 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
   };
 
   const onUpdateRecipe = async () => {
+    console.log('[UPD] Entered onUpdateRecipe');
     if (!currentRecipe || !currentRecipe.sourceId) return;
+
+    console.log('[UPD] sourceId to update:', currentRecipe.sourceId, 'typeof:', typeof currentRecipe.sourceId);
 
     try {
       // Step 5: Edge case handling - if updateSavedRecipe returns null, the recipe was deleted
@@ -2863,9 +2866,11 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
         steps: currentRecipe.steps,
       });
 
+      console.log('[UPD] updateSavedRecipe returned:', updatedRecipe);
+
       if (!updatedRecipe) {
         // Recipe was deleted - fall back to save-as-new path
-        console.log("Recipe no longer exists, falling back to save-as-new");
+        console.log('[UPD] update returned null → falling back to save-as-new');
         setTrayOpen(true);
         return;
       }
@@ -3565,6 +3570,7 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
               {/* Primary: Update */}
               <button
                 onClick={async () => {
+                  console.log('[UPD] Update button tapped - calling onUpdateRecipe');
                   setShowUpdateChoice(false);
                   // Update path (Step 4)
                   await onUpdateRecipe();
