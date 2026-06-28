@@ -796,14 +796,9 @@ ${stepsXML}
     };
     setBuildMessages([userMessage]);
 
-    // Build conversation history with recipe context
-    // The recipe XML goes into history for the AI but NOT as a visible message
-    const recipeXML = recipeToXML(recipe);
-    const recipeContextMessage = `Here is the recipe the user is asking about:\n\n${recipeXML}`;
-
-    // Seed history: recipe context (as assistant) + user question
+    // Build conversation history with just the user question
+    // Recipe context will be injected into system prompt instead of as a fake assistant turn
     setBuildConversationHistory([
-      { role: "assistant", content: recipeContextMessage },
       { role: "user", content: question.trim() },
     ]);
 
@@ -2359,21 +2354,22 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
   const autoFireRef = useRef(false);
   useEffect(() => {
     // Check if this is a transferred conversation that needs auto-fire
-    // Condition: conversationHistory has user question + recipe context, but no AI response yet
+    // Condition: conversationHistory has just the user question, currentRecipe exists (recipe-loaded chat)
     const needsAutoFire =
       !autoFireRef.current &&
       !typing &&
       messages.length === 1 &&
       messages[0].role === "user" &&
-      conversationHistory.length >= 2 &&
-      conversationHistory[conversationHistory.length - 1].role === "user";
+      conversationHistory.length === 1 &&
+      conversationHistory[0].role === "user" &&
+      currentRecipe !== null;
 
     if (needsAutoFire) {
       autoFireRef.current = true; // Mark as fired to prevent re-firing
       // Fire AI call with the existing conversation history
       fireAICall(conversationHistory);
     }
-  }, [messages, conversationHistory, typing]);
+  }, [messages, conversationHistory, typing, currentRecipe]);
 
   const fireAICall = async (history: ConversationMessage[]) => {
     setTyping(true);
@@ -2442,6 +2438,13 @@ Use this format every time a recipe is created or updated. Never deviate from it
 
 In the recipe JSON, the ingredient name field must contain only the ingredient name — never include quantity, amount, or preparation notes in the name field. All quantity information including amount, unit, and preparation notes must go in the quantity field only.`;
 
+      // If there's a recipe in scope, append it to system prompt as reference context
+      let finalSystemPrompt = systemPrompt;
+      if (currentRecipe) {
+        const recipeXML = recipeToXML(currentRecipe);
+        finalSystemPrompt = systemPrompt + `\n\nThe user is asking about this saved recipe; use it as reference:\n\n${recipeXML}`;
+      }
+
       // Call Supabase Edge Function
       const response = await fetch(
         "https://xzpmmthreeyscidhwriv.supabase.co/functions/v1/ai-chat",
@@ -2453,7 +2456,7 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
           },
           body: JSON.stringify({
             messages: history,
-            systemPrompt: systemPrompt,
+            systemPrompt: finalSystemPrompt,
           }),
         }
       );
@@ -2672,6 +2675,13 @@ Use this format every time a recipe is created or updated. Never deviate from it
 
 In the recipe JSON, the ingredient name field must contain only the ingredient name — never include quantity, amount, or preparation notes in the name field. All quantity information including amount, unit, and preparation notes must go in the quantity field only.`;
 
+      // If there's a recipe in scope, append it to system prompt as reference context
+      let finalSystemPrompt = systemPrompt;
+      if (currentRecipe) {
+        const recipeXML = recipeToXML(currentRecipe);
+        finalSystemPrompt = systemPrompt + `\n\nThe user is asking about this saved recipe; use it as reference:\n\n${recipeXML}`;
+      }
+
       // Call Supabase Edge Function
       const response = await fetch(
         "https://xzpmmthreeyscidhwriv.supabase.co/functions/v1/ai-chat",
@@ -2683,7 +2693,7 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
           },
           body: JSON.stringify({
             messages: updatedHistory,
-            systemPrompt: systemPrompt,
+            systemPrompt: finalSystemPrompt,
           }),
         }
       );
@@ -2945,6 +2955,13 @@ Use this format every time a recipe is created or updated. Never deviate from it
 
 In the recipe JSON, the ingredient name field must contain only the ingredient name — never include quantity, amount, or preparation notes in the name field. All quantity information including amount, unit, and preparation notes must go in the quantity field only.`;
 
+        // If there's a recipe in scope, append it to system prompt as reference context
+        let finalSystemPrompt = systemPrompt;
+        if (currentRecipe) {
+          const recipeXML = recipeToXML(currentRecipe);
+          finalSystemPrompt = systemPrompt + `\n\nThe user is asking about this saved recipe; use it as reference:\n\n${recipeXML}`;
+        }
+
         const response = await fetch(
           "https://xzpmmthreeyscidhwriv.supabase.co/functions/v1/ai-chat",
           {
@@ -2955,7 +2972,7 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
             },
             body: JSON.stringify({
               messages: updatedHistory,
-              systemPrompt: systemPrompt,
+              systemPrompt: finalSystemPrompt,
             }),
           }
         );
