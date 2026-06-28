@@ -353,12 +353,16 @@ export async function updateSavedRecipe(
 
     // Update ingredients if provided
     if (patch.ingredients !== undefined) {
+      console.log('[UPDING] Ingredient update starting - incoming array length:', patch.ingredients.length);
+      console.log('[UPDING] Incoming ingredients:', JSON.stringify(patch.ingredients));
+
       // Delete existing ingredients
-      const { error: deleteError } = await supabase
+      const { data: deleteData, error: deleteError } = await supabase
         .from('ingredients')
         .delete()
         .eq('recipe_id', id);
 
+      console.log('[UPDING] DELETE result - data:', deleteData, 'error:', deleteError);
       if (deleteError) throw deleteError;
 
       // Insert new ingredients
@@ -370,11 +374,16 @@ export async function updateSavedRecipe(
           sort_order: index,
         }));
 
-        const { error: insertError } = await supabase
+        console.log('[UPDING] About to INSERT - array to insert:', JSON.stringify(ingredientsToInsert));
+
+        const { data: insertData, error: insertError } = await supabase
           .from('ingredients')
           .insert(ingredientsToInsert);
 
+        console.log('[UPDING] INSERT result - data:', insertData, 'error:', insertError);
         if (insertError) throw insertError;
+      } else {
+        console.log('[UPDING] Skipping INSERT - ingredients array length is 0');
       }
     }
 
