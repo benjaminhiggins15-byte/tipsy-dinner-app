@@ -2859,6 +2859,7 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
 
     try {
       // Step 5: Edge case handling - if updateSavedRecipe returns null, the recipe was deleted
+      console.log('[UPD] calling updateSavedRecipe with id:', currentRecipe.sourceId);
       const updatedRecipe = await updateSavedRecipe(currentRecipe.sourceId, {
         title: currentRecipe.title,
         description: currentRecipe.description,
@@ -2871,6 +2872,7 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
       if (!updatedRecipe) {
         // Recipe was deleted - fall back to save-as-new path
         console.log('[UPD] update returned null → falling back to save-as-new');
+        console.log('[UPD] FALLBACK FIRED → routing to save-as-new, opening category picker');
         setTrayOpen(true);
         return;
       }
@@ -2928,8 +2930,9 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
       }));
       setActiveTab("recipes");
     } catch (error) {
-      console.error("Error updating recipe:", error);
+      console.error('[UPD] Error in onUpdateRecipe:', error);
       // On error, fall back to save-as-new
+      console.log('[UPD] ERROR FALLBACK → routing to save-as-new, opening category picker');
       setTrayOpen(true);
     }
   };
