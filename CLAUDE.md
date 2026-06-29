@@ -386,6 +386,24 @@ These survive tab switches, navigation, and save flows. Cook receives them as pr
 
 ---
 
+## Update vs Save-as-New (Recipe Origin Tracking)
+
+**Recipe origin tracking**: `RecipeDraft` (App.tsx line 67) now carries an optional `sourceId?: string` field. Set in `transferToRecipeChat` (line 787) from the source recipe's `id` when a saved recipe is loaded into Build via chat-from-recipe. Preserved across AI turns: all three AI call sites (`fireAICall`, `sendMessage`, `handleChipClick`) copy `sourceId` from the previous `buildCurrentRecipe` onto the newly-parsed recipe (lines 2560, 2801, 3155), so it survives repeated AI edits. `sourceId` is internal state only — NOT included in `recipeToXML`, NOT sent to the AI, must stay out of the recipe XML.
+
+**Save-flow branching**: When saving from Build, if `buildCurrentRecipe.sourceId` is present, the save sheet shows a two-button choice (Update [name] / Save as new) instead of the normal category picker. Absent → normal save flow unchanged. **Update path** calls `onUpdateRecipe` (line 2854) → `updateSavedRecipe` with in-place overwrite, re-anchors `sourceId` to the same saved recipe (line 2883). **Save-as-new path** uses normal `saveRecipe` insert and deliberately leaves `sourceId` pointing at the original base (line 2936–2939, commented as "base stays anchored" — enables spinning off multiple sibling recipes from one base in a single chat, marked as swappable F&F bet).
+
+**updateSavedRecipe fixes** (data.ts lines 323–468): Three bugs corrected. (a) Ingredient INSERT now includes `user_id: userId` (line 381) — was missing → RLS 42501 → silent ingredient wipe. (b) Ingredient replacement is now safe against partial failure: old ingredients fetched as backup (line 360), best-effort restore on insert failure (lines 395–421). Note: not ACID-atomic — Supabase client exposes no transaction control; documented limitation. (c) Empty-array gate changed from `!== undefined` to `&& length > 0` (line 355) to prevent destructive delete-with-no-insert. (d) Post-update FETCH no longer selects non-existent `recipes.category` column (line 427, was 42703); category read separately via `recipe_categories` join, returned as `category: ''` matching `loadSavedRecipes`.
+
+**onUpdateRecipe scope fix** (App.tsx line 2854): Previously referenced App-level setters (`setRecipesByCategory`, `setTabStacks`, `setActiveTab`) that aren't in Cook's scope → ReferenceError → error-fallback → duplicate. Now delegates to `finishSaveRecipe` (a Cook prop, line 2914) for cache-clear + nav. **Note for future work**: `onUpdateRecipe` lives inside Cook (child component) — only use Cook props, not App-level setters.
+
+**AddYourOwn edit-duplicates fix** (AddYourOwn.tsx line 86): `isEdit` was `typeof editRecipe?.savedId === "number"`, always false for Supabase UUID strings, routing edit-saves to INSERT (duplicate) instead of UPDATE. Changed to presence/truthy check `!!(editRecipe && editRecipe.savedId)` matching the working pattern at line 707. Edit-via-pencil now updates in place.
+
+**Shared-function risk**: `updateSavedRecipe` is used by BOTH the new Update path and AddYourOwn's edit flow. The `user_id` and ordering fixes above also closed a live production data-loss bug in AddYourOwn (editing ingredients was wiping them). Any future change to `updateSavedRecipe` affects both call sites.
+
+**Known technical debt**: The three AI call sites still duplicate both the system prompt AND the recipe-parsing logic (the `sourceId`-preservation fix had to be applied in all three). Future consolidation pass should centralize both. Also: AddYourOwn edit-screen delete-button rendering may now work as a side effect of the `isEdit` fix — unverified, worth a quick check.
+
+---
+
 ## Session Rules for Claude Code
 
 - Design decisions are made in Claude.ai first — never figure out design in Claude Code
@@ -452,11 +470,12 @@ These survive tab switches, navigation, and save flows. Cook receives them as pr
 - iOS input auto-zoom prevented — all input/textarea fields raised to fontSize:16 (TextInput, TextArea, EditInput, NameInput, inputStyleBase, Build chat textarea). Stops Safari auto-zoom-on-focus while preserving pinch-zoom ✓
 - Build conversation persistence — Build state (messages, history, current recipe) lifted to App scope, survives tab switches and save flows. Refresh button with animated clear (300ms slide transition). clearBuildConversation + clearBuildStateOnly helpers ✓
 - Chat from recipe card — floating chat icon on saved recipes, slide-up input bar, transfers to Build with full recipe context injected as XML, auto-fires AI on arrival. Single transfer path (no collision warning). RecipeCard → transferToRecipeChat prop pattern (module-level component, no App-scope closure) ✓
+- Update vs save-as-new — recipe origin tracking via sourceId, two-button choice on save (Update [name] / Save as new), Update path in-place overwrites with re-anchoring, Save-as-new spins off siblings from same base. Fixed updateSavedRecipe (user_id RLS, safe ingredient replace, empty-array gate, phantom column). Fixed AddYourOwn edit-duplicates bug (isEdit UUID check). Both paths verified end-to-end ✓
 
 **Known issues (next session priorities, in order):**
 - Saving a menu fails — data/logic bug, deferred from layout pass, needs dedicated session
 - Recipe List doesn't refresh after a recipe is deleted — cache clear works but list doesn't re-fetch on re-mount
-- Edit recipe doesn't pre-populate the Write Your Own flow — investigate how AddYourOwn.tsx handles the editRecipe prop
+- AddYourOwn edit flow: delete button rendering unverified (may work now as side effect of isEdit fix), worth quick check
 - Add an "All Recipes" default category — design decision pending (real Supabase row vs virtual view)
 - Slight flash on screen transitions during async category/recipe loads
 - + button position shifts after category creation
