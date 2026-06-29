@@ -787,10 +787,6 @@ export default function App() {
       sourceId: String(recipe.id), // Preserve origin for update-vs-save-as-new choice
     };
 
-    // [SRCID] Log 1: At load, inside transferToRecipeChat
-    console.log('[SRCID] transferToRecipeChat - incoming recipe.id:', recipe.id, 'typeof:', typeof recipe.id);
-    console.log('[SRCID] transferToRecipeChat - built recipeDraft.sourceId:', recipeDraft.sourceId);
-
     // Set the recipe as the in-progress recipe (shows in mini player)
     setBuildCurrentRecipe(recipeDraft);
 
@@ -879,11 +875,6 @@ export default function App() {
     const t = setTimeout(() => setTransition(null), DURATION);
     return () => clearTimeout(t);
   }, [transition]);
-
-  // [SRCID] Log 2: Watch buildCurrentRecipe state changes
-  useEffect(() => {
-    console.log('[SRCID] buildCurrentRecipe state changed - sourceId:', buildCurrentRecipe?.sourceId);
-  }, [buildCurrentRecipe]);
 
   const topLevelTransKey = topLevelTransition
     ? `${topLevelTransition.from}->${topLevelTransition.to}:${topLevelTransition.direction}`
@@ -2852,14 +2843,10 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
   };
 
   const onUpdateRecipe = async () => {
-    console.log('[UPD] Entered onUpdateRecipe');
     if (!currentRecipe || !currentRecipe.sourceId) return;
-
-    console.log('[UPD] sourceId to update:', currentRecipe.sourceId, 'typeof:', typeof currentRecipe.sourceId);
 
     try {
       // Step 5: Edge case handling - if updateSavedRecipe returns null, the recipe was deleted
-      console.log('[UPD] calling updateSavedRecipe with id:', currentRecipe.sourceId);
       const updatedRecipe = await updateSavedRecipe(currentRecipe.sourceId, {
         title: currentRecipe.title,
         description: currentRecipe.description,
@@ -2867,12 +2854,8 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
         steps: currentRecipe.steps,
       });
 
-      console.log('[UPD] updateSavedRecipe returned:', updatedRecipe);
-
       if (!updatedRecipe) {
         // Recipe was deleted - fall back to save-as-new path
-        console.log('[UPD] update returned null → falling back to save-as-new');
-        console.log('[UPD] FALLBACK FIRED → routing to save-as-new, opening category picker');
         setTrayOpen(true);
         return;
       }
@@ -2917,13 +2900,11 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
       }
 
       // Fallback: if no category found, update succeeded but can't navigate
-      // (Recipe has no categories, or query failed — rare edge case)
-      console.log('[UPD] Update succeeded but no category found for navigation - staying in Build');
-      // User can navigate manually; recipe is successfully updated in database
+      // Rare edge case (recipe has no categories or query failed) — return to previous screen
+      back();
     } catch (error) {
-      console.error('[UPD] Error in onUpdateRecipe:', error);
+      console.error('Error in onUpdateRecipe:', error);
       // On error, fall back to save-as-new
-      console.log('[UPD] ERROR FALLBACK → routing to save-as-new, opening category picker');
       setTrayOpen(true);
     }
   };
@@ -3422,15 +3403,6 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
           open={expanded}
           bottomOffset={bottomBarHeight}
           onSave={() => {
-            // [SRCID] Log 3: At save button tap, log the object the gate reads
-            console.log('[SRCID] Save button tapped - gate reads variable: currentRecipe (Cook component prop)');
-            console.log('[SRCID] Save button tapped - currentRecipe object:', currentRecipe);
-            console.log('[SRCID] Save button tapped - currentRecipe.sourceId:', currentRecipe.sourceId);
-
-            // [SRCID] Log 4: Before branch decision, log the boolean
-            const hasSourceId = !!currentRecipe.sourceId;
-            console.log('[SRCID] Gate decision boolean (sourceId present?):', hasSourceId);
-
             // If recipe has a sourceId, show update-vs-save-as-new choice
             // Otherwise, go straight to normal save flow
             if (currentRecipe.sourceId) {
@@ -3564,7 +3536,6 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
               {/* Primary: Update */}
               <button
                 onClick={async () => {
-                  console.log('[UPD] Update button tapped - calling onUpdateRecipe');
                   setShowUpdateChoice(false);
                   // Update path (Step 4)
                   await onUpdateRecipe();
