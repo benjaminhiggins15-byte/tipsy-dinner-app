@@ -84,6 +84,7 @@ const trayEmoji: Record<string, string> = {
 
 export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, editCategoryLabel, onSaveEdit, onDeleted, clearRecipeCache, onCreateCategoryForRecipe, initialDraft }: Props) {
   const isEdit = typeof editRecipe?.savedId === "number";
+  console.log(`[ADDEDIT] isEdit computed: savedId=${editRecipe?.savedId}, typeof=${typeof editRecipe?.savedId}, isEdit=${isEdit}`);
   const [showDelete, setShowDelete] = useState(false);
   const [step, setStep] = useState<Step>(initialDraft?.step ?? 1);
   const [title, setTitle] = useState(initialDraft?.title ?? editRecipe?.title ?? "");
@@ -573,6 +574,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
               <div style={{ fontFamily: fontSans, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(35,60,0,0.35)", marginBottom: 16 }}>Looking good.</div>
               <PreviewCard recipe={previewRecipe} tab={tab} setTab={setTab} />
               <div style={{ display: "flex", justifyContent: "center", marginTop: 20 }}>
+                {(() => { console.log(`[ADDEDIT] Step 4 save routing: isEdit=${isEdit}, savedId=${editRecipe?.savedId}, path=${isEdit ? 'UPDATE (saveEdit → updateSavedRecipe)' : 'INSERT (category picker → saveRecipe)'}`); return null; })()}
                 {isEdit ? (
                   <button onClick={saveEdit} style={{
                     padding: "12px 28px",
