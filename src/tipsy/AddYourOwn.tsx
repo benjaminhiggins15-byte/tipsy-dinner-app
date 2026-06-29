@@ -83,7 +83,7 @@ const trayEmoji: Record<string, string> = {
 };
 
 export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, editCategoryLabel, onSaveEdit, onDeleted, clearRecipeCache, onCreateCategoryForRecipe, initialDraft }: Props) {
-  const isEdit = typeof editRecipe?.savedId === "number";
+  const isEdit = !!(editRecipe && editRecipe.savedId);
   console.log(`[ADDEDIT] isEdit computed: savedId=${editRecipe?.savedId}, typeof=${typeof editRecipe?.savedId}, isEdit=${isEdit}`);
   const [showDelete, setShowDelete] = useState(false);
   const [step, setStep] = useState<Step>(initialDraft?.step ?? 1);
