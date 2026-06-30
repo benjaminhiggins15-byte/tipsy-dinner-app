@@ -175,6 +175,23 @@ function parseMonthDay(monthDay: string): { month: number; day: number } {
   return { month, day };
 }
 
+// Helper: parse "YYYY-MM-DD" string to LOCAL midnight Date
+function parseLocalDate(dateStr: string): Date {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return new Date(year, month - 1, day); // month is 0-indexed
+}
+
+// Helper: parse "MM-DD" with a specific year to LOCAL midnight Date
+function parseMonthDayWithYear(monthDay: string, year: number): Date {
+  const { month, day } = parseMonthDay(monthDay);
+  return new Date(year, month - 1, day); // month is 0-indexed
+}
+
+// Helper: normalize any Date to LOCAL start-of-day (midnight)
+function toLocalStartOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
 // Helper: check if a date falls within a seasonal range (handles wrap-around)
 function isInSeasonalRange(
   today: Date,
@@ -209,58 +226,44 @@ function getDaysBeforeDate(targetDate: Date, days: number): Date {
 }
 
 // Helper: check if today is within lead-in window (leadInStart <= today <= target)
+// Assumes today and targetDate are already normalized to local start-of-day
 function isInLeadInWindow(
-  today: Date,
+  todayNormalized: Date,
   targetDate: Date,
   leadInDays: number
 ): boolean {
   const leadInStart = getDaysBeforeDate(targetDate, leadInDays);
-  const todayTime = today.getTime();
+  const todayTime = todayNormalized.getTime();
   const startTime = leadInStart.getTime();
   const endTime = targetDate.getTime();
 
-  // Normalize to start of day for comparison
-  const todayStartOfDay = new Date(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate()
-  ).getTime();
-  const startStartOfDay = new Date(
-    leadInStart.getFullYear(),
-    leadInStart.getMonth(),
-    leadInStart.getDate()
-  ).getTime();
-  const endStartOfDay = new Date(
-    targetDate.getFullYear(),
-    targetDate.getMonth(),
-    targetDate.getDate()
-  ).getTime();
-
-  return todayStartOfDay >= startStartOfDay && todayStartOfDay <= endStartOfDay;
+  return todayTime >= startTime && todayTime <= endTime;
 }
 
 // Check if a time-aware chip is active on a given date
 export function isChipActive(chip: SuggestionChip, today: Date): boolean {
   if (!chip.timing) return true; // Evergreen chips are always active
 
+  // Normalize today to local start-of-day once for all comparisons
+  const todayNormalized = toLocalStartOfDay(today);
+
   const timing = chip.timing;
 
   switch (timing.kind) {
     case "seasonal": {
-      return isInSeasonalRange(today, timing.start, timing.end);
+      return isInSeasonalRange(todayNormalized, timing.start, timing.end);
     }
 
     case "fixedHoliday": {
-      const { month, day } = parseMonthDay(timing.monthDay);
-      const thisYearDate = new Date(today.getFullYear(), month - 1, day);
-      return isInLeadInWindow(today, thisYearDate, timing.leadInDays);
+      const thisYearDate = parseMonthDayWithYear(timing.monthDay, todayNormalized.getFullYear());
+      return isInLeadInWindow(todayNormalized, thisYearDate, timing.leadInDays);
     }
 
     case "floatingHoliday": {
       // Check if today falls within lead-in window of any listed date
       for (const dateStr of timing.dates) {
-        const targetDate = new Date(dateStr);
-        if (isInLeadInWindow(today, targetDate, timing.leadInDays)) {
+        const targetDate = parseLocalDate(dateStr);
+        if (isInLeadInWindow(todayNormalized, targetDate, timing.leadInDays)) {
           return true;
         }
       }
@@ -268,18 +271,18 @@ export function isChipActive(chip: SuggestionChip, today: Date): boolean {
     }
 
     case "recurringWeekly": {
-      const todayWeekday = today.getDay();
+      const todayWeekday = todayNormalized.getDay();
       // First check if today's weekday matches
       if (!timing.weekdays.includes(todayWeekday)) {
         return false;
       }
       // Then check if today is within the season window
-      return isInSeasonalRange(today, timing.seasonStart, timing.seasonEnd);
+      return isInSeasonalRange(todayNormalized, timing.seasonStart, timing.seasonEnd);
     }
 
     case "oneOff": {
-      const targetDate = new Date(timing.date);
-      return isInLeadInWindow(today, targetDate, timing.leadInDays);
+      const targetDate = parseLocalDate(timing.date);
+      return isInLeadInWindow(todayNormalized, targetDate, timing.leadInDays);
     }
 
     default:
