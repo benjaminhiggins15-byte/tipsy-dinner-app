@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type CSSProperties } from "react";
+import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
 import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, shareRecipe, type Recipe, type Occasion, type Menu, type SavedRecipe, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
@@ -22,6 +22,7 @@ import {
   IconRefresh,
   IconMessageCircle,
 } from "@tabler/icons-react";
+import { pickChips } from "./chips";
 
 // Helper to parse Server-Sent Events from Anthropic streaming API
 async function* parseSSEStream(response: Response) {
@@ -2333,6 +2334,9 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
   const [bottomBarHeight, setBottomBarHeight] = useState(0);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Pick 3 chips once per mount (stable within session, varied across sessions)
+  const displayChips = useMemo(() => pickChips(new Date()), []);
+
   useEffect(() => {
     const measure = () => {
       if (bottomBarRef.current) setBottomBarHeight(bottomBarRef.current.offsetHeight);
@@ -3271,120 +3275,47 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
             gap: 12,
             WebkitOverflowScrolling: "touch",
           }}>
-            <button
-              onClick={() => handleChipClick("Brainstorm sides for grilled ribeye")}
-              style={{
-                minWidth: 200,
-                height: 72,
-                background: "rgba(35,60,0,0.06)",
-                border: "1px solid rgba(35,60,0,0.1)",
-                borderRadius: 16,
-                padding: "14px 16px",
-                cursor: "pointer",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "flex-start",
-                justifyContent: "center",
-                gap: 4,
-                flexShrink: 0,
-              }}
-            >
-              <div style={{
-                fontFamily: "Inter, sans-serif",
-                fontWeight: 700,
-                fontSize: 15,
-                color: "#233C00",
-                lineHeight: 1.2,
-              }}>
-                Brainstorm
-              </div>
-              <div style={{
-                fontFamily: "Fraunces, serif",
-                fontStyle: "italic",
-                fontWeight: 300,
-                fontSize: 13,
-                color: "rgba(35,60,0,0.55)",
-                lineHeight: 1.2,
-              }}>
-                sides for grilled ribeye
-              </div>
-            </button>
-            <button
-              onClick={() => handleChipClick("Help me decide on dinner")}
-              style={{
-                minWidth: 200,
-                height: 72,
-                background: "rgba(35,60,0,0.06)",
-                border: "1px solid rgba(35,60,0,0.1)",
-                borderRadius: 16,
-                padding: "14px 16px",
-                cursor: "pointer",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "flex-start",
-                justifyContent: "center",
-                gap: 4,
-                flexShrink: 0,
-              }}
-            >
-              <div style={{
-                fontFamily: "Inter, sans-serif",
-                fontWeight: 700,
-                fontSize: 15,
-                color: "#233C00",
-                lineHeight: 1.2,
-              }}>
-                Help
-              </div>
-              <div style={{
-                fontFamily: "Fraunces, serif",
-                fontStyle: "italic",
-                fontWeight: 300,
-                fontSize: 13,
-                color: "rgba(35,60,0,0.55)",
-                lineHeight: 1.2,
-              }}>
-                me decide on dinner
-              </div>
-            </button>
-            <button
-              onClick={() => handleChipClick("Elevate my bolognese recipe")}
-              style={{
-                minWidth: 200,
-                height: 72,
-                background: "rgba(35,60,0,0.06)",
-                border: "1px solid rgba(35,60,0,0.1)",
-                borderRadius: 16,
-                padding: "14px 16px",
-                cursor: "pointer",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "flex-start",
-                justifyContent: "center",
-                gap: 4,
-                flexShrink: 0,
-              }}
-            >
-              <div style={{
-                fontFamily: "Inter, sans-serif",
-                fontWeight: 700,
-                fontSize: 15,
-                color: "#233C00",
-                lineHeight: 1.2,
-              }}>
-                Elevate
-              </div>
-              <div style={{
-                fontFamily: "Fraunces, serif",
-                fontStyle: "italic",
-                fontWeight: 300,
-                fontSize: 13,
-                color: "rgba(35,60,0,0.55)",
-                lineHeight: 1.2,
-              }}>
-                my bolognese recipe
-              </div>
-            </button>
+            {displayChips.map((chip, index) => (
+              <button
+                key={index}
+                onClick={() => handleChipClick(chip.prompt)}
+                style={{
+                  minWidth: 200,
+                  height: 72,
+                  background: "rgba(35,60,0,0.06)",
+                  border: "1px solid rgba(35,60,0,0.1)",
+                  borderRadius: 16,
+                  padding: "14px 16px",
+                  cursor: "pointer",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                  justifyContent: "center",
+                  gap: 4,
+                  flexShrink: 0,
+                }}
+              >
+                <div style={{
+                  fontFamily: "Inter, sans-serif",
+                  fontWeight: 700,
+                  fontSize: 15,
+                  color: "#233C00",
+                  lineHeight: 1.2,
+                }}>
+                  {chip.header}
+                </div>
+                <div style={{
+                  fontFamily: "Fraunces, serif",
+                  fontStyle: "italic",
+                  fontWeight: 300,
+                  fontSize: 13,
+                  color: "rgba(35,60,0,0.55)",
+                  lineHeight: 1.2,
+                }}>
+                  {chip.body}
+                </div>
+              </button>
+            ))}
           </div>
         </>
       ) : (
