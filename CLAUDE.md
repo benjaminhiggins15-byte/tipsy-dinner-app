@@ -348,6 +348,59 @@ These survive tab switches, navigation, and save flows. Cook receives them as pr
 
 ---
 
+## Build Home-Screen Suggestion Chips
+
+**Overview**: The three chips on the Build empty-state home screen are data-driven, selected at mount, and vary based on date/time. Defined in `src/tipsy/chips.ts`, rendered via `.map()` in App.tsx (lines 3267+).
+
+**Chip data shape**:
+- `header` (string) — bold Inter lead word displayed at top of chip (e.g., "Build", "Brainstorm", "Help")
+- `body` (string) — italic Fraunces body text displayed below header (e.g., "a fun Sunday dinner")
+- `prompt` (string) — full text fired into `handleChipClick` when tapped. This is what the AI receives. Tapping a chip is functionally identical to typing that text and sending it.
+- `type` ("build" | "brainstorm" | "help") — used by picker for variety across the 3 selected chips
+- `timing?` (object, optional) — if present, chip is time-aware and active only during specific windows. If absent, chip is evergreen (always available).
+
+**Five timing shapes**:
+1. `seasonal` — active every year between MM-DD start and end dates (e.g., summer: 06-16 → 08-31)
+2. `fixedHoliday` — active from N days before a recurring MM-DD date through the date (e.g., July 4th: 07-04, leadIn 10 → window 06-24 through 07-04)
+3. `floatingHoliday` — active from N days before explicit YYYY-MM-DD dates through each date (e.g., Thanksgiving 2026-11-26, 2027-11-25, leadIn 16)
+4. `recurringWeekly` — active on specified weekdays (0=Sun, 6=Sat) but only within a seasonal window. **Supports season wrap across New Year** (e.g., gameday: Sat/Sun, season 09-05 → 02-09 wraps into January-February)
+5. `oneOff` — active from N days before a single YYYY-MM-DD date through the date (e.g., awards night 2026-02-01, leadIn 4)
+
+`isChipActive(chip, today)` resolves whether a time-aware chip is live on a given date.
+
+**Picker behavior** (`pickChips(today)`):
+- Returns exactly 3 chips
+- Time-aware chips that are active today fill slots first (up to all 3 if genuinely active — e.g., a fall Sunday could show both "cozy fall dinner" and "gameday spread")
+- Remaining slots fill from the evergreen pool
+- Picker aims for variety of `type` across the 3 chips where possible (don't return three "Build" chips if the pool allows otherwise)
+- No duplicates, always exactly 3
+- Chips are picked **once per mount** via `useMemo` (stable within a session, varied across sessions)
+
+**CRITICAL date-handling convention**:
+- All date construction in `chips.ts` is **LOCAL-midnight**. Production calls `pickChips(new Date())`, which is local time, and users think in local days.
+- **Never use `new Date("YYYY-MM-DD")`** — it parses as UTC midnight and shifts windows by a day in timezones west of UTC. This was a real bug (July 4th chip opened/closed one day late), root-caused and fixed.
+- Use the local-parse helpers: `parseLocalDate(dateStr)`, `parseMonthDayWithYear(monthDay, year)`, `toLocalStartOfDay(date)`.
+- Do NOT reintroduce UTC string-parsing. The normalization logic in `isChipActive` assumes local dates.
+
+**Permanent test**: `src/tipsy/chips.test.ts`
+- Run with `bun run src/tipsy/chips.test.ts`
+- 29 test cases covering all timing shapes at their tight window edges
+- Imports the real chip definitions from `chips.ts` (not redefined, so test stays valid as chip data evolves)
+- Re-run whenever chip timing logic or calendar entries change
+
+**Adding new chips**:
+- The chip pool is currently a small starter set designed to grow into a large cultural calendar
+- Adding entries is **data-only** — define the chip in `evergreenChips` or `timeAwareChips` arrays
+- Does NOT require touching `isChipActive`, `pickChips`, or any logic functions
+
+**Guardrails** (chips do NOT touch):
+- System prompt (still triplicated across `fireAICall`, `sendMessage`, `handleChipClick` in App.tsx)
+- Recipe XML format or `recipeToXML`
+- Persistence/refresh logic
+- Public sharing route
+
+---
+
 ## Chat from Recipe Card
 
 **Entry point**: Floating chat icon on saved recipes in the in-app Recipe Card (line 2160: `{editable && transferToRecipeChat && (...)}` — gated on `recipe.savedId`). NOT present on the public route `r.$token.tsx` (separate component, must stay chrome-free).
@@ -471,6 +524,7 @@ These survive tab switches, navigation, and save flows. Cook receives them as pr
 - Build conversation persistence — Build state (messages, history, current recipe) lifted to App scope, survives tab switches and save flows. Refresh button with animated clear (300ms slide transition). clearBuildConversation + clearBuildStateOnly helpers ✓
 - Chat from recipe card — floating chat icon on saved recipes, slide-up input bar, transfers to Build with full recipe context injected as XML, auto-fires AI on arrival. Single transfer path (no collision warning). RecipeCard → transferToRecipeChat prop pattern (module-level component, no App-scope closure) ✓
 - Update vs save-as-new — recipe origin tracking via sourceId, two-button choice on save (Update [name] / Save as new), Update path in-place overwrites with re-anchoring, Save-as-new spins off siblings from same base. Fixed updateSavedRecipe (user_id RLS, safe ingredient replace, empty-array gate, phantom column). Fixed AddYourOwn edit-duplicates bug (isEdit UUID check). Both paths verified end-to-end ✓
+- Build home-screen suggestion chips — curated, time-aware chip system (src/tipsy/chips.ts). Three chips selected at mount via pickChips(new Date()), stable within session, varied across sessions. 8 evergreen + 6 time-aware chips with 5 timing shapes (seasonal, fixedHoliday, floatingHoliday, recurringWeekly, oneOff). Fixed UTC-vs-local date bug (all dates now local-midnight). 29/29 unit tests pass (chips.test.ts). Verified on-device ✓
 
 **Known issues (next session priorities, in order):**
 - Saving a menu fails — data/logic bug, deferred from layout pass, needs dedicated session
