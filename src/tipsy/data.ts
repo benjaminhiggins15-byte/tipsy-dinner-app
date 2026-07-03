@@ -1278,6 +1278,135 @@ export async function getRecipesForMenuSection(menuId: string, section: MenuSect
   }
 }
 
+// ==================== GROCERY LIST ====================
+
+export type GroceryItem = {
+  id: string;
+  displayName: string;
+  quantity: string;
+  checked: boolean;
+  sourceRecipeId: string | null;
+  sortOrder: number;
+};
+
+export async function loadGroceryItems(): Promise<GroceryItem[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return [];
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('grocery_items')
+      .select('id, display_name, quantity, checked, source_recipe_id, sort_order')
+      .eq('user_id', userId)
+      .order('sort_order', { ascending: true });
+
+    if (error) throw error;
+
+    return (data || []).map((item: any) => ({
+      id: item.id,
+      displayName: item.display_name,
+      quantity: item.quantity,
+      checked: item.checked,
+      sourceRecipeId: item.source_recipe_id,
+      sortOrder: item.sort_order,
+    }));
+  } catch (error) {
+    console.error('Error loading grocery items:', error);
+    return [];
+  }
+}
+
+export async function addGroceryItems(
+  items: { display_name: string; quantity: string; source_recipe_id?: string | null }[]
+): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot add grocery items: no user session');
+    throw new Error('No user session');
+  }
+  if (items.length === 0) return;
+
+  try {
+    const { data: existing, error: countError } = await supabase
+      .from('grocery_items')
+      .select('sort_order')
+      .eq('user_id', userId)
+      .order('sort_order', { ascending: false })
+      .limit(1);
+
+    if (countError) throw countError;
+
+    const startOrder = existing && existing.length > 0 ? existing[0].sort_order + 1 : 0;
+
+    const itemsToInsert = items.map((item, index) => ({
+      user_id: userId,
+      display_name: item.display_name,
+      quantity: item.quantity,
+      source_recipe_id: item.source_recipe_id ?? null,
+      sort_order: startOrder + index,
+    }));
+
+    const { error } = await supabase
+      .from('grocery_items')
+      .insert(itemsToInsert);
+
+    if (error) throw error;
+  } catch (error) {
+    console.error('Error adding grocery items:', error);
+    throw error;
+  }
+}
+
+export async function addManualGroceryItem(text: string): Promise<void> {
+  await addGroceryItems([{ display_name: text, quantity: '', source_recipe_id: null }]);
+}
+
+export async function toggleGroceryItemChecked(id: string, checked: boolean): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot update grocery item: no user session');
+    return;
+  }
+
+  try {
+    const { error } = await supabase
+      .from('grocery_items')
+      .update({ checked })
+      .eq('id', id)
+      .eq('user_id', userId);
+
+    if (error) throw error;
+  } catch (error) {
+    console.error('Error toggling grocery item:', error);
+  }
+}
+
+export async function clearGroceryItems(mode: 'all' | 'checked'): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot clear grocery items: no user session');
+    return;
+  }
+
+  try {
+    let query = supabase
+      .from('grocery_items')
+      .delete()
+      .eq('user_id', userId);
+
+    if (mode === 'checked') {
+      query = query.eq('checked', true);
+    }
+
+    const { error } = await query;
+    if (error) throw error;
+  } catch (error) {
+    console.error('Error clearing grocery items:', error);
+  }
+}
+
 // ==================== CLEANUP ====================
 
 export function cleanupMenusLocalStorage(): void {

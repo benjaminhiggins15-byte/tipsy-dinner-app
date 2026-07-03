@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, shareRecipe, type Recipe, type Occasion, type Menu, type SavedRecipe, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection } from "./data";
+import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, shareRecipe, type Recipe, type Occasion, type Menu, type SavedRecipe, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, type GroceryItem } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
@@ -116,6 +116,7 @@ type Screen =
   | { name: "categories" }
   | { name: "recipes"; categoryKey: string; categoryLabel: string }
   | { name: "recipe"; recipe: Recipe; categoryLabel: string; categoryKey: string }
+  | { name: "grocerylist" }
   | { name: "occasions" }
   | { name: "menus"; occasionId: string; occasionName: string }
   | { name: "menuinterior"; menuId: string }
@@ -159,6 +160,7 @@ function screenKey(s: Screen): string {
     case "categories": return "categories";
     case "recipes": return `recipes:${s.categoryKey}`;
     case "recipe": return `recipe:${s.categoryLabel}:${s.recipe.title}`;
+    case "grocerylist": return "grocerylist";
     case "occasions": return "occasions";
     case "menus": return `menus:${s.occasionId}`;
     case "menuinterior": return `menuinterior:${s.menuId}`;
@@ -272,6 +274,7 @@ function renderScreen(
         transferToRecipeChat={transferToRecipeChat}
       />
     );
+    case "grocerylist": return <GroceryList push={push} back={back} />;
     case "occasions": return (
       <Occasions
         back={back}
@@ -1384,22 +1387,41 @@ function Categories({ push, back, isTabRoot, ensureRecipesLoaded }: { push: (s: 
         <div style={{ fontFamily: "Inter, sans-serif", fontSize: 13, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase", color: "#233C00" }}>
           Recipes
         </div>
-        <button
-          onClick={() => push({ name: "newcategory" })}
-          aria-label="New category"
-          style={{
-            width: 32, height: 32, borderRadius: "50%",
-            border: "1px solid rgba(35,60,0,0.25)",
-            background: "transparent",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            cursor: "pointer",
-          }}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.7)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-        </button>
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <button
+            onClick={() => push({ name: "grocerylist" })}
+            aria-label="Grocery list"
+            style={{
+              width: 32, height: 32, borderRadius: "50%",
+              border: "1px solid rgba(35,60,0,0.25)",
+              background: "transparent",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer",
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.7)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="9" cy="21" r="1" />
+              <circle cx="20" cy="21" r="1" />
+              <path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6" />
+            </svg>
+          </button>
+          <button
+            onClick={() => push({ name: "newcategory" })}
+            aria-label="New category"
+            style={{
+              width: 32, height: 32, borderRadius: "50%",
+              border: "1px solid rgba(35,60,0,0.25)",
+              background: "transparent",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer",
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.7)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Grid */}
@@ -1721,6 +1743,7 @@ function RecipeCard({
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [shareConfirm, setShareConfirm] = useState(false);
+  const [groceryAddedConfirm, setGroceryAddedConfirm] = useState(false);
   const [showChatInput, setShowChatInput] = useState(false);
   const [chatQuestion, setChatQuestion] = useState("");
   const ingredients = recipe.ingredients ?? [];
@@ -1748,6 +1771,23 @@ function RecipeCard({
       } catch (err) {
         console.error('Clipboard write failed:', err);
       }
+    }
+  }
+
+  async function handleAddToGroceryList() {
+    if (!ingredients.length) return;
+    try {
+      await addGroceryItems(
+        ingredients.map((i) => ({
+          display_name: i.name,
+          quantity: i.qty,
+          source_recipe_id: recipe.savedId != null ? recipe.savedId.toString() : null,
+        }))
+      );
+      setGroceryAddedConfirm(true);
+      setTimeout(() => setGroceryAddedConfirm(false), 2000);
+    } catch (err) {
+      console.error('Failed to add to grocery list:', err);
     }
   }
 
@@ -1833,6 +1873,19 @@ function RecipeCard({
                     <polyline points="3 6 5 6 21 6" />
                     <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
                     <path d="M10 11v6M14 11v6" />
+                  </svg>
+                </button>
+              )}
+              {editable && ingredients.length > 0 && (
+                <button
+                  onClick={handleAddToGroceryList}
+                  aria-label="Add to grocery list"
+                  style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="9" cy="21" r="1" />
+                    <circle cx="20" cy="21" r="1" />
+                    <path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6" />
                   </svg>
                 </button>
               )}
@@ -2253,6 +2306,311 @@ function RecipeCard({
           }}
         >
           Link copied
+        </div>
+      )}
+
+      {/* Grocery list confirmation toast */}
+      {groceryAddedConfirm && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "80px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "#233C00",
+            color: "#FEE7C0",
+            padding: "8px 16px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            fontFamily: "Inter, sans-serif",
+            fontWeight: 500,
+            zIndex: 1000,
+          }}
+        >
+          Added to grocery list
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- Grocery List ---------------- */
+type GroceryRow = { key: string; quantity: string; ids: string[]; checked: boolean; sortOrder: number };
+type GroceryGroup = { label: string; rows: GroceryRow[] };
+
+function groupGroceryItems(items: GroceryItem[]): GroceryGroup[] {
+  const byName = new Map<string, GroceryGroup>();
+  const groups: GroceryGroup[] = [];
+
+  for (const item of items) {
+    const nameKey = item.displayName.trim().toLowerCase();
+    let group = byName.get(nameKey);
+    if (!group) {
+      group = { label: item.displayName.trim(), rows: [] };
+      byName.set(nameKey, group);
+      groups.push(group);
+    }
+    const existingRow = group.rows.find((r) => r.quantity === item.quantity);
+    if (existingRow) {
+      existingRow.ids.push(item.id);
+      existingRow.checked = existingRow.checked && item.checked;
+      existingRow.sortOrder = Math.min(existingRow.sortOrder, item.sortOrder);
+    } else {
+      group.rows.push({ key: item.id, quantity: item.quantity, ids: [item.id], checked: item.checked, sortOrder: item.sortOrder });
+    }
+  }
+
+  for (const group of groups) {
+    group.rows.sort((a, b) => a.sortOrder - b.sortOrder);
+  }
+  groups.sort((a, b) => {
+    const aMin = Math.min(...a.rows.map((r) => r.sortOrder));
+    const bMin = Math.min(...b.rows.map((r) => r.sortOrder));
+    return aMin - bMin;
+  });
+
+  return groups;
+}
+
+function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => void }) {
+  const [items, setItems] = useState<GroceryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newItemText, setNewItemText] = useState("");
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+
+  useEffect(() => {
+    let ignore = false;
+    async function load() {
+      const loaded = await loadGroceryItems();
+      if (!ignore) {
+        setItems(loaded);
+        setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  async function handleToggle(ids: string[], nextChecked: boolean) {
+    setItems((prev) => prev.map((it) => (ids.includes(it.id) ? { ...it, checked: nextChecked } : it)));
+    await Promise.all(ids.map((id) => toggleGroceryItemChecked(id, nextChecked)));
+  }
+
+  async function handleManualAdd() {
+    const text = newItemText.trim();
+    if (!text) return;
+    setNewItemText("");
+    await addManualGroceryItem(text);
+    setItems(await loadGroceryItems());
+  }
+
+  async function handleClear(mode: "all" | "checked") {
+    await clearGroceryItems(mode);
+    setShowClearConfirm(false);
+    setItems(await loadGroceryItems());
+  }
+
+  const groups = groupGroceryItems(items);
+
+  const renderRow = (row: GroceryRow, label: string | null) => (
+    <div
+      key={row.key}
+      onClick={() => handleToggle(row.ids, !row.checked)}
+      style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", padding: "4px 0" }}
+    >
+      <div
+        style={{
+          width: 20, height: 20, minWidth: 20,
+          borderRadius: "50%",
+          border: "1.5px solid rgba(35,60,0,0.3)",
+          background: row.checked ? "#233C00" : "transparent",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}
+      >
+        {row.checked && (
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#FEE7C0" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        )}
+      </div>
+      <div style={{ flex: 1, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        {label && (
+          <span
+            style={{
+              fontFamily: "Inter, sans-serif",
+              fontSize: 15,
+              fontWeight: 400,
+              color: row.checked ? "rgba(35,60,0,0.35)" : "#233C00",
+              textDecoration: row.checked ? "line-through" : "none",
+            }}
+          >
+            {label}
+          </span>
+        )}
+        {row.quantity && (
+          <span
+            style={{
+              fontFamily: "Inter, sans-serif",
+              fontSize: 13,
+              fontWeight: 500,
+              fontVariantNumeric: "tabular-nums",
+              color: row.checked ? "rgba(35,60,0,0.25)" : "rgba(35,60,0,0.4)",
+              textDecoration: row.checked ? "line-through" : "none",
+              marginLeft: label ? "auto" : 0,
+            }}
+          >
+            {row.quantity}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {/* Header */}
+      <div style={{ height: 56, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button
+            onClick={back}
+            aria-label="Back"
+            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.6)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
+          <div style={{ fontFamily: "Inter, sans-serif", fontSize: 13, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase", color: "#233C00" }}>
+            Grocery List
+          </div>
+        </div>
+        <button
+          onClick={() => setShowClearConfirm(true)}
+          aria-label="Clear list"
+          style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="3 6 5 6 21 6" />
+            <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+            <path d="M10 11v6M14 11v6" />
+          </svg>
+        </button>
+      </div>
+
+      {/* List */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "4px 24px 16px" }}>
+        {!loading && groups.length === 0 && (
+          <div
+            style={{
+              fontFamily: "Fraunces, serif",
+              fontStyle: "italic",
+              fontSize: 14,
+              color: "rgba(35,60,0,0.4)",
+              textAlign: "center",
+              padding: "40px 0",
+            }}
+          >
+            nothing here yet — pour something open.
+          </div>
+        )}
+        {groups.map((group, idx) => (
+          <div
+            key={group.label}
+            style={{ padding: "12px 0", borderBottom: idx === groups.length - 1 ? "none" : "1px dotted rgba(35,60,0,0.1)" }}
+          >
+            {group.rows.length === 1 ? (
+              renderRow(group.rows[0], group.label)
+            ) : (
+              <>
+                <div style={{ fontFamily: "Inter, sans-serif", fontSize: 15, fontWeight: 400, color: "#233C00", marginBottom: 8 }}>
+                  {group.label}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: 4 }}>
+                  {group.rows.map((row) => renderRow(row, null))}
+                </div>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Manual add */}
+      <div style={{ display: "flex", gap: 8, padding: "12px 24px", borderTop: "1px solid rgba(35,60,0,0.08)", flexShrink: 0 }}>
+        <input
+          value={newItemText}
+          onChange={(e) => setNewItemText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleManualAdd();
+          }}
+          placeholder="add an item"
+          style={{
+            flex: 1,
+            background: "rgba(35,60,0,0.06)",
+            border: "1px solid rgba(35,60,0,0.12)",
+            borderRadius: 10,
+            padding: "12px 14px",
+            fontSize: 16,
+            fontFamily: "Inter, sans-serif",
+            color: "#233C00",
+            outline: "none",
+          }}
+        />
+        <button
+          onClick={handleManualAdd}
+          aria-label="Add item"
+          style={{
+            width: 44, height: 44, minWidth: 44,
+            borderRadius: 10,
+            background: "#1E3A42",
+            border: "none",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            cursor: "pointer",
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FEE7C0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Clear confirmation modal */}
+      {showClearConfirm && (
+        <div
+          onClick={() => setShowClearConfirm(false)}
+          style={{ position: "absolute", inset: 0, background: "rgba(35,60,0,0.25)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 20, padding: 24 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: "#FAF7F2", borderRadius: 16, padding: "24px 20px", width: "100%", maxWidth: 280, display: "flex", flexDirection: "column", gap: 8, border: "0.5px solid rgba(35,60,0,0.1)" }}
+          >
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 16, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: "#233C00", textAlign: "center" }}>
+              Clear grocery list?
+            </div>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: "#233C00", textAlign: "center", marginBottom: 12 }}>
+              Choose what to remove.
+            </div>
+            <button
+              onClick={() => setShowClearConfirm(false)}
+              style={{ width: "100%", padding: "12px", borderRadius: 10, background: "transparent", border: "0.5px solid rgba(35,60,0,0.1)", color: "#233C00", fontFamily: "'Inter', sans-serif", fontSize: 13, fontWeight: 500, cursor: "pointer" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => handleClear("checked")}
+              style={{ width: "100%", padding: "12px", borderRadius: 10, background: "#FEE7C0", border: "none", color: "#233C00", fontFamily: "'Inter', sans-serif", fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer" }}
+            >
+              Clear checked items only
+            </button>
+            <button
+              onClick={() => handleClear("all")}
+              style={{ width: "100%", padding: "12px", borderRadius: 10, background: "#B85C5C", border: "none", color: "#FAF7F2", fontFamily: "'Inter', sans-serif", fontSize: 13, fontWeight: 500, cursor: "pointer" }}
+            >
+              Clear everything
+            </button>
+          </div>
         </div>
       )}
     </div>
