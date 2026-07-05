@@ -2375,7 +2375,9 @@ function groupGroceryItems(items: GroceryItem[]): GroceryGroup[] {
 function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => void }) {
   const [items, setItems] = useState<GroceryItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [newItemText, setNewItemText] = useState("");
+  const [manualName, setManualName] = useState("");
+  const [manualQty, setManualQty] = useState("");
+  const [manualNameErr, setManualNameErr] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   useEffect(() => {
@@ -2399,10 +2401,16 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
   }
 
   async function handleManualAdd() {
-    const text = newItemText.trim();
-    if (!text) return;
-    setNewItemText("");
-    await addManualGroceryItem(text);
+    const name = manualName.trim();
+    if (!name) {
+      setManualNameErr(true);
+      return;
+    }
+    const quantity = manualQty.trim();
+    setManualName("");
+    setManualQty("");
+    setManualNameErr(false);
+    await addManualGroceryItem(name, quantity);
     setItems(await loadGroceryItems());
   }
 
@@ -2537,43 +2545,76 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
       </div>
 
       {/* Manual add */}
-      <div style={{ display: "flex", gap: 8, padding: "12px 24px", borderTop: "1px solid rgba(35,60,0,0.08)", flexShrink: 0 }}>
-        <input
-          value={newItemText}
-          onChange={(e) => setNewItemText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") handleManualAdd();
-          }}
-          placeholder="add an item"
-          style={{
-            flex: 1,
-            background: "rgba(35,60,0,0.06)",
-            border: "1px solid rgba(35,60,0,0.12)",
-            borderRadius: 10,
-            padding: "12px 14px",
-            fontSize: 16,
-            fontFamily: "Inter, sans-serif",
-            color: "#233C00",
-            outline: "none",
-          }}
-        />
-        <button
-          onClick={handleManualAdd}
-          aria-label="Add item"
-          style={{
-            width: 44, height: 44, minWidth: 44,
-            borderRadius: 10,
-            background: "#1E3A42",
-            border: "none",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            cursor: "pointer",
-          }}
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FEE7C0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-        </button>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "12px 24px", borderTop: "1px solid rgba(35,60,0,0.08)", flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            value={manualQty}
+            onChange={(e) => setManualQty(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleManualAdd();
+            }}
+            placeholder="qty"
+            style={{
+              width: 80,
+              minWidth: 80,
+              textAlign: "center",
+              fontVariantNumeric: "tabular-nums",
+              background: "rgba(35,60,0,0.06)",
+              border: "1px solid rgba(35,60,0,0.12)",
+              borderRadius: 10,
+              padding: "12px 8px",
+              fontSize: 16,
+              fontFamily: "Inter, sans-serif",
+              fontWeight: 500,
+              color: "#233C00",
+              outline: "none",
+            }}
+          />
+          <input
+            value={manualName}
+            onChange={(e) => {
+              setManualName(e.target.value);
+              if (manualNameErr) setManualNameErr(false);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleManualAdd();
+            }}
+            placeholder="add an item"
+            style={{
+              flex: 1,
+              background: "rgba(35,60,0,0.06)",
+              border: manualNameErr ? "1px solid #B85C5C" : "1px solid rgba(35,60,0,0.12)",
+              borderRadius: 10,
+              padding: "12px 14px",
+              fontSize: 16,
+              fontFamily: "Inter, sans-serif",
+              color: "#233C00",
+              outline: "none",
+            }}
+          />
+          <button
+            onClick={handleManualAdd}
+            aria-label="Add item"
+            style={{
+              width: 44, height: 44, minWidth: 44,
+              borderRadius: 10,
+              background: "#1E3A42",
+              border: "none",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer",
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FEE7C0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
+        </div>
+        {manualNameErr && (
+          <div style={{ fontFamily: "Inter, sans-serif", fontSize: 12, color: "#B85C5C", paddingLeft: 2 }}>
+            Please enter an item name.
+          </div>
+        )}
       </div>
 
       {/* Clear confirmation modal */}

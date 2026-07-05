@@ -1359,8 +1359,8 @@ export async function addGroceryItems(
   }
 }
 
-export async function addManualGroceryItem(text: string): Promise<void> {
-  await addGroceryItems([{ display_name: text, quantity: '', source_recipe_id: null }]);
+export async function addManualGroceryItem(name: string, quantity: string = ''): Promise<void> {
+  await addGroceryItems([{ display_name: name, quantity, source_recipe_id: null }]);
 }
 
 export async function toggleGroceryItemChecked(id: string, checked: boolean): Promise<void> {
