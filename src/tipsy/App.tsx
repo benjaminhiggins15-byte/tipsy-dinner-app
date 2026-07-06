@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, shareRecipe, type Recipe, type Occasion, type Menu, type SavedRecipe, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, type GroceryItem } from "./data";
+import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, shareRecipe, type Recipe, type Occasion, type Menu, type SavedRecipe, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
@@ -23,42 +23,6 @@ import {
   IconMessageCircle,
 } from "@tabler/icons-react";
 import { pickChips } from "./chips";
-
-// Helper to parse Server-Sent Events from Anthropic streaming API
-async function* parseSSEStream(response: Response) {
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error("No response body");
-
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          const data = line.slice(6);
-          if (data === "[DONE]") continue;
-
-          try {
-            const parsed = JSON.parse(data);
-            yield parsed;
-          } catch (e) {
-            console.warn("Failed to parse SSE data:", data);
-          }
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
 
 type RecipeDraft = {
   title: string;
@@ -1777,13 +1741,16 @@ function RecipeCard({
   async function handleAddToGroceryList() {
     if (!ingredients.length) return;
     try {
-      await addGroceryItems(
+      const insertedItems = await addGroceryItems(
         ingredients.map((i) => ({
           display_name: i.name,
           quantity: i.qty,
           source_recipe_id: recipe.savedId != null ? recipe.savedId.toString() : null,
         }))
       );
+      enrichGroceryItems(
+        insertedItems.map((i) => ({ id: i.id, display_name: i.displayName, quantity: i.quantity }))
+      ).catch((err) => console.error('Grocery enrichment failed:', err));
       setGroceryAddedConfirm(true);
       setTimeout(() => setGroceryAddedConfirm(false), 2000);
     } catch (err) {
@@ -2335,41 +2302,121 @@ function RecipeCard({
 }
 
 /* ---------------- Grocery List ---------------- */
-type GroceryRow = { key: string; quantity: string; ids: string[]; checked: boolean; sortOrder: number };
-type GroceryGroup = { label: string; rows: GroceryRow[] };
+type GroceryRow = {
+  key: string;
+  quantityText: string;
+  ids: string[];
+  checked: boolean;
+  pending: boolean;
+  sortOrder: number;
+};
+type GroceryGroup = { label: string; rows: GroceryRow[]; sortOrder: number };
+type GroceryAisleSection = { aisle: string; groups: GroceryGroup[]; sortOrder: number };
 
-function groupGroceryItems(items: GroceryItem[]): GroceryGroup[] {
-  const byName = new Map<string, GroceryGroup>();
-  const groups: GroceryGroup[] = [];
+const GROCERY_AISLE_ORDER = ["produce", "dairy", "meat", "pantry", "frozen", "other"] as const;
+const GROCERY_AISLE_LABELS: Record<string, string> = {
+  produce: "Produce",
+  dairy: "Dairy",
+  meat: "Meat",
+  pantry: "Pantry",
+  frozen: "Frozen",
+  other: "Other",
+};
 
+function formatGroceryAmount(n: number): string {
+  return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
+}
+
+// How long a freshly-added, still-pending item is held out of the list (shown
+// only via the generic "Updating…" indicator) before it gives up waiting on
+// enrichment and falls back to a normal raw Phase-1 row. Matches the existing
+// polling cap so the two give up at the same time.
+const GROCERY_ENRICHMENT_HOLD_MS = 18000;
+
+// Groups items by aisle, then by normalized/display name within each aisle.
+// Within a name group, rows combine additively only when both come from
+// enriched items sharing the same unit (including unitless numeric counts).
+// Anything not yet enriched (pending/raw/failed) falls back to Phase 1's dumb
+// exact-string quantity match, and always displays its raw text — never
+// invented, never lost. Callers are expected to hold freshly-added still-
+// pending items out of this function entirely (see GroceryList's held-item
+// logic) — any "pending" item that does reach here is one whose hold has
+// timed out, and is treated identically to a raw/failed item.
+function groupGroceryItems(items: GroceryItem[]): GroceryAisleSection[] {
+  const bucketed = new Map<string, GroceryItem[]>();
   for (const item of items) {
-    const nameKey = item.displayName.trim().toLowerCase();
-    let group = byName.get(nameKey);
-    if (!group) {
-      group = { label: item.displayName.trim(), rows: [] };
-      byName.set(nameKey, group);
-      groups.push(group);
+    const bucketKey = item.aisle ?? "other";
+    if (!bucketed.has(bucketKey)) bucketed.set(bucketKey, []);
+    bucketed.get(bucketKey)!.push(item);
+  }
+
+  function buildGroups(bucketItems: GroceryItem[]): GroceryGroup[] {
+    const byName = new Map<string, GroceryGroup>();
+    const groups: GroceryGroup[] = [];
+
+    for (const item of bucketItems) {
+      const isEnriched = item.enrichmentStatus === "enriched" && !!item.normalizedName;
+      const label = (isEnriched ? item.normalizedName! : item.displayName).trim();
+      const nameKey = label.toLowerCase();
+
+      let group = byName.get(nameKey);
+      if (!group) {
+        group = { label, rows: [], sortOrder: item.sortOrder };
+        byName.set(nameKey, group);
+        groups.push(group);
+      }
+      group.sortOrder = Math.min(group.sortOrder, item.sortOrder);
+
+      const canSum = isEnriched && item.amount != null;
+      const rowKey = canSum ? `num:${item.unit ?? ""}` : isEnriched ? "enriched-no-qty" : `raw:${item.quantity}`;
+
+      let row = group.rows.find((r) => r.key === rowKey) as (GroceryRow & { _amountSum: number | null; _unit: string | null }) | undefined;
+      if (!row) {
+        row = {
+          key: rowKey,
+          quantityText: "",
+          ids: [],
+          checked: true,
+          pending: false,
+          sortOrder: item.sortOrder,
+          _amountSum: canSum ? 0 : null,
+          _unit: canSum ? (item.unit ?? null) : null,
+        };
+        group.rows.push(row);
+      }
+      if (canSum && row._amountSum != null) row._amountSum += item.amount!;
+      if (!canSum && !isEnriched) row.quantityText = item.quantity;
+      row.ids.push(item.id);
+      row.checked = row.checked && item.checked;
+      row.pending = row.pending || item.enrichmentStatus === "pending";
+      row.sortOrder = Math.min(row.sortOrder, item.sortOrder);
     }
-    const existingRow = group.rows.find((r) => r.quantity === item.quantity);
-    if (existingRow) {
-      existingRow.ids.push(item.id);
-      existingRow.checked = existingRow.checked && item.checked;
-      existingRow.sortOrder = Math.min(existingRow.sortOrder, item.sortOrder);
-    } else {
-      group.rows.push({ key: item.id, quantity: item.quantity, ids: [item.id], checked: item.checked, sortOrder: item.sortOrder });
+
+    for (const group of groups) {
+      for (const row of group.rows as (GroceryRow & { _amountSum: number | null; _unit: string | null })[]) {
+        if (row._amountSum != null) {
+          row.quantityText = row._unit ? `${formatGroceryAmount(row._amountSum)} ${row._unit}` : formatGroceryAmount(row._amountSum);
+        }
+      }
+      group.rows.sort((a, b) => a.sortOrder - b.sortOrder);
+    }
+    groups.sort((a, b) => a.sortOrder - b.sortOrder);
+    return groups;
+  }
+
+  const sections: GroceryAisleSection[] = [];
+  for (const aisle of GROCERY_AISLE_ORDER) {
+    const bucketItems = bucketed.get(aisle);
+    if (bucketItems && bucketItems.length > 0) {
+      sections.push({
+        aisle,
+        groups: buildGroups(bucketItems),
+        sortOrder: Math.min(...bucketItems.map((i) => i.sortOrder)),
+      });
     }
   }
 
-  for (const group of groups) {
-    group.rows.sort((a, b) => a.sortOrder - b.sortOrder);
-  }
-  groups.sort((a, b) => {
-    const aMin = Math.min(...a.rows.map((r) => r.sortOrder));
-    const bMin = Math.min(...b.rows.map((r) => r.sortOrder));
-    return aMin - bMin;
-  });
-
-  return groups;
+  return sections;
 }
 
 function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => void }) {
@@ -2410,7 +2457,10 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
     setManualName("");
     setManualQty("");
     setManualNameErr(false);
-    await addManualGroceryItem(name, quantity);
+    const insertedItems = await addManualGroceryItem(name, quantity);
+    enrichGroceryItems(
+      insertedItems.map((i) => ({ id: i.id, display_name: i.displayName, quantity: i.quantity }))
+    ).catch((err) => console.error('Grocery enrichment failed:', err));
     setItems(await loadGroceryItems());
   }
 
@@ -2420,7 +2470,77 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
     setItems(await loadGroceryItems());
   }
 
-  const groups = groupGroceryItems(items);
+  const pollCountRef = useRef(0);
+  useEffect(() => {
+    const hasPending = items.some((it) => it.enrichmentStatus === "pending");
+    if (!hasPending) {
+      pollCountRef.current = 0;
+      return;
+    }
+    if (pollCountRef.current >= 12) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      pollCountRef.current += 1;
+      const fresh = await loadGroceryItems();
+      if (!cancelled) setItems(fresh);
+    }, 1500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [items]);
+
+  // Freshly-added items sit in a hold — shown only via the generic "Updating…"
+  // indicator, never as raw rows that later reshuffle — until enrichment
+  // resolves or GROCERY_ENRICHMENT_HOLD_MS elapses, whichever comes first.
+  // Already-settled items (enriched, or pending items whose hold already
+  // expired) are never gated behind this and render instantly.
+  const [timedOutIds, setTimedOutIds] = useState<Set<string>>(new Set());
+  const pendingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  useEffect(() => {
+    const pendingIds = new Set(items.filter((it) => it.enrichmentStatus === "pending").map((it) => it.id));
+
+    for (const id of pendingIds) {
+      if (!pendingTimersRef.current.has(id)) {
+        const timer = setTimeout(() => {
+          setTimedOutIds((prev) => {
+            if (prev.has(id)) return prev;
+            const next = new Set(prev);
+            next.add(id);
+            return next;
+          });
+        }, GROCERY_ENRICHMENT_HOLD_MS);
+        pendingTimersRef.current.set(id, timer);
+      }
+    }
+
+    for (const [id, timer] of pendingTimersRef.current) {
+      if (!pendingIds.has(id)) {
+        clearTimeout(timer);
+        pendingTimersRef.current.delete(id);
+        setTimedOutIds((prev) => {
+          if (!prev.has(id)) return prev;
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }
+    }
+  }, [items]);
+
+  useEffect(() => {
+    return () => {
+      for (const timer of pendingTimersRef.current.values()) clearTimeout(timer);
+      pendingTimersRef.current.clear();
+    };
+  }, []);
+
+  const heldItems = items.filter((it) => it.enrichmentStatus === "pending" && !timedOutIds.has(it.id));
+  const heldIds = new Set(heldItems.map((it) => it.id));
+  const visibleItems = items.filter((it) => !heldIds.has(it.id));
+
+  const sections = groupGroceryItems(visibleItems);
 
   const renderRow = (row: GroceryRow, label: string | null) => (
     <div
@@ -2450,14 +2570,14 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
               fontFamily: "Inter, sans-serif",
               fontSize: 15,
               fontWeight: 400,
-              color: row.checked ? "rgba(35,60,0,0.35)" : "#233C00",
+              color: row.checked ? "rgba(35,60,0,0.35)" : row.pending ? "rgba(35,60,0,0.55)" : "#233C00",
               textDecoration: row.checked ? "line-through" : "none",
             }}
           >
             {label}
           </span>
         )}
-        {row.quantity && (
+        {row.quantityText && (
           <span
             style={{
               fontFamily: "Inter, sans-serif",
@@ -2469,7 +2589,7 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
               marginLeft: label ? "auto" : 0,
             }}
           >
-            {row.quantity}
+            {row.quantityText}
           </span>
         )}
       </div>
@@ -2509,7 +2629,7 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
 
       {/* List */}
       <div style={{ flex: 1, overflowY: "auto", padding: "4px 24px 16px" }}>
-        {!loading && groups.length === 0 && (
+        {!loading && sections.length === 0 && heldItems.length === 0 && (
           <div
             style={{
               fontFamily: "Fraunces, serif",
@@ -2523,23 +2643,77 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
             nothing here yet — pour something open.
           </div>
         )}
-        {groups.map((group, idx) => (
+        {heldItems.length > 0 && (
           <div
-            key={group.label}
-            style={{ padding: "12px 0", borderBottom: idx === groups.length - 1 ? "none" : "1px dotted rgba(35,60,0,0.1)" }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 10,
+              padding: "20px 0",
+              borderBottom: sections.length > 0 ? "1px dotted rgba(35,60,0,0.1)" : "none",
+              marginBottom: sections.length > 0 ? 4 : 0,
+            }}
           >
-            {group.rows.length === 1 ? (
-              renderRow(group.rows[0], group.label)
-            ) : (
-              <>
-                <div style={{ fontFamily: "Inter, sans-serif", fontSize: 15, fontWeight: 400, color: "#233C00", marginBottom: 8 }}>
-                  {group.label}
+            <div
+              style={{
+                width: 14, height: 14,
+                border: "1.5px solid rgba(35,60,0,0.25)",
+                borderTopColor: "rgba(35,60,0,0.6)",
+                borderRadius: "50%",
+                animation: "grocerySpin 0.8s linear infinite",
+              }}
+            />
+            <span
+              style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: 13,
+                fontWeight: 500,
+                letterSpacing: "0.04em",
+                color: "rgba(35,60,0,0.6)",
+              }}
+            >
+              Updating…
+            </span>
+            <style>{`@keyframes grocerySpin { to { transform: rotate(360deg); } }`}</style>
+          </div>
+        )}
+        {sections.map((section, sectionIdx) => (
+          <div
+            key={section.aisle}
+            style={{ padding: "12px 0", borderBottom: sectionIdx === sections.length - 1 ? "none" : "1px dotted rgba(35,60,0,0.1)" }}
+          >
+            <div
+              style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: 11,
+                fontWeight: 500,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: "rgba(35,60,0,0.35)",
+                marginBottom: 8,
+              }}
+            >
+              {GROCERY_AISLE_LABELS[section.aisle] ?? section.aisle}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {section.groups.map((group) => (
+                <div key={group.label} style={{ padding: "8px 0" }}>
+                  {group.rows.length === 1 ? (
+                    renderRow(group.rows[0], group.label)
+                  ) : (
+                    <>
+                      <div style={{ fontFamily: "Inter, sans-serif", fontSize: 15, fontWeight: 400, color: "#233C00", marginBottom: 8 }}>
+                        {group.label}
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: 4 }}>
+                        {group.rows.map((row) => renderRow(row, null))}
+                      </div>
+                    </>
+                  )}
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: 4 }}>
-                  {group.rows.map((row) => renderRow(row, null))}
-                </div>
-              </>
-            )}
+              ))}
+            </div>
           </div>
         ))}
       </div>

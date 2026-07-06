@@ -1,5 +1,43 @@
 import { supabase } from '../lib/supabase';
 
+// Generic SSE stream decoder for the ai-chat edge function. Shared so isolated,
+// non-conversational AI calls (e.g. grocery enrichment) don't need to import
+// from App.tsx, which would create a circular dependency.
+export async function* parseSSEStream(response: Response) {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("No response body");
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          const data = line.slice(6);
+          if (data === "[DONE]") continue;
+
+          try {
+            const parsed = JSON.parse(data);
+            yield parsed;
+          } catch (e) {
+            console.warn("Failed to parse SSE data:", data);
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export type Recipe = {
   title: string;
   description: string;
@@ -1280,6 +1318,8 @@ export async function getRecipesForMenuSection(menuId: string, section: MenuSect
 
 // ==================== GROCERY LIST ====================
 
+export type EnrichmentStatus = 'pending' | 'enriched' | 'raw' | 'failed';
+
 export type GroceryItem = {
   id: string;
   displayName: string;
@@ -1287,6 +1327,11 @@ export type GroceryItem = {
   checked: boolean;
   sourceRecipeId: string | null;
   sortOrder: number;
+  normalizedName: string | null;
+  amount: number | null;
+  unit: string | null;
+  aisle: string | null;
+  enrichmentStatus: EnrichmentStatus | null;
 };
 
 export async function loadGroceryItems(): Promise<GroceryItem[]> {
@@ -1298,35 +1343,44 @@ export async function loadGroceryItems(): Promise<GroceryItem[]> {
   try {
     const { data, error } = await supabase
       .from('grocery_items')
-      .select('id, display_name, quantity, checked, source_recipe_id, sort_order')
+      .select('id, display_name, quantity, checked, source_recipe_id, sort_order, normalized_name, amount, unit, aisle, enrichment_status')
       .eq('user_id', userId)
       .order('sort_order', { ascending: true });
 
     if (error) throw error;
 
-    return (data || []).map((item: any) => ({
-      id: item.id,
-      displayName: item.display_name,
-      quantity: item.quantity,
-      checked: item.checked,
-      sourceRecipeId: item.source_recipe_id,
-      sortOrder: item.sort_order,
-    }));
+    return (data || []).map(mapGroceryItemRow);
   } catch (error) {
     console.error('Error loading grocery items:', error);
     return [];
   }
 }
 
+function mapGroceryItemRow(item: any): GroceryItem {
+  return {
+    id: item.id,
+    displayName: item.display_name,
+    quantity: item.quantity,
+    checked: item.checked,
+    sourceRecipeId: item.source_recipe_id,
+    sortOrder: item.sort_order,
+    normalizedName: item.normalized_name,
+    amount: item.amount,
+    unit: item.unit,
+    aisle: item.aisle,
+    enrichmentStatus: item.enrichment_status,
+  };
+}
+
 export async function addGroceryItems(
   items: { display_name: string; quantity: string; source_recipe_id?: string | null }[]
-): Promise<void> {
+): Promise<GroceryItem[]> {
   const userId = await getCurrentUserId();
   if (!userId) {
     console.error('Cannot add grocery items: no user session');
     throw new Error('No user session');
   }
-  if (items.length === 0) return;
+  if (items.length === 0) return [];
 
   try {
     const { data: existing, error: countError } = await supabase
@@ -1346,21 +1400,25 @@ export async function addGroceryItems(
       quantity: item.quantity,
       source_recipe_id: item.source_recipe_id ?? null,
       sort_order: startOrder + index,
+      enrichment_status: 'pending',
     }));
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('grocery_items')
-      .insert(itemsToInsert);
+      .insert(itemsToInsert)
+      .select('id, display_name, quantity, checked, source_recipe_id, sort_order, normalized_name, amount, unit, aisle, enrichment_status');
 
     if (error) throw error;
+
+    return (data || []).map(mapGroceryItemRow);
   } catch (error) {
     console.error('Error adding grocery items:', error);
     throw error;
   }
 }
 
-export async function addManualGroceryItem(name: string, quantity: string = ''): Promise<void> {
-  await addGroceryItems([{ display_name: name, quantity, source_recipe_id: null }]);
+export async function addManualGroceryItem(name: string, quantity: string = ''): Promise<GroceryItem[]> {
+  return addGroceryItems([{ display_name: name, quantity, source_recipe_id: null }]);
 }
 
 export async function toggleGroceryItemChecked(id: string, checked: boolean): Promise<void> {
@@ -1405,6 +1463,192 @@ export async function clearGroceryItems(mode: 'all' | 'checked'): Promise<void> 
   } catch (error) {
     console.error('Error clearing grocery items:', error);
   }
+}
+
+// ==================== GROCERY ENRICHMENT (isolated AI utility) ====================
+//
+// This is a self-contained, non-conversational AI call. It has its own prompt
+// string, defined below, and is completely separate from the conversational
+// voice/formatting system prompt used by Build (triplicated across fireAICall,
+// sendMessage, and handleChipClick in App.tsx). This function must never import
+// from, reference, or be adapted from those call sites.
+
+const GROCERY_AISLES = ['produce', 'dairy', 'meat', 'pantry', 'frozen', 'other'] as const;
+type GroceryAisle = typeof GROCERY_AISLES[number];
+
+type GroceryEnrichmentResult = {
+  id: string;
+  normalizedName: string;
+  amount: number | null;
+  unit: string | null;
+  aisle: GroceryAisle;
+};
+
+const GROCERY_ENRICHMENT_SYSTEM_PROMPT = `You are a data-normalization utility for a grocery list. You are not a conversational assistant and must never write prose, greetings, or explanations.
+
+You will receive a JSON array of grocery items. Each item has "id", "display_name", and "quantity" (a free-text string, may be empty).
+
+For each item, produce a normalized version:
+- normalized_name: a clean shopping name with preparation/descriptor words stripped (e.g. "finely diced yellow onion" -> "yellow onion") and common synonyms resolved to the most common grocery-store name (e.g. "green onions" -> "scallion"). Keep it short and singular where natural.
+- amount: a plain number extracted from the quantity string (e.g. "2 cups" -> 2). If no clean number can be extracted (e.g. "a pinch", "to taste", empty string), use null. Never invent a number.
+- unit: the unit of measure as plain lowercase text (e.g. "cup", "medium", "clove", "oz"). Use null if there is no unit, or if amount is null.
+- aisle: exactly one of "produce", "dairy", "meat", "pantry", "frozen", "other". If genuinely ambiguous, use "other".
+
+Respond with ONLY a raw JSON array. No prose, no markdown code fences, no explanation, no leading or trailing text of any kind.
+Each output element must be an object with exactly these keys: "id", "normalized_name", "amount", "unit", "aisle".
+The "id" of each output element must exactly match the "id" of its corresponding input item. Return exactly one output element per input item.`;
+
+function parseGroceryEnrichmentResponse(
+  rawText: string,
+  validIds: Set<string>
+): Map<string, GroceryEnrichmentResult> {
+  const results = new Map<string, GroceryEnrichmentResult>();
+
+  let parsed: unknown;
+  try {
+    // The model is instructed to return raw JSON only; strip markdown fences
+    // defensively in case it doesn't comply.
+    const cleaned = rawText.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '');
+    parsed = JSON.parse(cleaned);
+  } catch (error) {
+    console.warn('Grocery enrichment: could not parse AI response as JSON', error);
+    return results;
+  }
+
+  if (!Array.isArray(parsed)) {
+    console.warn('Grocery enrichment: AI response was not a JSON array');
+    return results;
+  }
+
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== 'object') continue;
+    const e = entry as Record<string, unknown>;
+
+    const id = e.id;
+    if (typeof id !== 'string' || !validIds.has(id)) continue;
+
+    const normalizedName = typeof e.normalized_name === 'string' ? e.normalized_name.trim() : '';
+    if (!normalizedName) continue; // nothing usable for this item
+
+    const amount = typeof e.amount === 'number' && Number.isFinite(e.amount) ? e.amount : null;
+    const unit = typeof e.unit === 'string' && e.unit.trim() ? e.unit.trim() : null;
+    const aisle = typeof e.aisle === 'string' && (GROCERY_AISLES as readonly string[]).includes(e.aisle)
+      ? (e.aisle as GroceryAisle)
+      : 'other';
+
+    results.set(id, { id, normalizedName, amount, unit: amount === null ? null : unit, aisle });
+  }
+
+  return results;
+}
+
+async function markGroceryEnrichmentStatus(ids: string[], userId: string, status: EnrichmentStatus): Promise<void> {
+  if (ids.length === 0) return;
+  try {
+    const { error } = await supabase
+      .from('grocery_items')
+      .update({ enrichment_status: status })
+      .in('id', ids)
+      .eq('user_id', userId);
+    if (error) throw error;
+  } catch (error) {
+    console.error(`Error marking grocery items as '${status}':`, error);
+  }
+}
+
+async function writeGroceryEnrichmentResult(id: string, userId: string, result: GroceryEnrichmentResult): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from('grocery_items')
+      .update({
+        normalized_name: result.normalizedName,
+        amount: result.amount,
+        unit: result.unit,
+        aisle: result.aisle,
+        enrichment_status: 'enriched',
+      })
+      .eq('id', id)
+      .eq('user_id', userId);
+    if (error) throw error;
+  } catch (error) {
+    console.error('Error writing grocery enrichment result for item', id, error);
+  }
+}
+
+// Isolated AI enrichment pass. Never overwrites display_name/quantity (the raw
+// fallback) and never throws in a way that could break the caller — worst case,
+// items are left/marked as raw or failed and the list keeps working exactly as
+// it does without enrichment.
+export async function enrichGroceryItems(
+  items: { id: string; display_name: string; quantity: string }[]
+): Promise<void> {
+  if (items.length === 0) return;
+
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot enrich grocery items: no user session');
+    return;
+  }
+
+  const validIds = new Set(items.map((i) => i.id));
+  let results: Map<string, GroceryEnrichmentResult>;
+
+  try {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseAnonKey) throw new Error('Supabase config missing');
+
+    const inputPayload = items.map((i) => ({
+      id: i.id,
+      display_name: i.display_name,
+      quantity: i.quantity,
+    }));
+
+    const response = await fetch(`${supabaseUrl}/functions/v1/ai-chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${supabaseAnonKey}`,
+      },
+      body: JSON.stringify({
+        systemPrompt: GROCERY_ENRICHMENT_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: JSON.stringify(inputPayload) }],
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Edge function error: ${errorText}`);
+    }
+
+    let fullText = '';
+    for await (const chunk of parseSSEStream(response)) {
+      if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'text_delta') {
+        fullText += chunk.delta.text;
+      }
+    }
+
+    if (!fullText.trim()) throw new Error('Empty response from grocery enrichment call');
+
+    results = parseGroceryEnrichmentResponse(fullText, validIds);
+  } catch (error) {
+    console.error('Grocery enrichment call failed:', error);
+    await markGroceryEnrichmentStatus(items.map((i) => i.id), userId, 'failed');
+    return;
+  }
+
+  // Per item: write enriched fields on success, or mark 'raw' when the AI ran
+  // but returned nothing usable for that specific item.
+  await Promise.all(
+    items.map(async (item) => {
+      const result = results.get(item.id);
+      if (result) {
+        await writeGroceryEnrichmentResult(item.id, userId, result);
+      } else {
+        await markGroceryEnrichmentStatus([item.id], userId, 'raw');
+      }
+    })
+  );
 }
 
 // ==================== CLEANUP ====================
