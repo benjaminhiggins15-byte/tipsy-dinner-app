@@ -2313,7 +2313,6 @@ type GroceryRow = {
 type GroceryGroup = { label: string; rows: GroceryRow[]; sortOrder: number };
 type GroceryAisleSection = { aisle: string; groups: GroceryGroup[]; sortOrder: number };
 
-const GROCERY_PENDING_SECTION = "__pending__";
 const GROCERY_AISLE_ORDER = ["produce", "dairy", "meat", "pantry", "frozen", "other"] as const;
 const GROCERY_AISLE_LABELS: Record<string, string> = {
   produce: "Produce",
@@ -2328,17 +2327,25 @@ function formatGroceryAmount(n: number): string {
   return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
 }
 
-// Groups items first by aisle (with a dedicated "tidying up" bucket for items
-// still being enriched), then by normalized/display name within each aisle.
+// How long a freshly-added, still-pending item is held out of the list (shown
+// only via the generic "Updating…" indicator) before it gives up waiting on
+// enrichment and falls back to a normal raw Phase-1 row. Matches the existing
+// polling cap so the two give up at the same time.
+const GROCERY_ENRICHMENT_HOLD_MS = 18000;
+
+// Groups items by aisle, then by normalized/display name within each aisle.
 // Within a name group, rows combine additively only when both come from
 // enriched items sharing the same unit (including unitless numeric counts).
 // Anything not yet enriched (pending/raw/failed) falls back to Phase 1's dumb
 // exact-string quantity match, and always displays its raw text — never
-// invented, never lost.
+// invented, never lost. Callers are expected to hold freshly-added still-
+// pending items out of this function entirely (see GroceryList's held-item
+// logic) — any "pending" item that does reach here is one whose hold has
+// timed out, and is treated identically to a raw/failed item.
 function groupGroceryItems(items: GroceryItem[]): GroceryAisleSection[] {
   const bucketed = new Map<string, GroceryItem[]>();
   for (const item of items) {
-    const bucketKey = item.enrichmentStatus === "pending" && !item.aisle ? GROCERY_PENDING_SECTION : (item.aisle ?? "other");
+    const bucketKey = item.aisle ?? "other";
     if (!bucketed.has(bucketKey)) bucketed.set(bucketKey, []);
     bucketed.get(bucketKey)!.push(item);
   }
@@ -2398,14 +2405,6 @@ function groupGroceryItems(items: GroceryItem[]): GroceryAisleSection[] {
   }
 
   const sections: GroceryAisleSection[] = [];
-  const pendingItems = bucketed.get(GROCERY_PENDING_SECTION);
-  if (pendingItems && pendingItems.length > 0) {
-    sections.push({
-      aisle: GROCERY_PENDING_SECTION,
-      groups: buildGroups(pendingItems),
-      sortOrder: Math.min(...pendingItems.map((i) => i.sortOrder)),
-    });
-  }
   for (const aisle of GROCERY_AISLE_ORDER) {
     const bucketItems = bucketed.get(aisle);
     if (bucketItems && bucketItems.length > 0) {
@@ -2491,7 +2490,57 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
     };
   }, [items]);
 
-  const sections = groupGroceryItems(items);
+  // Freshly-added items sit in a hold — shown only via the generic "Updating…"
+  // indicator, never as raw rows that later reshuffle — until enrichment
+  // resolves or GROCERY_ENRICHMENT_HOLD_MS elapses, whichever comes first.
+  // Already-settled items (enriched, or pending items whose hold already
+  // expired) are never gated behind this and render instantly.
+  const [timedOutIds, setTimedOutIds] = useState<Set<string>>(new Set());
+  const pendingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  useEffect(() => {
+    const pendingIds = new Set(items.filter((it) => it.enrichmentStatus === "pending").map((it) => it.id));
+
+    for (const id of pendingIds) {
+      if (!pendingTimersRef.current.has(id)) {
+        const timer = setTimeout(() => {
+          setTimedOutIds((prev) => {
+            if (prev.has(id)) return prev;
+            const next = new Set(prev);
+            next.add(id);
+            return next;
+          });
+        }, GROCERY_ENRICHMENT_HOLD_MS);
+        pendingTimersRef.current.set(id, timer);
+      }
+    }
+
+    for (const [id, timer] of pendingTimersRef.current) {
+      if (!pendingIds.has(id)) {
+        clearTimeout(timer);
+        pendingTimersRef.current.delete(id);
+        setTimedOutIds((prev) => {
+          if (!prev.has(id)) return prev;
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }
+    }
+  }, [items]);
+
+  useEffect(() => {
+    return () => {
+      for (const timer of pendingTimersRef.current.values()) clearTimeout(timer);
+      pendingTimersRef.current.clear();
+    };
+  }, []);
+
+  const heldItems = items.filter((it) => it.enrichmentStatus === "pending" && !timedOutIds.has(it.id));
+  const heldIds = new Set(heldItems.map((it) => it.id));
+  const visibleItems = items.filter((it) => !heldIds.has(it.id));
+
+  const sections = groupGroceryItems(visibleItems);
 
   const renderRow = (row: GroceryRow, label: string | null) => (
     <div
@@ -2580,7 +2629,7 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
 
       {/* List */}
       <div style={{ flex: 1, overflowY: "auto", padding: "4px 24px 16px" }}>
-        {!loading && sections.length === 0 && (
+        {!loading && sections.length === 0 && heldItems.length === 0 && (
           <div
             style={{
               fontFamily: "Fraunces, serif",
@@ -2594,38 +2643,59 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
             nothing here yet — pour something open.
           </div>
         )}
+        {heldItems.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 10,
+              padding: "20px 0",
+              borderBottom: sections.length > 0 ? "1px dotted rgba(35,60,0,0.1)" : "none",
+              marginBottom: sections.length > 0 ? 4 : 0,
+            }}
+          >
+            <div
+              style={{
+                width: 14, height: 14,
+                border: "1.5px solid rgba(35,60,0,0.25)",
+                borderTopColor: "rgba(35,60,0,0.6)",
+                borderRadius: "50%",
+                animation: "grocerySpin 0.8s linear infinite",
+              }}
+            />
+            <span
+              style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: 13,
+                fontWeight: 500,
+                letterSpacing: "0.04em",
+                color: "rgba(35,60,0,0.6)",
+              }}
+            >
+              Updating…
+            </span>
+            <style>{`@keyframes grocerySpin { to { transform: rotate(360deg); } }`}</style>
+          </div>
+        )}
         {sections.map((section, sectionIdx) => (
           <div
             key={section.aisle}
             style={{ padding: "12px 0", borderBottom: sectionIdx === sections.length - 1 ? "none" : "1px dotted rgba(35,60,0,0.1)" }}
           >
-            {section.aisle === GROCERY_PENDING_SECTION ? (
-              <div
-                style={{
-                  fontFamily: "Fraunces, serif",
-                  fontStyle: "italic",
-                  fontSize: 12,
-                  color: "rgba(35,60,0,0.35)",
-                  marginBottom: 8,
-                }}
-              >
-                tidying up…
-              </div>
-            ) : (
-              <div
-                style={{
-                  fontFamily: "Inter, sans-serif",
-                  fontSize: 11,
-                  fontWeight: 500,
-                  letterSpacing: "0.08em",
-                  textTransform: "uppercase",
-                  color: "rgba(35,60,0,0.35)",
-                  marginBottom: 8,
-                }}
-              >
-                {GROCERY_AISLE_LABELS[section.aisle] ?? section.aisle}
-              </div>
-            )}
+            <div
+              style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: 11,
+                fontWeight: 500,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: "rgba(35,60,0,0.35)",
+                marginBottom: 8,
+              }}
+            >
+              {GROCERY_AISLE_LABELS[section.aisle] ?? section.aisle}
+            </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               {section.groups.map((group) => (
                 <div key={group.label} style={{ padding: "8px 0" }}>
