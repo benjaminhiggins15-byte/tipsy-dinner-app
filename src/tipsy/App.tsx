@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, shareRecipe, type Recipe, type Occasion, type Menu, type SavedRecipe, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream } from "./data";
+import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, shareRecipe, type Recipe, type Occasion, type Menu, type SavedRecipe, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
@@ -2302,123 +2302,6 @@ function RecipeCard({
 }
 
 /* ---------------- Grocery List ---------------- */
-type GroceryRow = {
-  key: string;
-  quantityText: string;
-  ids: string[];
-  checked: boolean;
-  pending: boolean;
-  sortOrder: number;
-};
-type GroceryGroup = { label: string; rows: GroceryRow[]; sortOrder: number };
-type GroceryAisleSection = { aisle: string; groups: GroceryGroup[]; sortOrder: number };
-
-const GROCERY_AISLE_ORDER = ["produce", "dairy", "meat", "pantry", "frozen", "other"] as const;
-const GROCERY_AISLE_LABELS: Record<string, string> = {
-  produce: "Produce",
-  dairy: "Dairy",
-  meat: "Meat",
-  pantry: "Pantry",
-  frozen: "Frozen",
-  other: "Other",
-};
-
-function formatGroceryAmount(n: number): string {
-  return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
-}
-
-// How long a freshly-added, still-pending item is held out of the list (shown
-// only via the generic "Updating…" indicator) before it gives up waiting on
-// enrichment and falls back to a normal raw Phase-1 row. Matches the existing
-// polling cap so the two give up at the same time.
-const GROCERY_ENRICHMENT_HOLD_MS = 18000;
-
-// Groups items by aisle, then by normalized/display name within each aisle.
-// Within a name group, rows combine additively only when both come from
-// enriched items sharing the same unit (including unitless numeric counts).
-// Anything not yet enriched (pending/raw/failed) falls back to Phase 1's dumb
-// exact-string quantity match, and always displays its raw text — never
-// invented, never lost. Callers are expected to hold freshly-added still-
-// pending items out of this function entirely (see GroceryList's held-item
-// logic) — any "pending" item that does reach here is one whose hold has
-// timed out, and is treated identically to a raw/failed item.
-function groupGroceryItems(items: GroceryItem[]): GroceryAisleSection[] {
-  const bucketed = new Map<string, GroceryItem[]>();
-  for (const item of items) {
-    const bucketKey = item.aisle ?? "other";
-    if (!bucketed.has(bucketKey)) bucketed.set(bucketKey, []);
-    bucketed.get(bucketKey)!.push(item);
-  }
-
-  function buildGroups(bucketItems: GroceryItem[]): GroceryGroup[] {
-    const byName = new Map<string, GroceryGroup>();
-    const groups: GroceryGroup[] = [];
-
-    for (const item of bucketItems) {
-      const isEnriched = item.enrichmentStatus === "enriched" && !!item.normalizedName;
-      const label = (isEnriched ? item.normalizedName! : item.displayName).trim();
-      const nameKey = label.toLowerCase();
-
-      let group = byName.get(nameKey);
-      if (!group) {
-        group = { label, rows: [], sortOrder: item.sortOrder };
-        byName.set(nameKey, group);
-        groups.push(group);
-      }
-      group.sortOrder = Math.min(group.sortOrder, item.sortOrder);
-
-      const canSum = isEnriched && item.amount != null;
-      const rowKey = canSum ? `num:${item.unit ?? ""}` : isEnriched ? "enriched-no-qty" : `raw:${item.quantity}`;
-
-      let row = group.rows.find((r) => r.key === rowKey) as (GroceryRow & { _amountSum: number | null; _unit: string | null }) | undefined;
-      if (!row) {
-        row = {
-          key: rowKey,
-          quantityText: "",
-          ids: [],
-          checked: true,
-          pending: false,
-          sortOrder: item.sortOrder,
-          _amountSum: canSum ? 0 : null,
-          _unit: canSum ? (item.unit ?? null) : null,
-        };
-        group.rows.push(row);
-      }
-      if (canSum && row._amountSum != null) row._amountSum += item.amount!;
-      if (!canSum && !isEnriched) row.quantityText = item.quantity;
-      row.ids.push(item.id);
-      row.checked = row.checked && item.checked;
-      row.pending = row.pending || item.enrichmentStatus === "pending";
-      row.sortOrder = Math.min(row.sortOrder, item.sortOrder);
-    }
-
-    for (const group of groups) {
-      for (const row of group.rows as (GroceryRow & { _amountSum: number | null; _unit: string | null })[]) {
-        if (row._amountSum != null) {
-          row.quantityText = row._unit ? `${formatGroceryAmount(row._amountSum)} ${row._unit}` : formatGroceryAmount(row._amountSum);
-        }
-      }
-      group.rows.sort((a, b) => a.sortOrder - b.sortOrder);
-    }
-    groups.sort((a, b) => a.sortOrder - b.sortOrder);
-    return groups;
-  }
-
-  const sections: GroceryAisleSection[] = [];
-  for (const aisle of GROCERY_AISLE_ORDER) {
-    const bucketItems = bucketed.get(aisle);
-    if (bucketItems && bucketItems.length > 0) {
-      sections.push({
-        aisle,
-        groups: buildGroups(bucketItems),
-        sortOrder: Math.min(...bucketItems.map((i) => i.sortOrder)),
-      });
-    }
-  }
-
-  return sections;
-}
-
 function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => void }) {
   const [items, setItems] = useState<GroceryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2426,6 +2309,33 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
   const [manualQty, setManualQty] = useState("");
   const [manualNameErr, setManualNameErr] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+  const [shareConfirm, setShareConfirm] = useState(false);
+
+  async function handleShareList() {
+    if (isSharing) return;
+    setIsSharing(true);
+    try {
+      const url = await shareGroceryList();
+      if (!url) return;
+
+      if (navigator.share) {
+        try {
+          await navigator.share({ url });
+        } catch (err) {
+          // User cancelled — silent fail
+        }
+      } else {
+        await navigator.clipboard.writeText(url);
+        setShareConfirm(true);
+        setTimeout(() => setShareConfirm(false), 2000);
+      }
+    } catch (err) {
+      console.error('Failed to share grocery list:', err);
+    } finally {
+      setIsSharing(false);
+    }
+  }
 
   useEffect(() => {
     let ignore = false;
@@ -2614,17 +2524,46 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
             Grocery List
           </div>
         </div>
-        <button
-          onClick={() => setShowClearConfirm(true)}
-          aria-label="Clear list"
-          style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="3 6 5 6 21 6" />
-            <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-            <path d="M10 11v6M14 11v6" />
-          </svg>
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <button
+            onClick={handleShareList}
+            disabled={isSharing}
+            aria-label="Share grocery list"
+            style={{ background: "transparent", border: "none", padding: 0, cursor: isSharing ? "default" : "pointer", display: "flex", alignItems: "center" }}
+          >
+            {isSharing ? (
+              <div
+                style={{
+                  width: 16, height: 16,
+                  border: "1.5px solid rgba(35,60,0,0.25)",
+                  borderTopColor: "rgba(35,60,0,0.6)",
+                  borderRadius: "50%",
+                  animation: "grocerySpin 0.8s linear infinite",
+                }}
+              />
+            ) : (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="18" cy="5" r="3" />
+                <circle cx="6" cy="12" r="3" />
+                <circle cx="18" cy="19" r="3" />
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+              </svg>
+            )}
+          </button>
+          <button
+            onClick={() => setShowClearConfirm(true)}
+            aria-label="Clear list"
+            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+              <path d="M10 11v6M14 11v6" />
+            </svg>
+          </button>
+        </div>
+        <style>{`@keyframes grocerySpin { to { transform: rotate(360deg); } }`}</style>
       </div>
 
       {/* List */}
@@ -2790,6 +2729,28 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
           </div>
         )}
       </div>
+
+      {/* Share confirmation toast */}
+      {shareConfirm && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "80px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "#233C00",
+            color: "#FEE7C0",
+            padding: "8px 16px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            fontFamily: "Inter, sans-serif",
+            fontWeight: 500,
+            zIndex: 1000,
+          }}
+        >
+          Link copied
+        </div>
+      )}
 
       {/* Clear confirmation modal */}
       {showClearConfirm && (
