@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as RTokenRouteImport } from './routes/r.$token'
+import { Route as ListTokenRouteImport } from './routes/list.$token'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -22,30 +23,39 @@ const RTokenRoute = RTokenRouteImport.update({
   path: '/r/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ListTokenRoute = ListTokenRouteImport.update({
+  id: '/list/$token',
+  path: '/list/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/list/$token': typeof ListTokenRoute
   '/r/$token': typeof RTokenRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/list/$token': typeof ListTokenRoute
   '/r/$token': typeof RTokenRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/list/$token': typeof ListTokenRoute
   '/r/$token': typeof RTokenRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/r/$token'
+  fullPaths: '/' | '/list/$token' | '/r/$token'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/r/$token'
-  id: '__root__' | '/' | '/r/$token'
+  to: '/' | '/list/$token' | '/r/$token'
+  id: '__root__' | '/' | '/list/$token' | '/r/$token'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ListTokenRoute: typeof ListTokenRoute
   RTokenRoute: typeof RTokenRoute
 }
 
@@ -65,11 +75,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/list/$token': {
+      id: '/list/$token'
+      path: '/list/$token'
+      fullPath: '/list/$token'
+      preLoaderRoute: typeof ListTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ListTokenRoute: ListTokenRoute,
   RTokenRoute: RTokenRoute,
 }
 export const routeTree = rootRouteImport

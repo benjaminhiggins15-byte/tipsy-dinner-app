@@ -1334,6 +1334,127 @@ export type GroceryItem = {
   enrichmentStatus: EnrichmentStatus | null;
 };
 
+// Grouping/display logic for the grocery list — a pure function of
+// GroceryItem[], shared by the live GroceryList screen (App.tsx) and the
+// public list.$token.tsx route, which reconstructs GroceryItem-shaped
+// objects from a grocery_list_shares snapshot.
+export type GroceryRow = {
+  key: string;
+  quantityText: string;
+  ids: string[];
+  checked: boolean;
+  pending: boolean;
+  sortOrder: number;
+};
+export type GroceryGroup = { label: string; rows: GroceryRow[]; sortOrder: number };
+export type GroceryAisleSection = { aisle: string; groups: GroceryGroup[]; sortOrder: number };
+
+export const GROCERY_AISLE_ORDER = ["produce", "dairy", "meat", "pantry", "frozen", "other"] as const;
+export const GROCERY_AISLE_LABELS: Record<string, string> = {
+  produce: "Produce",
+  dairy: "Dairy",
+  meat: "Meat",
+  pantry: "Pantry",
+  frozen: "Frozen",
+  other: "Other",
+};
+
+function formatGroceryAmount(n: number): string {
+  return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
+}
+
+// How long a freshly-added, still-pending item is held out of the list (shown
+// only via the generic "Updating…" indicator) before it gives up waiting on
+// enrichment and falls back to a normal raw Phase-1 row. Matches the existing
+// polling cap so the two give up at the same time.
+export const GROCERY_ENRICHMENT_HOLD_MS = 18000;
+
+// Groups items by aisle, then by normalized/display name within each aisle.
+// Within a name group, rows combine additively only when both come from
+// enriched items sharing the same unit (including unitless numeric counts).
+// Anything not yet enriched (pending/raw/failed) falls back to Phase 1's dumb
+// exact-string quantity match, and always displays its raw text — never
+// invented, never lost. Callers are expected to hold freshly-added still-
+// pending items out of this function entirely (see GroceryList's held-item
+// logic) — any "pending" item that does reach here is one whose hold has
+// timed out, and is treated identically to a raw/failed item.
+export function groupGroceryItems(items: GroceryItem[]): GroceryAisleSection[] {
+  const bucketed = new Map<string, GroceryItem[]>();
+  for (const item of items) {
+    const bucketKey = item.aisle ?? "other";
+    if (!bucketed.has(bucketKey)) bucketed.set(bucketKey, []);
+    bucketed.get(bucketKey)!.push(item);
+  }
+
+  function buildGroups(bucketItems: GroceryItem[]): GroceryGroup[] {
+    const byName = new Map<string, GroceryGroup>();
+    const groups: GroceryGroup[] = [];
+
+    for (const item of bucketItems) {
+      const isEnriched = item.enrichmentStatus === "enriched" && !!item.normalizedName;
+      const label = (isEnriched ? item.normalizedName! : item.displayName).trim();
+      const nameKey = label.toLowerCase();
+
+      let group = byName.get(nameKey);
+      if (!group) {
+        group = { label, rows: [], sortOrder: item.sortOrder };
+        byName.set(nameKey, group);
+        groups.push(group);
+      }
+      group.sortOrder = Math.min(group.sortOrder, item.sortOrder);
+
+      const canSum = isEnriched && item.amount != null;
+      const rowKey = canSum ? `num:${item.unit ?? ""}` : isEnriched ? "enriched-no-qty" : `raw:${item.quantity}`;
+
+      let row = group.rows.find((r) => r.key === rowKey) as (GroceryRow & { _amountSum: number | null; _unit: string | null }) | undefined;
+      if (!row) {
+        row = {
+          key: rowKey,
+          quantityText: "",
+          ids: [],
+          checked: true,
+          pending: false,
+          sortOrder: item.sortOrder,
+          _amountSum: canSum ? 0 : null,
+          _unit: canSum ? (item.unit ?? null) : null,
+        };
+        group.rows.push(row);
+      }
+      if (canSum && row._amountSum != null) row._amountSum += item.amount!;
+      if (!canSum && !isEnriched) row.quantityText = item.quantity;
+      row.ids.push(item.id);
+      row.checked = row.checked && item.checked;
+      row.pending = row.pending || item.enrichmentStatus === "pending";
+      row.sortOrder = Math.min(row.sortOrder, item.sortOrder);
+    }
+
+    for (const group of groups) {
+      for (const row of group.rows as (GroceryRow & { _amountSum: number | null; _unit: string | null })[]) {
+        if (row._amountSum != null) {
+          row.quantityText = row._unit ? `${formatGroceryAmount(row._amountSum)} ${row._unit}` : formatGroceryAmount(row._amountSum);
+        }
+      }
+      group.rows.sort((a, b) => a.sortOrder - b.sortOrder);
+    }
+    groups.sort((a, b) => a.sortOrder - b.sortOrder);
+    return groups;
+  }
+
+  const sections: GroceryAisleSection[] = [];
+  for (const aisle of GROCERY_AISLE_ORDER) {
+    const bucketItems = bucketed.get(aisle);
+    if (bucketItems && bucketItems.length > 0) {
+      sections.push({
+        aisle,
+        groups: buildGroups(bucketItems),
+        sortOrder: Math.min(...bucketItems.map((i) => i.sortOrder)),
+      });
+    }
+  }
+
+  return sections;
+}
+
 export async function loadGroceryItems(): Promise<GroceryItem[]> {
   const userId = await getCurrentUserId();
   if (!userId) {
@@ -1649,6 +1770,129 @@ export async function enrichGroceryItems(
       }
     })
   );
+}
+
+// ==================== GROCERY LIST SHARING (frozen-copy snapshot) ====================
+// Snapshot sharing for the grocery list, modeled on shareRecipe/getPublicRecipeByToken
+// but deliberately NOT a live pointer: sharing captures a point-in-time copy of the
+// current enriched list into grocery_list_shares. The live grocery_items table is only
+// ever read here, never written — later edits/clears to the owner's live list must not
+// affect an already-minted snapshot.
+
+// Polling cap mirrors the GroceryList screen's own hold-until-ready timeout (~18s), so
+// a share tap never waits meaningfully longer than the list screen already would before
+// giving up and falling back to whatever's there.
+const GROCERY_SHARE_ENRICHMENT_POLL_INTERVAL_MS = 1500;
+const GROCERY_SHARE_ENRICHMENT_POLL_MAX_ATTEMPTS = 12;
+
+type GroceryListSnapshotItem = {
+  display_name: string;
+  quantity: string;
+  normalized_name: string | null;
+  amount: number | null;
+  unit: string | null;
+  aisle: string | null;
+  enrichment_status: EnrichmentStatus | null;
+  checked: boolean;
+  sort_order: number;
+};
+
+export async function shareGroceryList(): Promise<string | null> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot share grocery list: no user session');
+    return null;
+  }
+
+  try {
+    let items = await loadGroceryItems();
+
+    // Wait for any still-enriching items so the snapshot is clean, up to the
+    // existing hold cap. If it never resolves, capture whatever's there —
+    // a share must never block forever on enrichment.
+    let attempts = 0;
+    while (
+      items.some((it) => it.enrichmentStatus === 'pending') &&
+      attempts < GROCERY_SHARE_ENRICHMENT_POLL_MAX_ATTEMPTS
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, GROCERY_SHARE_ENRICHMENT_POLL_INTERVAL_MS));
+      items = await loadGroceryItems();
+      attempts += 1;
+    }
+
+    const snapshotItems: GroceryListSnapshotItem[] = items.map((item) => ({
+      display_name: item.displayName,
+      quantity: item.quantity,
+      normalized_name: item.normalizedName,
+      amount: item.amount,
+      unit: item.unit,
+      aisle: item.aisle,
+      enrichment_status: item.enrichmentStatus,
+      checked: item.checked,
+      sort_order: item.sortOrder,
+    }));
+
+    // Each share mints a brand-new token/row — unlike shareRecipe's token
+    // reuse. A list snapshot is a point-in-time capture; sharing again later
+    // must capture the then-current list, not resurface an old frozen copy.
+    const token = crypto.randomUUID();
+
+    const { error } = await supabase
+      .from('grocery_list_shares')
+      .insert({ user_id: userId, share_token: token, items: snapshotItems });
+
+    if (error) throw error;
+
+    return `${window.location.origin}/list/${token}`;
+  } catch (error) {
+    console.error('Error sharing grocery list:', error);
+    return null;
+  }
+}
+
+// Reads a frozen snapshot for the public list.$token.tsx route. No user_id
+// filter — anonymous access is governed entirely by the anon-read RLS policy
+// on grocery_list_shares, mirroring getPublicRecipeByToken's reliance on
+// share_token as the sole access grant. Reconstructs GroceryItem-shaped
+// objects (synthetic index-based ids — the snapshot is read-only, so real
+// ids from the live grocery_items table were never stored) so the result can
+// be passed straight into groupGroceryItems, unmodified.
+export async function getPublicGroceryListByToken(token: string): Promise<GroceryItem[] | null> {
+  try {
+    const { data, error } = await supabase
+      .from('grocery_list_shares')
+      .select('items')
+      .eq('share_token', token)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error loading public grocery list:', error);
+      return null;
+    }
+
+    if (!data) {
+      return null;
+    }
+
+    const snapshotItems = (data.items || []) as GroceryListSnapshotItem[];
+
+    return snapshotItems.map((item, idx) => ({
+      id: String(idx),
+      displayName: item.display_name,
+      quantity: item.quantity,
+      checked: item.checked,
+      sourceRecipeId: null,
+      sortOrder: item.sort_order,
+      normalizedName: item.normalized_name,
+      amount: item.amount,
+      unit: item.unit,
+      aisle: item.aisle,
+      enrichmentStatus: item.enrichment_status,
+    }));
+  } catch (error) {
+    console.error('Error loading public grocery list:', error);
+    return null;
+  }
 }
 
 // ==================== CLEANUP ====================
