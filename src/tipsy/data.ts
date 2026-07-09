@@ -48,6 +48,8 @@ export type Recipe = {
   steps?: string[];
   savedId?: number | string; // Can be UUID from Supabase or legacy number from localStorage
   categoryKey?: string;
+  cookEvents?: CookEvent[];
+  headlineRating?: number | null;
 };
 
 // Gradient palette for categories
@@ -526,6 +528,14 @@ export async function getSavedRecipesForCategory(categoryId: string, label: stri
             name,
             quantity,
             sort_order
+          ),
+          cook_events (
+            id,
+            recipe_id,
+            cooked_on,
+            score,
+            note,
+            created_at
           )
         )
       `)
@@ -537,6 +547,7 @@ export async function getSavedRecipesForCategory(categoryId: string, label: stri
     // Transform to Recipe format
     return (recipeCategories || []).map((rc: any) => {
       const recipe = rc.recipes;
+      const cookEvents = (recipe.cook_events || []).map(mapCookEventRow);
       return {
         title: recipe.title,
         description: recipe.description,
@@ -551,6 +562,8 @@ export async function getSavedRecipesForCategory(categoryId: string, label: stri
         steps: recipe.steps || [],
         savedId: recipe.id,
         categoryKey: categoryId,
+        cookEvents,
+        headlineRating: headlineRatingFromEvents(cookEvents),
       };
     });
   } catch (error) {
@@ -1892,6 +1905,155 @@ export async function getPublicGroceryListByToken(token: string): Promise<Grocer
   } catch (error) {
     console.error('Error loading public grocery list:', error);
     return null;
+  }
+}
+
+// ==================== COOK HISTORY ====================
+
+export type CookEvent = {
+  id: string;
+  recipeId: string;
+  cookedOn: string; // YYYY-MM-DD, local date
+  score: number | null; // 1.0-10.0, one decimal place; null if scoring was skipped
+  note: string | null;
+  createdAt: string;
+};
+
+function mapCookEventRow(row: any): CookEvent {
+  return {
+    id: row.id,
+    recipeId: row.recipe_id,
+    cookedOn: row.cooked_on,
+    score: row.score,
+    note: row.note,
+    createdAt: row.created_at,
+  };
+}
+
+// Local-date default for "today" — matches the local-midnight convention in
+// chips.ts; new Date().toISOString() would use UTC and can land on the wrong
+// day for users west of UTC in the evening.
+function todayLocalDateString(): string {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+// Derived, never stored: the score of the most-recent event that has a
+// score, ignoring skipped (null-score) events. Ties broken by created_at.
+export function headlineRatingFromEvents(events: CookEvent[]): number | null {
+  let best: CookEvent | null = null;
+  for (const e of events) {
+    if (e.score == null) continue;
+    if (!best || e.cookedOn > best.cookedOn || (e.cookedOn === best.cookedOn && e.createdAt > best.createdAt)) {
+      best = e;
+    }
+  }
+  return best ? best.score : null;
+}
+
+export async function loadCookEventsForRecipe(recipeId: string): Promise<CookEvent[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return [];
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('cook_events')
+      .select('id, recipe_id, cooked_on, score, note, created_at')
+      .eq('user_id', userId)
+      .eq('recipe_id', recipeId)
+      .order('cooked_on', { ascending: false });
+
+    if (error) throw error;
+
+    return (data || []).map(mapCookEventRow);
+  } catch (error) {
+    console.error('Error loading cook events:', error);
+    return [];
+  }
+}
+
+export async function addCookEvent(
+  recipeId: string,
+  event: { cookedOn?: string; score?: number | null; note?: string | null } = {}
+): Promise<CookEvent | null> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot add cook event: no user session');
+    throw new Error('No user session');
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('cook_events')
+      .insert({
+        user_id: userId,
+        recipe_id: recipeId,
+        cooked_on: event.cookedOn ?? todayLocalDateString(),
+        score: event.score ?? null,
+        note: event.note ?? null,
+      })
+      .select('id, recipe_id, cooked_on, score, note, created_at')
+      .single();
+
+    if (error) throw error;
+
+    return mapCookEventRow(data);
+  } catch (error) {
+    console.error('Error adding cook event:', error);
+    throw error;
+  }
+}
+
+export async function updateCookEvent(
+  eventId: string,
+  updates: { cookedOn?: string; score?: number | null; note?: string | null }
+): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot update cook event: no user session');
+    return;
+  }
+
+  const patch: Record<string, unknown> = {};
+  if (updates.cookedOn !== undefined) patch.cooked_on = updates.cookedOn;
+  if (updates.score !== undefined) patch.score = updates.score;
+  if (updates.note !== undefined) patch.note = updates.note;
+
+  try {
+    const { error } = await supabase
+      .from('cook_events')
+      .update(patch)
+      .eq('id', eventId)
+      .eq('user_id', userId);
+
+    if (error) throw error;
+  } catch (error) {
+    console.error('Error updating cook event:', error);
+  }
+}
+
+export async function deleteCookEvent(eventId: string): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot delete cook event: no user session');
+    return;
+  }
+
+  try {
+    const { error } = await supabase
+      .from('cook_events')
+      .delete()
+      .eq('id', eventId)
+      .eq('user_id', userId);
+
+    if (error) throw error;
+  } catch (error) {
+    console.error('Error deleting cook event:', error);
   }
 }
 
