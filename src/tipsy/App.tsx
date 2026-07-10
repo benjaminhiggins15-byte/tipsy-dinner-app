@@ -1916,7 +1916,7 @@ function RecipeCard({
                 color: "rgba(35,60,0,0.4)",
                 flexShrink: 0,
               }}>
-                {recipe.headlineRating}
+                {recipe.headlineRating.toFixed(1)}
               </div>
             )}
           </div>
@@ -2167,7 +2167,7 @@ function RecipeCard({
                         fontWeight: 500,
                         fontVariantNumeric: "tabular-nums",
                         color: "rgba(35,60,0,0.4)",
-                      }}>{event.score}</span>
+                      }}>{event.score.toFixed(1)}</span>
                     )}
                   </div>
                 );
@@ -2205,7 +2205,7 @@ function RecipeCard({
                           fontWeight: 500,
                           fontVariantNumeric: "tabular-nums",
                           color: "rgba(35,60,0,0.4)",
-                        }}>{event.score}</span>
+                        }}>{event.score.toFixed(1)}</span>
                       )}
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.25)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{
                         transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
