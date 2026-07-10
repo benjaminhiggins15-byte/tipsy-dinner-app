@@ -2019,7 +2019,7 @@ function RecipeCard({
           </div>
 
           {/* Title */}
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+          <div style={{ marginBottom: 8 }}>
             <div style={{
               fontFamily: "Inter, sans-serif",
               fontStyle: "normal",
@@ -2032,18 +2032,6 @@ function RecipeCard({
             }}>
               {recipe.title}
             </div>
-            {headlineRating != null && (
-              <div style={{
-                fontFamily: "Inter, sans-serif",
-                fontSize: 15,
-                fontWeight: 500,
-                fontVariantNumeric: "tabular-nums",
-                color: "rgba(35,60,0,0.4)",
-                flexShrink: 0,
-              }}>
-                {headlineRating.toFixed(1)}
-              </div>
-            )}
           </div>
 
           {/* Description */}
@@ -2059,34 +2047,29 @@ function RecipeCard({
             {recipe.description}
           </div>
 
-          {/* Log cook button */}
-          {editable && (
-            <button
-              onClick={openLogSheetForCreate}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "10px 16px",
-                marginBottom: 18,
-                background: "#233C00",
-                border: "none",
-                borderRadius: 10,
-                color: "#FEE7C0",
+          {/* Headline rating */}
+          {headlineRating != null && (
+            <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 18 }}>
+              <span style={{
                 fontFamily: "Inter, sans-serif",
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: 500,
-                letterSpacing: "0.06em",
+                letterSpacing: "0.12em",
                 textTransform: "uppercase",
-                cursor: "pointer",
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FEE7C0" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-              Log cook
-            </button>
+                color: "rgba(35,60,0,0.35)",
+              }}>
+                Rating
+              </span>
+              <span style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: 15,
+                fontWeight: 700,
+                fontVariantNumeric: "tabular-nums",
+                color: "#233C00",
+              }}>
+                {headlineRating.toFixed(1)}
+              </span>
+            </div>
           )}
 
           {/* Meta row */}
@@ -2296,6 +2279,34 @@ function RecipeCard({
             )}
           </div>
           <div style={{ display: tab === "history" ? "block" : "none", padding: "20px 24px" }}>
+            {editable && (
+              <button
+                onClick={openLogSheetForCreate}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "10px 16px",
+                  marginBottom: 20,
+                  background: "#233C00",
+                  border: "none",
+                  borderRadius: 10,
+                  color: "#FEE7C0",
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  cursor: "pointer",
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FEE7C0" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                Log cook
+              </button>
+            )}
             {cookEvents.map((event, idx) => {
               const hasNote = !!(event.note && event.note.trim().length > 0);
               const isExpanded = expandedCookEvents.has(event.id);
@@ -2536,8 +2547,11 @@ function RecipeCard({
           <div
             onClick={closeLogSheet}
             style={{
-              position: "absolute",
-              inset: 0,
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 64, // nav-bar clearance — anchor to the real viewport, not the padded screen layer (see ScreenStage)
               background: "rgba(35, 60, 0, 0.08)",
               zIndex: 80,
               display: "flex",
@@ -2551,13 +2565,15 @@ function RecipeCard({
               style={{
                 background: "#FAF7F2",
                 borderRadius: "24px 24px 0 0",
-                padding: "16px 20px 24px",
                 width: "100%",
                 maxHeight: "85vh",
-                overflowY: "auto",
+                display: "flex",
+                flexDirection: "column",
                 animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
               }}
             >
+              {/* Scrollable content */}
+              <div style={{ overflowY: "auto", minHeight: 0, flex: "1 1 auto", padding: "16px 20px 0" }}>
               {/* Handle */}
               <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(35,60,0,0.15)", margin: "0 auto 20px" }} />
 
@@ -2697,53 +2713,56 @@ function RecipeCard({
                   color: "#233C00",
                   outline: "none",
                   resize: "none",
-                  marginBottom: 20,
+                  marginBottom: 16,
                 }}
               />
+              </div>
 
-              {/* Save */}
-              <button
-                onClick={handleSaveLog}
-                disabled={savingLog}
-                style={{
-                  width: "100%",
-                  padding: "16px 20px",
-                  background: "#233C00",
-                  color: "#FAF7F2",
-                  border: "none",
-                  borderRadius: 14,
-                  fontFamily: "Inter, sans-serif",
-                  fontSize: 15,
-                  fontWeight: 500,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                  cursor: savingLog ? "not-allowed" : "pointer",
-                  opacity: savingLog ? 0.6 : 1,
-                  marginBottom: logMode === "edit" ? 12 : 0,
-                }}
-              >
-                Save
-              </button>
-
-              {/* Delete (edit mode only) */}
-              {logMode === "edit" && (
+              {/* Pinned footer: Save always stays reachable, never scrolls out of view */}
+              <div style={{ flexShrink: 0, padding: "16px 20px 24px" }}>
                 <button
-                  onClick={() => setConfirmDeleteEvent(true)}
+                  onClick={handleSaveLog}
+                  disabled={savingLog}
                   style={{
                     width: "100%",
-                    padding: "12px",
-                    background: "transparent",
+                    padding: "16px 20px",
+                    background: "#233C00",
+                    color: "#FAF7F2",
                     border: "none",
-                    color: "#B85C5C",
+                    borderRadius: 14,
                     fontFamily: "Inter, sans-serif",
-                    fontSize: 13,
+                    fontSize: 15,
                     fontWeight: 500,
-                    cursor: "pointer",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    cursor: savingLog ? "not-allowed" : "pointer",
+                    opacity: savingLog ? 0.6 : 1,
+                    marginBottom: logMode === "edit" ? 12 : 0,
                   }}
                 >
-                  Delete this cook
+                  Save
                 </button>
-              )}
+
+                {/* Delete (edit mode only) */}
+                {logMode === "edit" && (
+                  <button
+                    onClick={() => setConfirmDeleteEvent(true)}
+                    style={{
+                      width: "100%",
+                      padding: "12px",
+                      background: "transparent",
+                      border: "none",
+                      color: "#B85C5C",
+                      fontFamily: "Inter, sans-serif",
+                      fontSize: 13,
+                      fontWeight: 500,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Delete this cook
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </>
