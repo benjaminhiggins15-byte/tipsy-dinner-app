@@ -2057,6 +2057,7 @@ function RecipeCard({
                 letterSpacing: "0.12em",
                 textTransform: "uppercase",
                 color: "rgba(35,60,0,0.35)",
+                lineHeight: 1,
               }}>
                 Rating
               </span>
@@ -2066,6 +2067,7 @@ function RecipeCard({
                 fontWeight: 700,
                 fontVariantNumeric: "tabular-nums",
                 color: "#233C00",
+                lineHeight: 1,
               }}>
                 {headlineRating.toFixed(1)}
               </span>
