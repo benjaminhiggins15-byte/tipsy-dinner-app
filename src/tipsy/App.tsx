@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, shareRecipe, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList } from "./data";
+import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, shareRecipe, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
@@ -1711,9 +1711,18 @@ function RecipeCard({
   const [showChatInput, setShowChatInput] = useState(false);
   const [chatQuestion, setChatQuestion] = useState("");
   const [expandedCookEvents, setExpandedCookEvents] = useState<Set<string>>(new Set());
+  const [cookEvents, setCookEvents] = useState<CookEvent[]>(recipe.cookEvents ?? []);
+  const [showLogSheet, setShowLogSheet] = useState(false);
+  const [logMode, setLogMode] = useState<"create" | "edit">("create");
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
+  const [logDate, setLogDate] = useState("");
+  const [logScoreDigits, setLogScoreDigits] = useState("");
+  const [logNote, setLogNote] = useState("");
+  const [savingLog, setSavingLog] = useState(false);
+  const [confirmDeleteEvent, setConfirmDeleteEvent] = useState(false);
   const ingredients = recipe.ingredients ?? [];
   const steps = recipe.steps ?? [];
-  const cookEvents = recipe.cookEvents ?? [];
+  const headlineRating = headlineRatingFromEvents(cookEvents);
   const editable = recipe.savedId != null;
 
   const toggleCookEvent = (id: string) => {
@@ -1733,6 +1742,122 @@ function RecipeCard({
       day: "numeric",
       year: "numeric",
     });
+  };
+
+  // Local-date default for "today" — matches the local-midnight convention
+  // used throughout the app; new Date().toISOString() would use UTC and can
+  // land on the wrong day for users west of UTC in the evening.
+  const todayLocalDateString = (): string => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  const sortCookEventsDesc = (events: CookEvent[]): CookEvent[] => {
+    return [...events].sort((a, b) => {
+      if (a.cookedOn !== b.cookedOn) return a.cookedOn < b.cookedOn ? 1 : -1;
+      return a.createdAt < b.createdAt ? 1 : -1;
+    });
+  };
+
+  const openLogSheetForCreate = () => {
+    setLogMode("create");
+    setEditingEventId(null);
+    setLogDate(todayLocalDateString());
+    setLogScoreDigits("");
+    setLogNote("");
+    setShowLogSheet(true);
+  };
+
+  const openLogSheetForEdit = (event: CookEvent) => {
+    setLogMode("edit");
+    setEditingEventId(event.id);
+    setLogDate(event.cookedOn);
+    setLogScoreDigits(event.score != null ? event.score.toFixed(1) : "");
+    setLogNote(event.note ?? "");
+    setShowLogSheet(true);
+  };
+
+  // Decimal keypad for score entry: builds a string left-to-right, at most
+  // one decimal place, whole-number part capped at 10 (so it can only ever
+  // represent 1.0-10.0 or be empty).
+  const handleKeypadDigit = (digit: string) => {
+    setLogScoreDigits((current) => {
+      const dotIndex = current.indexOf(".");
+      if (dotIndex !== -1 && current.length - dotIndex > 1) return current; // already has one decimal digit
+      if (current === "" && digit === "0") return current; // no leading zero — min score is 1.0
+      const candidate = current + digit;
+      const wholePart = dotIndex !== -1 ? candidate.slice(0, candidate.indexOf(".")) : candidate;
+      if (Number(wholePart) > 10) return current;
+      return candidate;
+    });
+  };
+
+  const handleKeypadDecimal = () => {
+    setLogScoreDigits((current) => {
+      if (current === "" || current.includes(".")) return current;
+      return current + ".";
+    });
+  };
+
+  const handleKeypadBackspace = () => {
+    setLogScoreDigits((current) => current.slice(0, -1));
+  };
+
+  // Empty pad = no score. Otherwise clamp into the valid 1.0-10.0 range and
+  // round to one decimal place, matching the numeric(3,1) column.
+  const parseLogScore = (): number | null => {
+    if (logScoreDigits === "" || logScoreDigits === ".") return null;
+    const parsed = parseFloat(logScoreDigits);
+    if (Number.isNaN(parsed)) return null;
+    const clamped = Math.min(10, Math.max(1, parsed));
+    return Number(clamped.toFixed(1));
+  };
+
+  const closeLogSheet = () => {
+    setShowLogSheet(false);
+    setEditingEventId(null);
+  };
+
+  const handleSaveLog = async () => {
+    if (!recipe.savedId || savingLog) return;
+    setSavingLog(true);
+    try {
+      const score = parseLogScore();
+      const note = logNote.trim() || null;
+      const cookedOn = logDate || todayLocalDateString();
+
+      if (logMode === "create") {
+        const created = await addCookEvent(recipe.savedId.toString(), { cookedOn, score, note });
+        if (created) {
+          setCookEvents((prev) => sortCookEventsDesc([...prev, created]));
+        }
+      } else if (editingEventId) {
+        await updateCookEvent(editingEventId, { cookedOn, score, note });
+        setCookEvents((prev) =>
+          sortCookEventsDesc(
+            prev.map((e) => (e.id === editingEventId ? { ...e, cookedOn, score, note } : e))
+          )
+        );
+      }
+      clearRecipeCache?.(categoryKey);
+      closeLogSheet();
+    } catch (err) {
+      console.error("Failed to save cook event:", err);
+    } finally {
+      setSavingLog(false);
+    }
+  };
+
+  const handleDeleteLog = async () => {
+    if (!editingEventId) return;
+    await deleteCookEvent(editingEventId);
+    setCookEvents((prev) => prev.filter((e) => e.id !== editingEventId));
+    clearRecipeCache?.(categoryKey);
+    setConfirmDeleteEvent(false);
+    closeLogSheet();
   };
 
   async function handleShare() {
@@ -1907,7 +2032,7 @@ function RecipeCard({
             }}>
               {recipe.title}
             </div>
-            {recipe.headlineRating != null && (
+            {headlineRating != null && (
               <div style={{
                 fontFamily: "Inter, sans-serif",
                 fontSize: 15,
@@ -1916,7 +2041,7 @@ function RecipeCard({
                 color: "rgba(35,60,0,0.4)",
                 flexShrink: 0,
               }}>
-                {recipe.headlineRating.toFixed(1)}
+                {headlineRating.toFixed(1)}
               </div>
             )}
           </div>
@@ -1933,6 +2058,36 @@ function RecipeCard({
           }}>
             {recipe.description}
           </div>
+
+          {/* Log cook button */}
+          {editable && (
+            <button
+              onClick={openLogSheetForCreate}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "10px 16px",
+                marginBottom: 18,
+                background: "#233C00",
+                border: "none",
+                borderRadius: 10,
+                color: "#FEE7C0",
+                fontFamily: "Inter, sans-serif",
+                fontSize: 12,
+                fontWeight: 500,
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                cursor: "pointer",
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FEE7C0" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              Log cook
+            </button>
+          )}
 
           {/* Meta row */}
           {recipe.yield && (
@@ -2160,15 +2315,27 @@ function RecipeCard({
                       fontWeight: 400,
                       color: "#233C00",
                     }}>{formatCookedOn(event.cookedOn)}</span>
-                    {event.score != null && (
-                      <span style={{
-                        fontFamily: "Inter, sans-serif",
-                        fontSize: 14,
-                        fontWeight: 500,
-                        fontVariantNumeric: "tabular-nums",
-                        color: "rgba(35,60,0,0.4)",
-                      }}>{event.score.toFixed(1)}</span>
-                    )}
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      {event.score != null && (
+                        <span style={{
+                          fontFamily: "Inter, sans-serif",
+                          fontSize: 14,
+                          fontWeight: 500,
+                          fontVariantNumeric: "tabular-nums",
+                          color: "rgba(35,60,0,0.4)",
+                        }}>{event.score.toFixed(1)}</span>
+                      )}
+                      <button
+                        onClick={() => openLogSheetForEdit(event)}
+                        aria-label="Edit this cook"
+                        style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.3)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                          <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
                 );
               }
@@ -2207,6 +2374,20 @@ function RecipeCard({
                           color: "rgba(35,60,0,0.4)",
                         }}>{event.score.toFixed(1)}</span>
                       )}
+                      <span
+                        role="button"
+                        aria-label="Edit this cook"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openLogSheetForEdit(event);
+                        }}
+                        style={{ display: "flex", alignItems: "center", cursor: "pointer" }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.3)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                          <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                        </svg>
+                      </span>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.25)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{
                         transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
                         transition: "transform 200ms ease",
@@ -2326,6 +2507,316 @@ function RecipeCard({
                   back();
                 }
               }}
+              style={{
+                width: "100%",
+                padding: "12px",
+                borderRadius: 10,
+                background: "#B85C5C",
+                border: "none",
+                color: "#FAF7F2",
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Log-cook create/edit sheet */}
+      {showLogSheet && (
+        <>
+          <style>{`
+            @keyframes tipsy-fade { from { opacity: 0; } to { opacity: 1; } }
+            @keyframes tipsy-slideup { from { transform: translateY(100%); } to { transform: translateY(0); } }
+          `}</style>
+          <div
+            onClick={closeLogSheet}
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: "rgba(35, 60, 0, 0.08)",
+              zIndex: 80,
+              display: "flex",
+              alignItems: "flex-end",
+              justifyContent: "center",
+              animation: "tipsy-fade 0.22s ease",
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: "#FAF7F2",
+                borderRadius: "24px 24px 0 0",
+                padding: "16px 20px 24px",
+                width: "100%",
+                maxHeight: "85vh",
+                overflowY: "auto",
+                animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
+              }}
+            >
+              {/* Handle */}
+              <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(35,60,0,0.15)", margin: "0 auto 20px" }} />
+
+              {/* Title */}
+              <div style={{
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 16,
+                fontWeight: 700,
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+                color: "#233C00",
+                textAlign: "center",
+                marginBottom: 20,
+              }}>
+                {logMode === "create" ? "Log a cook" : "Edit this cook"}
+              </div>
+
+              {/* Date */}
+              <div style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: 10,
+                fontWeight: 500,
+                textTransform: "uppercase",
+                letterSpacing: "0.1em",
+                color: "rgba(35,60,0,0.35)",
+                marginBottom: 8,
+              }}>
+                Date
+              </div>
+              <input
+                type="date"
+                value={logDate}
+                onChange={(e) => setLogDate(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "12px 14px",
+                  background: "rgba(35,60,0,0.05)",
+                  border: "1px solid rgba(35,60,0,0.12)",
+                  borderRadius: 10,
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 15,
+                  color: "#233C00",
+                  outline: "none",
+                  marginBottom: 20,
+                }}
+              />
+
+              {/* Score keypad */}
+              <div style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: 10,
+                fontWeight: 500,
+                textTransform: "uppercase",
+                letterSpacing: "0.1em",
+                color: "rgba(35,60,0,0.35)",
+                marginBottom: 8,
+              }}>
+                Score (optional)
+              </div>
+              <div style={{
+                textAlign: "center",
+                fontFamily: "Inter, sans-serif",
+                fontSize: 32,
+                fontWeight: 700,
+                fontVariantNumeric: "tabular-nums",
+                color: logScoreDigits ? "#233C00" : "rgba(35,60,0,0.25)",
+                marginBottom: 14,
+              }}>
+                {logScoreDigits || "—"}
+              </div>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, 1fr)",
+                gap: 8,
+                marginBottom: 20,
+              }}>
+                {["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "back"].map((key) => (
+                  <button
+                    key={key}
+                    onClick={() => {
+                      if (key === "back") handleKeypadBackspace();
+                      else if (key === ".") handleKeypadDecimal();
+                      else handleKeypadDigit(key);
+                    }}
+                    style={{
+                      padding: "14px 0",
+                      background: "rgba(35,60,0,0.05)",
+                      border: "1px solid rgba(35,60,0,0.1)",
+                      borderRadius: 10,
+                      fontFamily: "Inter, sans-serif",
+                      fontSize: 16,
+                      fontWeight: 500,
+                      color: "#233C00",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    {key === "back" ? (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#233C00" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 4H8l-7 8 7 8h13a2 2 0 002-2V6a2 2 0 00-2-2z" />
+                        <line x1="18" y1="9" x2="12" y2="15" />
+                        <line x1="12" y1="9" x2="18" y2="15" />
+                      </svg>
+                    ) : key}
+                  </button>
+                ))}
+              </div>
+
+              {/* Note */}
+              <div style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: 10,
+                fontWeight: 500,
+                textTransform: "uppercase",
+                letterSpacing: "0.1em",
+                color: "rgba(35,60,0,0.35)",
+                marginBottom: 8,
+              }}>
+                Note (optional)
+              </div>
+              <textarea
+                value={logNote}
+                onChange={(e) => setLogNote(e.target.value)}
+                placeholder="how did it go?"
+                rows={3}
+                style={{
+                  width: "100%",
+                  padding: "12px 14px",
+                  background: "rgba(35,60,0,0.05)",
+                  border: "1px solid rgba(35,60,0,0.12)",
+                  borderRadius: 10,
+                  fontFamily: "Fraunces, serif",
+                  fontStyle: "italic",
+                  fontSize: 14,
+                  color: "#233C00",
+                  outline: "none",
+                  resize: "none",
+                  marginBottom: 20,
+                }}
+              />
+
+              {/* Save */}
+              <button
+                onClick={handleSaveLog}
+                disabled={savingLog}
+                style={{
+                  width: "100%",
+                  padding: "16px 20px",
+                  background: "#233C00",
+                  color: "#FAF7F2",
+                  border: "none",
+                  borderRadius: 14,
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 15,
+                  fontWeight: 500,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  cursor: savingLog ? "not-allowed" : "pointer",
+                  opacity: savingLog ? 0.6 : 1,
+                  marginBottom: logMode === "edit" ? 12 : 0,
+                }}
+              >
+                Save
+              </button>
+
+              {/* Delete (edit mode only) */}
+              {logMode === "edit" && (
+                <button
+                  onClick={() => setConfirmDeleteEvent(true)}
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    background: "transparent",
+                    border: "none",
+                    color: "#B85C5C",
+                    fontFamily: "Inter, sans-serif",
+                    fontSize: 13,
+                    fontWeight: 500,
+                    cursor: "pointer",
+                  }}
+                >
+                  Delete this cook
+                </button>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Delete cook-event confirmation modal */}
+      {confirmDeleteEvent && (
+        <div
+          onClick={() => setConfirmDeleteEvent(false)}
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "rgba(35,60,0,0.25)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 90,
+            padding: 24,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 16,
+              padding: "24px 20px",
+              width: "100%",
+              maxWidth: 280,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              border: "0.5px solid rgba(35,60,0,0.1)",
+            }}
+          >
+            <div style={{
+              fontFamily: "'Inter', sans-serif",
+              fontSize: 16,
+              fontWeight: 700,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+              color: "#233C00",
+              textAlign: "center",
+            }}>
+              Delete this cook event?
+            </div>
+            <div style={{
+              fontFamily: "'Inter', sans-serif",
+              fontSize: 13,
+              color: "#233C00",
+              textAlign: "center",
+              marginBottom: 12,
+            }}>
+              This can't be undone.
+            </div>
+            <button
+              onClick={() => setConfirmDeleteEvent(false)}
+              style={{
+                width: "100%",
+                padding: "12px",
+                borderRadius: 10,
+                background: "transparent",
+                border: "0.5px solid rgba(35,60,0,0.1)",
+                color: "#233C00",
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleDeleteLog}
               style={{
                 width: "100%",
                 padding: "12px",
