@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, shareRecipe, type Recipe, type Occasion, type Menu, type SavedRecipe, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList } from "./data";
+import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, shareRecipe, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
@@ -1704,15 +1704,36 @@ function RecipeCard({
   clearRecipeCache?: (categoryKey: string) => void;
   transferToRecipeChat?: (recipe: SavedRecipe, question: string, onCollisionCancel: () => void) => void;
 }) {
-  const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
+  const [tab, setTab] = useState<"ingredients" | "steps" | "history">("ingredients");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [shareConfirm, setShareConfirm] = useState(false);
   const [groceryAddedConfirm, setGroceryAddedConfirm] = useState(false);
   const [showChatInput, setShowChatInput] = useState(false);
   const [chatQuestion, setChatQuestion] = useState("");
+  const [expandedCookEvents, setExpandedCookEvents] = useState<Set<string>>(new Set());
   const ingredients = recipe.ingredients ?? [];
   const steps = recipe.steps ?? [];
+  const cookEvents = recipe.cookEvents ?? [];
   const editable = recipe.savedId != null;
+
+  const toggleCookEvent = (id: string) => {
+    const next = new Set(expandedCookEvents);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setExpandedCookEvents(next);
+  };
+
+  const formatCookedOn = (dateStr: string): string => {
+    const [year, month, day] = dateStr.split("-").map(Number);
+    return new Date(year, month - 1, day).toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+  };
 
   async function handleShare() {
     if (!recipe.savedId) return;
@@ -1873,18 +1894,31 @@ function RecipeCard({
           </div>
 
           {/* Title */}
-          <div style={{
-            fontFamily: "Inter, sans-serif",
-            fontStyle: "normal",
-            fontSize: 28,
-            fontWeight: 700,
-            letterSpacing: "0.04em",
-            textTransform: "capitalize",
-            color: "#233C00",
-            lineHeight: 1.1,
-            marginBottom: 8,
-          }}>
-            {recipe.title}
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+            <div style={{
+              fontFamily: "Inter, sans-serif",
+              fontStyle: "normal",
+              fontSize: 28,
+              fontWeight: 700,
+              letterSpacing: "0.04em",
+              textTransform: "capitalize",
+              color: "#233C00",
+              lineHeight: 1.1,
+            }}>
+              {recipe.title}
+            </div>
+            {recipe.headlineRating != null && (
+              <div style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: 15,
+                fontWeight: 500,
+                fontVariantNumeric: "tabular-nums",
+                color: "rgba(35,60,0,0.4)",
+                flexShrink: 0,
+              }}>
+                {recipe.headlineRating}
+              </div>
+            )}
           </div>
 
           {/* Description */}
@@ -1997,6 +2031,35 @@ function RecipeCard({
               }} />
             )}
           </button>
+          <button
+            onClick={() => setTab("history")}
+            style={{
+              paddingBottom: 12,
+              fontFamily: "Inter, sans-serif",
+              fontSize: 11,
+              fontWeight: 500,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              color: tab === "history" ? "#233C00" : "rgba(35,60,0,0.3)",
+              position: "relative",
+              cursor: "pointer",
+              background: "transparent",
+              border: "none",
+            }}
+          >
+            History
+            {tab === "history" && (
+              <div style={{
+                position: "absolute",
+                bottom: -1,
+                left: 0,
+                right: 0,
+                height: 1.5,
+                background: "#233C00",
+                borderRadius: 2,
+              }} />
+            )}
+          </button>
         </div>
 
         {/* Tab content */}
@@ -2075,6 +2138,114 @@ function RecipeCard({
                 fontSize: 13,
                 color: "rgba(35,60,0,0.4)",
               }}>No steps yet.</p>
+            )}
+          </div>
+          <div style={{ display: tab === "history" ? "block" : "none", padding: "20px 24px" }}>
+            {cookEvents.map((event, idx) => {
+              const hasNote = !!(event.note && event.note.trim().length > 0);
+              const isExpanded = expandedCookEvents.has(event.id);
+
+              if (!hasNote) {
+                return (
+                  <div key={event.id} style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "12px 0",
+                    borderBottom: idx === cookEvents.length - 1 ? "none" : "1px dotted rgba(35,60,0,0.1)",
+                  }}>
+                    <span style={{
+                      fontFamily: "Inter, sans-serif",
+                      fontSize: 14,
+                      fontWeight: 400,
+                      color: "#233C00",
+                    }}>{formatCookedOn(event.cookedOn)}</span>
+                    {event.score != null && (
+                      <span style={{
+                        fontFamily: "Inter, sans-serif",
+                        fontSize: 14,
+                        fontWeight: 500,
+                        fontVariantNumeric: "tabular-nums",
+                        color: "rgba(35,60,0,0.4)",
+                      }}>{event.score}</span>
+                    )}
+                  </div>
+                );
+              }
+
+              return (
+                <div key={event.id} style={{ marginBottom: idx === cookEvents.length - 1 ? 0 : 10 }}>
+                  <button
+                    onClick={() => toggleCookEvent(event.id)}
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      padding: "12px 14px",
+                      background: "rgba(35,60,0,0.03)",
+                      border: "1px solid rgba(35,60,0,0.08)",
+                      borderRadius: isExpanded ? "10px 10px 0 0" : 10,
+                      borderBottom: isExpanded ? "none" : "1px solid rgba(35,60,0,0.08)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span style={{
+                      fontFamily: "Inter, sans-serif",
+                      fontSize: 14,
+                      fontWeight: 400,
+                      color: "#233C00",
+                    }}>{formatCookedOn(event.cookedOn)}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      {event.score != null && (
+                        <span style={{
+                          fontFamily: "Inter, sans-serif",
+                          fontSize: 14,
+                          fontWeight: 500,
+                          fontVariantNumeric: "tabular-nums",
+                          color: "rgba(35,60,0,0.4)",
+                        }}>{event.score}</span>
+                      )}
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.25)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{
+                        transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                        transition: "transform 200ms ease",
+                        flexShrink: 0,
+                      }}>
+                        <polyline points="9 18 15 12 9 6" />
+                      </svg>
+                    </div>
+                  </button>
+                  {isExpanded && (
+                    <div style={{
+                      background: "rgba(35,60,0,0.03)",
+                      border: "1px solid rgba(35,60,0,0.08)",
+                      borderTop: "none",
+                      borderRadius: "0 0 10px 10px",
+                      padding: "12px 14px",
+                    }}>
+                      <p style={{
+                        fontFamily: "Fraunces, serif",
+                        fontStyle: "italic",
+                        fontWeight: 300,
+                        fontSize: 14,
+                        color: "rgba(35,60,0,0.6)",
+                        margin: 0,
+                        lineHeight: 1.5,
+                      }}>{event.note}</p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {cookEvents.length === 0 && (
+              <p style={{
+                fontFamily: "Fraunces, serif",
+                fontStyle: "italic",
+                fontWeight: 300,
+                fontSize: 14,
+                color: "rgba(35,60,0,0.35)",
+              }}>no cooks logged yet.</p>
             )}
           </div>
         </div>
