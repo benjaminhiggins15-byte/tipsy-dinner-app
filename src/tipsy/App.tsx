@@ -2063,8 +2063,8 @@ function RecipeCard({
               </span>
               <span style={{
                 fontFamily: "Inter, sans-serif",
-                fontSize: 15,
-                fontWeight: 700,
+                fontSize: 13,
+                fontWeight: 500,
                 fontVariantNumeric: "tabular-nums",
                 color: "#233C00",
                 lineHeight: 1,
