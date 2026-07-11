@@ -1,555 +1,446 @@
 # Tipsy Dinner — CLAUDE.md
-Last updated: June 2026
+
+Operational/technical truth for the codebase. Strategic status, roadmap, and
+what-shipped-when live in the current-state doc — do NOT duplicate them here.
+Detailed per-screen visual spec lives in DESIGN_SPEC.md — consult it when building
+or restyling a screen.
+
+Last updated: July 2026
 
 ---
 
 ## What This App Is
 
-Tipsy Dinner is a personal digital cookbook and AI recipe assistant. Named after the tradition of cooking with wine with my wife. The app has two modes: a personal recipe library (saved, browsable, organized) and an AI-powered recipe builder that helps craft new recipes through conversation.
-
-Target user: myself first. Elevated home cook. Cooks for two (wife) and for crowds (hosts Christmas, dinner parties, etc). No central recipe hub currently — this solves that.
+Tipsy Dinner is a personal digital cookbook + AI recipe assistant. Two modes: a
+personal recipe library (saved, browsable, organized) and an AI recipe builder
+(Build) that crafts recipes through conversation. Target user: an elevated home
+cook, cooking for two and for crowds.
 
 ---
 
 ## Tech Stack
 
-- React + Vite
+- React + TanStack Start + Vite
 - Bun (package manager, dev server)
-- Supabase — auth provider, client at `src/lib/supabase.ts`
-- Anthropic SDK (AI layer, direct browser call, moving server-side with Supabase later)
-- localStorage (data layer, migrating to Supabase later)
+- Supabase — auth, database, storage, edge functions. Client at `src/lib/supabase.ts`
+- Nitro — Vercel deployment adapter
+- Anthropic API — server-side via Supabase Edge Function `ai-chat` (key never in browser)
 - Tabler Icons
-- Google Fonts: Fraunces (italic), Inter
+- Fonts: Lazydog (display), Fraunces italic, Inter, Playwrite US Modern (logo assets only)
 
-**Local dev:** `bun dev` from `~/Developer/tipsy-dinner-app`
-**Runs at:** localhost:8080 or 8081
+**Local dev:** `bun dev` from `~/Developer/tipsy-dinner-app` → localhost:8080 or 8081
 **GitHub:** github.com/benjaminhiggins15-byte/tipsy-dinner-app
-**Deployment:** Vercel (live at tipsydinner.com)
+**Deployment:** Vercel, live at tipsydinner.com. Every push to main auto-deploys.
 
 ---
 
-## Fonts
+## Design System
 
-- **Lazydog** — `src/fonts/lazydog.ttf`, registered via `@font-face` as `'Lazydog'`. Used for all recipe titles, screen headings, section headings. Always `text-transform: uppercase`. This is the display font for the entire app.
-- **Fraunces italic** — Google Font. Used for AI responses, recipe descriptions, taglines, margin notes, empty state copy, form description fields.
-- **Inter** — Google Font, weights 400 and 500. Used for all body copy, ingredient names, steps, nav labels, buttons, metadata, quantities.
-- **Playwrite US Modern** — Google Font. Used ONLY in the logo assets. Never used anywhere in the app UI.
+Full per-screen detail in DESIGN_SPEC.md. The core:
 
----
+**Fonts**
+- **Lazydog** — `src/fonts/lazydog.ttf`, `@font-face` as `'Lazydog'`. All recipe titles, screen/section headings. Always `text-transform: uppercase`. Display font for the whole app.
+- **Fraunces italic** (Google) — AI responses, recipe descriptions, taglines, margin notes, empty-state copy, form description fields.
+- **Inter** (Google, 400/500) — body copy, ingredient names, steps, nav labels, buttons, metadata, quantities.
+- **Playwrite US Modern** (Google) — logo assets ONLY, never in app UI.
 
-## Color Palette
-
+**Color palette**
 ```css
---green:       #233C00   /* App background — primary surface, all screens */
---green-deep:  #182800   /* Nav bar, input bar, bottom sheets */
---green-mid:   #2E4E08   /* Cards, recipe rows, section headers */
+--green:       #233C00   /* app background — all screens */
+--green-deep:  #182800   /* nav bar, input bar */
+--green-mid:   #2E4E08   /* cards, recipe rows, section headers */
 --blue:        #1E3A42   /* CTA buttons, active states */
---blue-mid:    #2A4E5A   /* Borders, accents, secondary elements */
---cream:       #FEE7C0   /* All text on green, hero moments */
---cream-dim:   rgba(254,231,192,0.55)  /* Secondary text, placeholders, muted labels */
+--blue-mid:    #2A4E5A   /* borders, accents, secondary elements */
+--cream:       #FEE7C0   /* all text on green, hero moments */
+--cream-dim:   rgba(254,231,192,0.55)  /* secondary text, placeholders, muted labels */
 ```
+Rules: cream on green for text directly on background; user bubbles cream bg + green text; AI text cream Fraunces italic on green (no bubble); CTAs cream bg + green text; no red/orange/coral/terracotta. Bottom sheets (delete-confirm modals, the Cook History log/edit sheet) are light `#FAF7F2`, not a green — confirmed by grep, zero `#182800` bottom sheets exist anywhere in the codebase.
 
-**Rules:**
-- Cream on green always for text directly on the background
-- User message bubbles: cream (#FEE7C0) background with green (#233C00) text
-- AI message text: cream (#FEE7C0), Fraunces italic, directly on green background (no bubble)
-- CTA buttons (Next, Save, etc): cream background, green text
-- No red, orange, coral, or terracotta
-
----
-
-## Universal Gradient
-
-Every screen (except splash) gets a full-bleed gradient behind all content:
-
+**Universal gradient** — behind every screen except splash:
 ```css
 background: linear-gradient(180deg, #3a6010 0%, #2E4E08 35%, #233C00 100%);
-height: 420–480px;
-position: absolute;
-top: 0; left: 0; right: 0;
-z-index: 0;
-pointer-events: none;
+height: 420–480px; position: absolute; top:0; left:0; right:0;
+z-index: 0; pointer-events: none;
 ```
+Content sits above at z-index 1. Gradient fades into base green — no hard edges.
 
-All content sits above this at `z-index: 1`. The gradient fades naturally into the base green — no hard edges anywhere on screen.
-
----
-
-## Logo Assets
-
-Three versions in `src/Logos/`:
-- `Full_Logo.png` — full "tipsy DINNER" wordmark lockup. Used on splash screen only.
-- `watermark_square.png` — square tD monogram on green background. Used in Build screen top-left and mini player.
+**Logo assets** (`src/Logos/`) — path is case-sensitive on Linux/Vercel:
+- `Full_Logo.png` — full "tipsy DINNER" wordmark. Splash screen only.
+- `watermark_square.png` — square tD monogram. Build top-left + mini player.
 - `watermark_circle.png` — circular tD monogram. Available if needed.
-
-**Import example:**
 ```js
 import tDSquare from '../Logos/watermark_square.png'
 import fullLogo from '../Logos/Full_Logo.png'
 ```
 
-**Logo usage rules:**
-- Splash screen: `Full_Logo.png`, centered, green background
-- Build screen top-left: `watermark_square.png`, imported as asset, rendered as `<img>` tag
-- Mini player: `watermark_square.png`
-- All other screens: no logo
-
----
-
-## Navigation
-
-Four tabs, always visible, always at the bottom of every screen:
-
-| Tab | Icon (Tabler) | Active state |
-|-----|--------------|--------------|
-| Build | chef hat / bulb | cream icon + cream label + cream dot |
-| Recipes | open book | same |
-| Menus | grid/squares | same |
-| Profile | person | same |
-
-- Active tab: cream icon, cream label, small cream dot below
-- Inactive tabs: cream at 25% opacity
-- Nav bar background: `#182800`
-- Back arrows: icon only, no text labels
-- All screen transitions: slide left/right
-
----
-
-## Screen-by-Screen Design Spec
-
-### Build — Empty State
-- Gradient behind all content
-- Top bar: tD square PNG left, "Write your own" ghost pill right (Inter 500, cream 60%, border cream 20%, border-radius 20px)
-- Hero: "what's on the menu?" centered in the green space — Lazydog uppercase, cream, large (~48–52px)
-- Bottom stack (just above input): three Fraunces italic prompt chips, stacked vertically, "or just type" divider, then input bar
-- Prompt chips: Fraunces italic, cream 85%, background cream 6%, border cream 14%, border-radius 12px, padding 13px 18px
-- "or just type" divider: Inter, cream 28%, uppercase, letter-spacing
-- Input bar: on #182800 footer, cream placeholder text, send button circle in #1E3A42
-
-**Chip copy (personalized later, for now):**
-1. "something impressive for a dinner party"
-2. "a weeknight dinner, nothing too fussy"
-3. "we've got a bottle open — build around it"
-
-### Build — Active State
-- Same gradient, same top bar (tD PNG left only, no "Write your own" once conversation starts)
-- Conversation thread sits on green, justified to bottom
-- User messages: cream (#FEE7C0) bubble, border-radius 18px 18px 4px 18px, green (#233C00) Inter text
-- AI messages: no bubble, Fraunces italic cream text, directly on green, max-width 88%
-- Mini player: on #182800, border-top cream 8%, tD square PNG left, "Recipe ready" label (Inter 10px uppercase cream 35%), recipe title (Inter 500 cream), chevron right
-- Mini player fades to 50% opacity while recipe generating, fades back on completion
-- Mini player pulses soft blue glow (#2A4E5A) once when recipe finishes
-- When recipe card is expanded, auto-collapses to mini player on message send
-- Input bar: same as empty state but send button filled #1E3A42 with cream arrow
-
-### Recipes — Categories
-- Gradient behind header
-- Header: "Recipes" in Inter 500 uppercase cream left, + button (circle, cream border 25%, plus icon) right
-- 2x4 grid of cards, gap 12px, padding 0 20px
-- Cards: background #2E4E08, border-radius 16px, padding 16px
-- Card layout: Tabler icon top-left (cream 20% opacity, 32px), recipe count bottom (Inter 11px cream 40%), category title bottom (Inter 700 uppercase cream, letter-spacing 0.08em, 15px)
-- Empty dashed card bottom-right: cream 4% bg, dashed border cream 15%, plus icon centered
-- Recipes tab active in nav
-
-### Recipes — Recipe List
-- Gradient behind header
-- Header: back arrow left, category name (Inter 500 uppercase cream) + recipe count (Inter cream 35%) stacked, no right action
-- List of 80px rows, gap 10px, padding 0 20px
-- Row: background #2E4E08, border-radius 14px, padding 0 18px
-- Row layout: placeholder icon (44x44 rounded, cream 7% bg, cream 25% stroke) left, title (Inter 700 uppercase cream 14px) + Fraunces italic description (cream 50% 12px) + meta (Inter 500 uppercase cream 25% 10px) center, chevron right (cream 20%)
-
-### Recipes — Recipe Card
-- Full-bleed gradient (taller, ~480px) behind everything — fades through hero, tabs, into ingredient rows seamlessly
-- No hard background change between sections
-- Top bar: back arrow left, share + edit icons right (cream 60%)
-- Hero: category label (Inter 500 uppercase cream 40% 11px), recipe title (Lazydog uppercase cream 28px), Fraunces italic description (cream 60% 15px), meta row (Time / Serves / Added)
-- Tab bar: left-aligned, "Ingredients" and "Steps" only, underline active tab (cream 1.5px), inactive cream 30%, border-bottom cream 8%
-- Ingredients: name left (Inter cream 15px), quantity right (Inter 500 tabular-nums cream 45% 14px), dotted divider between rows (cream 8%)
-- Section labels: Inter 500 uppercase cream 30% 10px
-
-### Write Your Own — Basics (Step 1 of 5)
-- Gradient behind all content
-- Top bar: back arrow left, "Step 1 of 5" centered (Inter 500 uppercase cream 35%), cream pill button "Next" right (green text)
-- Progress bar: thin 2px cream line, 20% filled, cream 10% track
-- Form fields: background cream 5%, border cream 12%, border-radius 10px, padding 14px 16px, cream text
-- Field labels: Inter 500 uppercase cream 35% 10px, letter-spacing 0.1em
-- Description field: Fraunces italic 15px
-- Cook time + Serves: side by side, centered text, Inter 500 18px
-
-### Write Your Own — Ingredients (Step 2 of 5)
-- Gradient behind all content
-- Same top bar pattern, "Step 2 of 5", progress 40%
-- Quantity input: 80px wide, centered, Inter 500 tabular-nums cream 50%
-- Name input: flex 1, Inter 400 cream
-- X remove: cream 20% stroke, right of each row
-- "add ingredient" row first (primary action)
-- "add section" as centered divider with lines (secondary action, below)
-
-### Write Your Own — Steps (Step 3 of 5)
-- Gradient behind all content
-- Same top bar pattern, "Step 3 of 5", progress 60%
-- Step number: small circle (cream 8% bg, cream 12% border, 28px), Inter 500 cream 45% inside
-- Step input: flex 1, Inter 400 cream 14px, border cream 12%, border-radius 10px
-- X remove: right of each row, aligned to top
-- "add step" at bottom
-
-### Write Your Own — Preview (Step 4 — no counter shown)
-- Gradient behind all content
-- Top bar: back arrow left only, no step counter, no progress bar
-- "Looking good." as muted tag (Inter 500 uppercase cream 35%)
-- Full recipe card preview — same layout as recipe card screen
-- Small cream pill "Save" button centered in the green zone above nav, green text
-
-### Write Your Own — Save Sheet (bottom sheet)
-- Slides up over preview screen, preview dims to 25% opacity behind
-- Sheet: background #182800, border-radius 24px 24px at top
-- Handle: 36px wide, 4px tall, cream 15%, centered
-- "Pick a category" label: Inter 500 uppercase cream 35%
-- Category chips: 3-column grid, cream 6% bg, cream 12% border, border-radius 10px, Inter 500 12px cream 60%. Selected: cream 12% bg, cream 40% border, full cream text
-- Divider: 1px cream 6%
-- "Add to a menu" button: cream 4% bg, cream 12% border, border-radius 12px, Inter 500 cream 70%, chevron right
-- "save recipe for now" CTA: full-width, cream bg, green text, border-radius 14px, Inter 500 uppercase
-
-### Menus — Occasions
-- Gradient behind header
-- Header: "Menus" left, + button right
-- Full-width rows separated by cream 6% dividers
-- Each row: Tabler icon (22px, cream 45%) left, occasion name (Inter 500 cream 16px) + menu count (Inter cream 35% 12px) center, edit + delete icons (cream 20%) right, chevron right
-- Menus tab active in nav
-
-### Menus — Menu List
-- Gradient behind header
-- Header: back arrow + occasion name + menu count stacked, + button right
-- Full-width cards, gap 12px, padding 0 20px
-- Card: background #2E4E08, border-radius 16px
-- Photo zone: 130px tall, gradient placeholder (#2E4E08 → #1a3205), "add a photo" label (Inter 500 uppercase cream 20%), gradient overlay at bottom
-- Card body: menu name (Inter 500 cream 15px) + Fraunces italic description (cream 45% 13px) left, edit + delete icons right
-
-### Menus — Menu Interior
-- Gradient behind header
-- Header: back arrow + menu name + occasion name stacked, edit pencil right
-- Collapsible sections: Apps, Mains, Sides, Desserts (Drinks optional)
-- Section header: #2E4E08 5% bg, cream 8% border, border-radius 14px (14px 14px 0 0 when open)
-- Section name: Inter 500 uppercase cream 70% 12px, recipe count cream 30% 11px, chevron right
-- Expanded section body: cream 3% bg, cream 8% border, border-top none, border-radius 0 0 14px 14px
-- Recipe rows inside: name (Inter 500 cream 14px) + meta (Inter cream 30% 11px), X remove right (cream 15%)
-- "add a recipe" row at bottom of each expanded section
-- Tapping a recipe opens the recipe card; back returns to this screen
+**Navigation** — four tabs, always visible, bottom of every screen: Build, Recipes,
+Menus, Profile. Active = cream icon + label + small cream dot below; inactive = cream
+25%. Nav bg #182800. Back arrows icon-only. All transitions slide left/right.
+(Grocery list is NOT a nav tab — reached via a cart icon on the Recipes header. The
+5th nav slot is deliberately reserved for a future social feature.)
 
 ---
 
 ## Data Layer
 
-**Supabase tables:**
-- `profiles` — user profile data (display_name, palate, inspiration, constraints, onboarding_complete)
-- `recipes` — saved recipes
-- `ingredients` — recipe ingredients with sort_order
-- `categories` — custom recipe categories
-- `recipe_categories` — join table for recipes ↔ categories
-- `occasions` — menu occasions
-- `menus` — saved menus
-- `menu_recipes` — join table for menus ↔ recipes
+**Supabase tables** (RLS enabled on all; owner-only unless noted):
+- `profiles` — display_name, palate, inspiration, constraints, onboarding_complete
+- `recipes` — saved recipes; `is_public` bool + `share_token` for public links
+- `ingredients` — one row per ingredient, with `sort_order` (separate table to enable ingredient search later)
+- `categories`, `recipe_categories` (join — a recipe can be in many categories)
+- `occasions`, `menus`, `menu_recipes` (join, has `section` field)
+- `grocery_items` — grocery list rows (raw + AI-enriched fields), owner-only
+- `grocery_list_shares` — frozen snapshots for public grocery share links; owner-write + anon-read
 
-**Legacy localStorage keys (still in use):**
-```
-tipsyDinnerName
-tipsyDinnerEmail
-tipsyDinnerTable
-```
+**Key schema decisions:**
+- Ingredients stored as **free-text strings**, NOT structured `{amount, unit}`. Deliberate and load-bearing: fits the free-text nature of AI cooking ("a good glug of olive oil"); AI normalizes on demand where structure is needed. The AI is the bridge between free-text recipes and any feature that computes over ingredients (grocery, future pantry/nutrition/scaling). Full structured-storage migration is a trigger-gated option — revisit ONLY if a feature must compute across the whole library's quantities in *stored* form.
+- `steps` is a JSONB array inside `recipes` (never searched independently).
+- Menu section canonical order (enforced in app code, not DB): apps → mains → sides → desserts → drinks.
+
+**Schema lives ONLY in the Supabase dashboard** — no in-repo migration files. Known
+logged risk; follow the existing hand-applied-SQL convention when adding tables, but
+flag it. (Grocery tables were added dashboard-only this way.)
+
+**Legacy localStorage keys still in use:** `tipsyDinnerName`, `tipsyDinnerEmail`,
+`tipsyDinnerTable`. (All recipe/menu/profile data is on Supabase — localStorage is no
+longer used for app data.)
 
 ---
 
 ## AI Layer
 
-- Model: claude-sonnet-4-5
-- Supabase Edge Function at `/functions/v1/ai-chat` handles all AI calls
-- API key stored server-side in Edge Function environment (`ANTHROPIC_API_KEY`)
-- Client authenticates with Supabase anon key (`VITE_SUPABASE_ANON_KEY`)
-- Streaming: fully implemented — responses appear word by word via Server-Sent Events
-- Two modes: Brainstorm and Recipe
-- Never enter Recipe mode early — only on explicit user choice
-- Recipe card never updated for technique, wine, or tangent questions
+- Model: `claude-sonnet-4-5` via Supabase Edge Function `ai-chat` (`/functions/v1/ai-chat`)
+- API key server-side only (`ANTHROPIC_API_KEY` in Edge Function env). Client uses Supabase anon key. Swapping LLM = one-line change in the edge function.
+- Streaming implemented (SSE, word-by-word) via `parseSSEStream` in App.tsx
+- `max_tokens` = 4096 (raised from 2048 to give the grocery enrichment call headroom; Anthropic bills only generated tokens, so no cost/behavior change for normal turns)
+- Two modes: Brainstorm and Recipe. Never enter Recipe mode except on explicit user choice. Recipe card is never updated for technique/wine/tangent questions.
 
-**System prompt:**
-- The system prompt is duplicated across three AI-call sites in the Cook component (`fireAICall`, `sendMessage`, `handleChipClick`). All three copies must be kept in sync.
-- User profile (palate, inspiration, constraints) is interpolated into the prompt at all call sites.
-- When a pre-existing saved recipe is in scope (`currentRecipe !== null`), the recipe is serialized via `recipeToXML` and appended to the system prompt as reference context. If no recipe is in scope, the system prompt is unchanged.
-- Formatting guidance (General rules section): instructs the model to format for readability. Named-dish/item lists use bold-name — em-dash — description format (one per line). Broader clustered options use a short framing line plus bold theme labels with specifics in prose (only where grouping is natural). Single-thought / judgment / yes-no answers stay in flowing conversational prose. No headers, no bullet points; asterisks only for bolding names or theme labels. This guidance applies in all modes and whether or not a recipe is loaded in context.
+**System prompt — TRIPLICATED (known debt).** The conversational system prompt is
+duplicated across three call sites in the Cook component: `fireAICall`,
+`sendMessage`, `handleChipClick`. **Any prompt edit must touch all three or they
+drift.** Consolidate before any heavy future prompt work. User profile (palate,
+inspiration, constraints) is interpolated at all three sites.
 
-**Microcopy voice:**
-- "pour a glass — what are we cooking?" (input placeholder)
-- "building the recipe…" / "uncorking…" / "tasting…" (loading states)
-- "filed away." (save confirmation)
-- "nothing here yet — pour something open." (empty states)
-- "Looking good." (preview screen tag)
-- "save recipe for now" (save sheet CTA)
-- "what's on the menu?" (Build empty state hero)
+**Recipe context injection.** When a saved recipe is in scope (`currentRecipe !==
+null`), it is serialized via `recipeToXML` (module-level in App.tsx) and appended to
+the **system prompt as reference material** — framed "The user is asking about this
+saved recipe; use it as reference: …". It is NOT seeded as a fake assistant message
+(that made the model believe it authored the recipe and drift into recipe-prose
+register). Travels every turn; token-neutral; scale-safe. Blank Build leaves the
+prompt unchanged. Invariants: recipe never enters the visible `messages` array;
+`<recipe>` tags stripped from AI output; XML schema unchanged; a Build-from-scratch
+AI-authored recipe legitimately stays an assistant message in history.
+
+**Formatting house style** (content-aware, all modes, recipe loaded or not): named
+dishes/items → bold-name — em-dash — description, one per line; broader clustered
+options → short framing line + bold theme labels, specifics in prose; single
+thought/judgment/yes-no → flowing prose. No headers, no bullets; asterisks only for
+bolding names/labels. Guard against both over-structuring (invented groupings) and
+under-structuring (dense paragraphs).
+
+**Grocery enrichment is a SEPARATE AI island.** `enrichGroceryItems` (data.ts) is a
+structured JSON-in/JSON-out utility with its own prompt
+(`GROCERY_ENRICHMENT_SYSTEM_PROMPT`, defined just above it). **Never merge, adapt
+from, or share code with the triplicated conversational prompt** — different purposes
+(structured utility vs. conversational voice); mixing risks both contracts.
+
+**Microcopy voice:** "pour a glass — what are we cooking?" (placeholder); "building
+the recipe…" / "uncorking…" / "tasting…" (loading); "filed away." (save); "nothing
+here yet — pour something open." (empty); "Looking good." (preview); "what's on the
+menu?" (Build hero).
 
 ---
 
 ## Authentication
 
-**Stack:**
-- Supabase Auth — `@supabase/supabase-js` installed
-- Client: `src/lib/supabase.ts`
-- Auth screens: `src/tipsy/SignUp.tsx` and `src/tipsy/SignIn.tsx`
-- Transition wrapper: `src/tipsy/AuthFlow.tsx` handles slide animations between auth screens
+- Supabase Auth (`@supabase/supabase-js`). Client `src/lib/supabase.ts`. Screens `src/tipsy/SignUp.tsx`, `src/tipsy/SignIn.tsx`; slide transitions via `src/tipsy/AuthFlow.tsx`.
+- Email/password + Google OAuth, both working. Email confirmation disabled (intentional). Profile auto-created on signup via Postgres trigger.
+- Routing: no session → SignUp; session + `onboarding_complete` false → Onboarding; session + true → Build.
+- Onboarding: three questions (palate, inspiration, constraints), each writes to `profiles`; loader sets `onboarding_complete` true.
 
-**Session handling:**
-- `App.tsx` manages session state using `supabase.auth.getSession()` and `supabase.auth.onAuthStateChange()`
-- Real-time listener reacts to login/logout
-- Sign out button in Profile page Support section
+**Duplicate SIGNED_IN event.** `onAuthStateChange` fires a duplicate SIGNED_IN when
+the browser tab regains focus. A `profileInitialized` ref prevents re-running
+profile/migration logic on subsequent events; it resets to false on logout so
+re-auth works. (This was the root cause of the old tab-refocus state-reset bug.)
 
-**Routing logic:**
-1. No active session → show SignUp screen (can navigate to SignIn via pill button)
-2. Active session + `onboarding_complete` = false in profiles table → show Onboarding flow
-3. Active session + `onboarding_complete` = true → show Build screen (main app)
+---
 
-**Auth methods:**
-- Email/password sign up and sign in
-- Google OAuth (wired and working)
-- Email confirmation currently disabled in Supabase (intentional for development)
+## Architecture / SSR
 
-**Onboarding:**
-- Legacy Welcome screen (name/email/password) removed — auth happens before onboarding
-- Onboarding now starts directly at first question ("Your palate")
-- Three questions total: palate, inspiration, constraints
-- Each question writes to Supabase profiles table (palate, inspiration, constraints columns)
-- Loader screen sets `onboarding_complete` = true in profiles table on completion
+**SSR + Supabase.** TanStack Start with SSR via Nitro. Supabase client is SSR-safe:
+- Browser: localStorage, `persistSession: true`, `detectSessionInUrl: true`
+- Server: no-op storage, `persistSession: false`, `detectSessionInUrl: false`
+- `getCurrentUserId()` uses `supabase.auth.getUser()` (not `getSession()`) for reliable production session retrieval.
 
-**Transitions:**
-- SignUp ↔ SignIn: slide left/right via AuthFlow component
-- Sign out: slides right from main app to auth screens (same as back navigation throughout app)
-- Uses same DURATION (300ms) and easing as all other screen transitions
+**Recipe List cache (Option 2).** Recipe data lives in App.tsx, not the list
+component: `recipesByCategory` state (keyed by category); `ensureRecipesLoaded()`
+fetches/caches before nav and on list mount when empty; `clearRecipeCache()`
+invalidates on save/edit/delete; the list re-fetches via a useEffect dependency on
+`recipesByCategory[categoryKey]`.
+
+**ScreenStage tree.** Unified structure: the current screen always renders in the
+same base-layer position; the outgoing screen renders as an overlay only during a
+transition. (Previously alternated between two JSX shapes, causing unmount/remount on
+every navigation.) NOTE: `paddingBottom: 64` (App.tsx ~lines 1218 & 1231) is
+hard-coded nav-bar clearance — content-box sizing, so the screen layer's actual box is
+64px taller than the true viewport. This already bit a real bottom sheet (Cook
+History's log-cook sheet): a `position: absolute; inset: 0` backdrop inherited the
+oversized containing block and pushed its Save button 64px below the visible screen.
+Fixed there via `position: fixed; bottom: 64` (matching the existing chat-input-bar
+pattern) instead of `absolute + inset: 0`. Any new full-height bottom sheet should use
+the same `fixed` pattern from the start. Someday cleanup: make the nav-bar clearance
+not hard-coded so this class of bug can't recur.
+
+**Lovable double-mount.** Built in Lovable → components mount twice in dev
+(StrictMode-equivalent). All async fetches use the ignore-flag pattern:
+```javascript
+useEffect(() => {
+  let ignore = false;
+  async function load() {
+    const data = await fetchSomething();
+    if (ignore) return;
+    setState(data);
+  }
+  load();
+  return () => { ignore = true; };
+}, [deps]);
+```
+
+**Public sharing route.** `src/routes/r.$token.tsx` — standalone, outside the auth
+flow and outside the app frame. Server loader + `getPublicRecipeByToken(token)`
+(fetches recipe + ingredients, no `user_id` filter, relies on RLS). Two anon-read
+policies (`recipes_select_public`, `ingredients_select_public`) gated to `is_public =
+true`, OR'd with owner-only policies. Tokens minted via `crypto.randomUUID()`, reused
+for stable links. **Must stay chrome-free** (no in-app UI like the chat icon).
+
+**Vercel quirks.** Nitro generates `.vercel/output` during build (gitignored).
+`config.json` and `.vc-config.json` are written manually via a Nitro compiled hook in
+`vite.config.ts`; `tslib.es6.mjs` copied in the same hook. Output dir set to
+`.vercel/output` in Vercel settings.
 
 ---
 
 ## Build Conversation Persistence
 
-**Why**: Previously, Build's conversation state lived in the Cook component and was destroyed on unmount (e.g., when switching tabs or saving a recipe). Users lost their conversation mid-flow.
+Build state is lifted to App-level so it survives tab switches, navigation, and save
+flows (it previously lived in Cook and was destroyed on unmount). App-level state:
+`buildMessages`, `buildConversationHistory`, `buildCurrentRecipe`,
+`buildMessageIdRef`, `buildAutoFireAI`. Cook receives these as props, renders/updates
+them, does NOT own them.
 
-**Solution**: Build conversation state is lifted to App-level (lines 314-319 in `App.tsx`):
-- `buildMessages` — visible chat messages
-- `buildConversationHistory` — full history sent to AI (includes system messages not shown as bubbles)
-- `buildCurrentRecipe` — in-progress recipe shown in mini player
-- `buildMessageIdRef` — message ID counter
-- `buildAutoFireAI` — flag to trigger AI on Build mount (used by recipe chat transfer)
-
-These survive tab switches, navigation, and save flows. Cook receives them as props and renders/updates them, but doesn't own them.
-
-**Clear functions**:
-- `clearBuildStateOnly()` (line 818) — resets the four state pieces above, no transition or navigation. Used when seeding needs to atomically replace state.
-- `clearBuildConversation()` (line 826) — calls `clearBuildStateOnly()`, then triggers a 300ms slide-back transition to a fresh Cook screen (with new `resetKey`). This is what the refresh button uses.
-
-**Refresh button**:
-- Top-right of Build's active state, hidden when `isEmpty` (line 3122: `{!isEmpty && (...)}`).
-- Tapping opens a confirmation modal (lines 3415-3502) reusing the delete-confirm pattern.
-- On confirm, calls `onClearConversation` prop (wired to `clearBuildConversation`), which runs the animated clear.
-
----
-
-## Build Home-Screen Suggestion Chips
-
-**Overview**: The three chips on the Build empty-state home screen are data-driven, selected at mount, and vary based on date/time. Defined in `src/tipsy/chips.ts`, rendered via `.map()` in App.tsx (lines 3267+).
-
-**Chip data shape**:
-- `header` (string) — bold Inter lead word displayed at top of chip (e.g., "Build", "Brainstorm", "Help")
-- `body` (string) — italic Fraunces body text displayed below header (e.g., "a fun Sunday dinner")
-- `prompt` (string) — full text fired into `handleChipClick` when tapped. This is what the AI receives. Tapping a chip is functionally identical to typing that text and sending it.
-- `type` ("build" | "brainstorm" | "help") — used by picker for variety across the 3 selected chips
-- `timing?` (object, optional) — if present, chip is time-aware and active only during specific windows. If absent, chip is evergreen (always available).
-
-**Five timing shapes**:
-1. `seasonal` — active every year between MM-DD start and end dates (e.g., summer: 06-16 → 08-31)
-2. `fixedHoliday` — active from N days before a recurring MM-DD date through the date (e.g., July 4th: 07-04, leadIn 10 → window 06-24 through 07-04)
-3. `floatingHoliday` — active from N days before explicit YYYY-MM-DD dates through each date (e.g., Thanksgiving 2026-11-26, 2027-11-25, leadIn 16)
-4. `recurringWeekly` — active on specified weekdays (0=Sun, 6=Sat) but only within a seasonal window. **Supports season wrap across New Year** (e.g., gameday: Sat/Sun, season 09-05 → 02-09 wraps into January-February)
-5. `oneOff` — active from N days before a single YYYY-MM-DD date through the date (e.g., awards night 2026-02-01, leadIn 4)
-
-`isChipActive(chip, today)` resolves whether a time-aware chip is live on a given date.
-
-**Picker behavior** (`pickChips(today)`):
-- Returns exactly 3 chips
-- Time-aware chips that are active today fill slots first (up to all 3 if genuinely active — e.g., a fall Sunday could show both "cozy fall dinner" and "gameday spread")
-- Remaining slots fill from the evergreen pool
-- Picker aims for variety of `type` across the 3 chips where possible (don't return three "Build" chips if the pool allows otherwise)
-- No duplicates, always exactly 3
-- Chips are picked **once per mount** via `useMemo` (stable within a session, varied across sessions)
-
-**CRITICAL date-handling convention**:
-- All date construction in `chips.ts` is **LOCAL-midnight**. Production calls `pickChips(new Date())`, which is local time, and users think in local days.
-- **Never use `new Date("YYYY-MM-DD")`** — it parses as UTC midnight and shifts windows by a day in timezones west of UTC. This was a real bug (July 4th chip opened/closed one day late), root-caused and fixed.
-- Use the local-parse helpers: `parseLocalDate(dateStr)`, `parseMonthDayWithYear(monthDay, year)`, `toLocalStartOfDay(date)`.
-- Do NOT reintroduce UTC string-parsing. The normalization logic in `isChipActive` assumes local dates.
-
-**Permanent test**: `src/tipsy/chips.test.ts`
-- Run with `bun run src/tipsy/chips.test.ts`
-- 29 test cases covering all timing shapes at their tight window edges
-- Imports the real chip definitions from `chips.ts` (not redefined, so test stays valid as chip data evolves)
-- Re-run whenever chip timing logic or calendar entries change
-
-**Adding new chips**:
-- The chip pool is currently a small starter set designed to grow into a large cultural calendar
-- Adding entries is **data-only** — define the chip in `evergreenChips` or `timeAwareChips` arrays
-- Does NOT require touching `isChipActive`, `pickChips`, or any logic functions
-
-**Guardrails** (chips do NOT touch):
-- System prompt (still triplicated across `fireAICall`, `sendMessage`, `handleChipClick` in App.tsx)
-- Recipe XML format or `recipeToXML`
-- Persistence/refresh logic
-- Public sharing route
+Clear functions: `clearBuildStateOnly()` resets state, no transition (used when
+seeding must atomically replace state); `clearBuildConversation()` calls it then runs
+a 300ms slide to a fresh Cook (new `resetKey`) — this is what the refresh button
+uses. Refresh button: top-right of Build active state, hidden when empty; confirm
+modal reuses the delete-confirm pattern.
 
 ---
 
 ## Chat from Recipe Card
 
-**Entry point**: Floating chat icon on saved recipes in the in-app Recipe Card (line 2160: `{editable && transferToRecipeChat && (...)}` — gated on `recipe.savedId`). NOT present on the public route `r.$token.tsx` (separate component, must stay chrome-free).
+A floating chat icon on the user's own saved Recipe Card (gated on `recipe.savedId`;
+NOT on the public route) opens a slide-up input bar; the user's question transfers
+them into Build with the full recipe loaded as the in-progress recipe, AI auto-fires
+on arrival. Single transfer path for empty and active Build (no collision warning —
+starting a new chat silently replaces any active one; the refresh button is the
+deliberate reset).
 
-**Interaction flow**:
-1. User taps chat icon → slides up a `CookInputBar` docked flush above nav bar (bottom: 64px, line 2209)
-2. User types question and taps send
-3. `handleChatSend` (line 1760 in RecipeCard) builds `SavedRecipe` object, calls `transferToRecipeChat` prop
-4. Slide-up bar closes, user lands in Build with seeded conversation, AI auto-fires
+**RecipeCard is a module-level component with NO closure access to App scope.**
+Seeding/navigation must go through props (e.g. `transferToRecipeChat`). Never call
+App-level setters (`setBuildMessages`, `switchToTab`, etc.) directly from RecipeCard —
+they're undefined there and crash silently. `transferToRecipeChat` atomically seeds
+the mini-player recipe, the user's question as the first message, and a one-entry
+conversation history, then navigates to Build. Auto-fire keys off a seeded
+single-user-message history **with `currentRecipe !== null`** (that check
+distinguishes a recipe-loaded chat from empty Build); guarded by `autoFireRef`.
 
-**Dismiss**: Tap-outside-to-close via backdrop (lines 2188-2198, covers content area only, not nav). Tapping inside the bar stops propagation so it doesn't close.
-
-**Transfer path** (`transferToRecipeChat`, line 773):
-- **IMPORTANT**: RecipeCard is a module-level component with NO closure access to App scope. Seeding/navigation logic must go through props like `transferToRecipeChat`. Never call App-level functions (`setBuildMessages`, `switchToTab`, etc.) directly from RecipeCard — they're undefined there and will crash silently.
-- Single transfer path for both empty and active Build (no collision warning).
-- Atomically seeds:
-  - In-progress recipe (mini player): `setBuildCurrentRecipe(recipeDraft)` (line 789)
-  - User's question as first message: `setBuildMessages([userMessage])` (line 797)
-  - Conversation history with just the user question: `setBuildConversationHistory([{ role: "user", content: question.trim() }])` (line 805)
-- Navigates to Build: `switchToTab("build")` (line 814)
-
-**Recipe-to-AI context injection**:
-- `recipeToXML()` helper (App.tsx line 90) is a module-level function that converts a recipe to structured XML matching the system prompt's `<recipe>` format. It was moved to module level to be accessible from both the App component (`transferToRecipeChat`) and the Cook component (AI-call sites: `fireAICall`, `sendMessage`, `handleChipClick`).
-- When a pre-existing saved recipe is pulled into chat, the recipe is supplied to the model as **system-prompt reference context**, NOT as a seeded assistant-role message in `conversationHistory`.
-- At each AI-call site in Cook, the system prompt is conditionally extended: if `currentRecipe` exists, the recipe is serialized via `recipeToXML` and appended to the system prompt string with the framing `"The user is asking about this saved recipe; use it as reference:\n\n${recipeXML}"`. If no recipe is in scope, the system prompt is unchanged (blank Build is unaffected).
-- Preserved invariants: recipe invisibility (recipe never enters the `messages`/display array), recipe XML stripping logic (strips `<recipe>` tags from AI response text), the `<recipe>` XML schema, and the Build-from-scratch flow where an AI-authored recipe legitimately remains an assistant message in `conversationHistory`.
-
-**Auto-fire on arrival**:
-- Cook's `useEffect` (lines 2360-2376) detects seeded conversation on mount.
-- Triggers when: `messages.length === 1`, `messages[0].role === "user"`, `conversationHistory.length === 1`, `conversationHistory[0].role === "user"`, and `currentRecipe !== null`. The `currentRecipe` check is critical — it distinguishes a recipe-loaded chat from an empty Build.
-- Guarded by `autoFireRef` to prevent double-firing.
-- `currentRecipe` is included in the `useEffect` dependency array.
-- Immediately fires AI call with the seeded history (line 2374: `fireAICall(conversationHistory)`).
-
-**Why inject full recipe**: Users ask recipe-specific questions ("can I substitute X?", "how long does step 2 take?"). The AI needs ingredients and steps in context to answer accurately. Recipe context is transparent to the user (not shown as a chat bubble), but present in the system prompt on every turn of that conversation.
+Full recipe (not mini-player-only) is injected so the AI can answer surgical
+questions ("can I sub X?", "how long is step 2?") correctly. See AI Layer for the
+system-prompt-reference mechanism.
 
 ---
 
 ## Update vs Save-as-New (Recipe Origin Tracking)
 
-**Recipe origin tracking**: `RecipeDraft` (App.tsx line 67) now carries an optional `sourceId?: string` field. Set in `transferToRecipeChat` (line 787) from the source recipe's `id` when a saved recipe is loaded into Build via chat-from-recipe. Preserved across AI turns: all three AI call sites (`fireAICall`, `sendMessage`, `handleChipClick`) copy `sourceId` from the previous `buildCurrentRecipe` onto the newly-parsed recipe (lines 2560, 2801, 3155), so it survives repeated AI edits. `sourceId` is internal state only — NOT included in `recipeToXML`, NOT sent to the AI, must stay out of the recipe XML.
+`RecipeDraft` carries an optional `sourceId?: string`, set in `transferToRecipeChat`
+from the source recipe's id when a saved recipe is loaded via chat-from-recipe. All
+three AI call sites copy `sourceId` forward onto each newly-parsed recipe so it
+survives repeated AI edits. `sourceId` is internal state only — NOT in `recipeToXML`,
+NOT sent to the AI.
 
-**Save-flow branching**: When saving from Build, if `buildCurrentRecipe.sourceId` is present, the save sheet shows a two-button choice (Update [name] / Save as new) instead of the normal category picker. Absent → normal save flow unchanged. **Update path** calls `onUpdateRecipe` (line 2854) → `updateSavedRecipe` with in-place overwrite, re-anchors `sourceId` to the same saved recipe (line 2883). **Save-as-new path** uses normal `saveRecipe` insert and deliberately leaves `sourceId` pointing at the original base (line 2936–2939, commented as "base stays anchored" — enables spinning off multiple sibling recipes from one base in a single chat, marked as swappable F&F bet).
+At save: if `sourceId` is present, the save sheet shows a two-button choice (Update
+[name] / Save as new) instead of the category picker; absent → normal flow. **Update**
+overwrites in place via `updateSavedRecipe`, keeps categories, re-anchors `sourceId`
+to the same recipe. **Save-as-new** inserts via `saveRecipe` and deliberately leaves
+`sourceId` on the original base, so multiple siblings can be spun off one base in a
+single chat (swappable F&F bet). Edge case: origin deleted mid-chat → silent fallback
+to save-as-new.
 
-**updateSavedRecipe fixes** (data.ts lines 323–468): Three bugs corrected. (a) Ingredient INSERT now includes `user_id: userId` (line 381) — was missing → RLS 42501 → silent ingredient wipe. (b) Ingredient replacement is now safe against partial failure: old ingredients fetched as backup (line 360), best-effort restore on insert failure (lines 395–421). Note: not ACID-atomic — Supabase client exposes no transaction control; documented limitation. (c) Empty-array gate changed from `!== undefined` to `&& length > 0` (line 355) to prevent destructive delete-with-no-insert. (d) Post-update FETCH no longer selects non-existent `recipes.category` column (line 427, was 42703); category read separately via `recipe_categories` join, returned as `category: ''` matching `loadSavedRecipes`.
+**`updateSavedRecipe` is a KNOWN TROUBLE FUNCTION — shared by BOTH the chat-edit
+Update path AND AddYourOwn (Write Your Own) edit. Any change to it touches both flows
+— always test both.** It produced multiple bugs, including two live production
+data-loss bugs now fixed: (a) ingredient INSERT was missing `user_id` → RLS wipe of
+ingredients on any Write-Your-Own edit; (b) a stale `isEdit` numeric-type check in
+AddYourOwn routed edits to INSERT, duplicating the recipe instead of updating.
+Current guards in `updateSavedRecipe`: `user_id` on ingredient writes; best-effort
+restore on partial insert failure (NOT ACID — Supabase client has no transaction
+control); empty-array gate (`&& length > 0`) so a delete never fires without an
+insert; post-update fetch reads category via the `recipe_categories` join (there is
+no `recipes.category` column). `onUpdateRecipe` lives inside Cook — use only Cook
+props there, never App-level setters (that scope error caused a duplicate-on-save).
 
-**onUpdateRecipe scope fix** (App.tsx line 2854): Previously referenced App-level setters (`setRecipesByCategory`, `setTabStacks`, `setActiveTab`) that aren't in Cook's scope → ReferenceError → error-fallback → duplicate. Now delegates to `finishSaveRecipe` (a Cook prop, line 2914) for cache-clear + nav. **Note for future work**: `onUpdateRecipe` lives inside Cook (child component) — only use Cook props, not App-level setters.
+---
 
-**AddYourOwn edit-duplicates fix** (AddYourOwn.tsx line 86): `isEdit` was `typeof editRecipe?.savedId === "number"`, always false for Supabase UUID strings, routing edit-saves to INSERT (duplicate) instead of UPDATE. Changed to presence/truthy check `!!(editRecipe && editRecipe.savedId)` matching the working pattern at line 707. Edit-via-pencil now updates in place.
+## Build Home-Screen Suggestion Chips
 
-**Shared-function risk**: `updateSavedRecipe` is used by BOTH the new Update path and AddYourOwn's edit flow. The `user_id` and ordering fixes above also closed a live production data-loss bug in AddYourOwn (editing ingredients was wiping them). Any future change to `updateSavedRecipe` affects both call sites.
+Home-screen chips are data + a deterministic picker, not hardcoded JSX. Defined in
+`src/tipsy/chips.ts`, rendered via `.map()` in App.tsx. `pickChips(new Date())`
+returns exactly 3 (active time-aware chips fill first, rest from an evergreen pool,
+varied by type), picked once per mount via `useMemo` — stable within a session,
+varied across. Chips route through the unchanged `handleChipClick` (functionally
+identical to a typed message).
 
-**Known technical debt**: The three AI call sites still duplicate both the system prompt AND the recipe-parsing logic (the `sourceId`-preservation fix had to be applied in all three). Future consolidation pass should centralize both. Also: AddYourOwn edit-screen delete-button rendering may now work as a side effect of the `isEdit` fix — unverified, worth a quick check.
+Each chip: `header`, `body`, `prompt` (fired text), `type` (build/brainstorm/help),
+optional `timing`. Five timing shapes: `seasonal`, `fixedHoliday`, `floatingHoliday`,
+`recurringWeekly` (supports a season wrapping the New Year, e.g. football Sep–Feb),
+`oneOff`. `isChipActive(chip, today)` resolves liveness. At least one time-aware chip
+is present every session (seasons act as an always-on baseline).
+
+**Adding chips is data-only** — add to `evergreenChips` / `timeAwareChips`; no need to
+touch `isChipActive`, `pickChips`, or any logic. Schema was designed for the full
+future cultural calendar, so expanding it is data-entry, not engineering.
+
+**CRITICAL date convention: LOCAL-midnight throughout `chips.ts`.** Production calls
+`pickChips(new Date())` (local), and users think in local days. **Never use `new
+Date("YYYY-MM-DD")`** — it parses as UTC midnight and shifts windows a day west of UTC
+(this was a real bug: July 4th opened/closed a day late). Use the local-parse helpers
+`parseLocalDate`, `parseMonthDayWithYear`, `toLocalStartOfDay`. Do not reintroduce
+UTC string-parsing.
+
+**Standing test: `src/tipsy/chips.test.ts`** (`bun run src/tipsy/chips.test.ts`) — 29
+cases across all timing shapes at their tight window edges; imports the real chip
+defs. Re-run whenever timing logic or calendar entries change.
+
+---
+
+## Grocery List
+
+Live in production (three phases: surface + data + dumb combining; AI enrichment;
+snapshot sharing). No 5th nav tab — entry is a cart icon on the Recipes/Categories
+header plus an "add to grocery list" button on RecipeCard. All schema hand-applied
+via the Supabase dashboard (no migration files).
+
+**`grocery_items`** (owner-only RLS on all ops): base cols `id`, `user_id`,
+`display_name`, `quantity` (free-text), `checked`, `source_recipe_id` (provenance
+only, never re-read live), `sort_order`; enrichment cols `normalized_name`, `amount`,
+`unit`, `aisle` (produce/dairy/meat/pantry/frozen/other), `enrichment_status`
+(pending | enriched | raw | failed). **Raw `display_name`/`quantity` are never
+overwritten** by enrichment — normalized fields are added in parallel, so there is
+always a safe raw fallback to render.
+
+**`grocery_list_shares`**: `user_id`, `share_token` (a fresh `crypto.randomUUID()`
+minted on *every* share — unlike `shareRecipe`, which reuses one token per recipe),
+`items` (JSONB snapshot). RLS: owner select/insert + a permissive anon select (`using
+(true)`); the unguessable token is the real access boundary. No revoke path (deleting
+the row is the only invalidation) — accepted, parity with recipe sharing.
+
+**Key functions (`src/tipsy/data.ts`, GROCERY LIST section):** `loadGroceryItems`,
+`addGroceryItems` (bulk insert, `sort_order` from current max, status pending),
+`addManualGroceryItem`, `toggleGroceryItemChecked`, `clearGroceryItems('all' |
+'checked')`, `enrichGroceryItems` (isolated AI island — see AI Layer),
+`groupGroceryItems`, `shareGroceryList` (reads live items, never writes; mints a fresh
+snapshot row — later edits/clears don't affect an existing snapshot),
+`getPublicGroceryListByToken` (anon read for the public route).
+
+**`groupGroceryItems`** lives in `data.ts` (not App.tsx) so the public route can
+import it without pulling the client bundle into SSR — pure function of
+`GroceryItem[]`, buckets by aisle then name, combines additively only when both rows
+are enriched and share a unit, else falls back to exact-string quantity match.
+
+**Hold-until-ready UX**: new items are held out of the rendered list (generic
+"Updating…" indicator) up to `GROCERY_ENRICHMENT_HOLD_MS` (18000ms) while enrichment
+resolves, so text/grouping doesn't visibly jump. `shareGroceryList` polls for pending
+enrichment up to the same ~18s cap before minting, then falls back to whatever's there
+— a share must never block forever.
+
+**Public route**: `src/routes/list.$token.tsx`, modeled on `r.$token.tsx` (same
+not-found styling, footer, no-login structure). Any login wall on a Vercel *preview*
+link is Vercel's deployment-protection SSO gate, unrelated to the app; production has
+no such gate.
+
+---
+
+## Cook History
+
+Live in production. Lets a user log real cook attempts (date, optional score, optional
+note) against a saved recipe and see them in a third HISTORY tab on the Recipe Card.
+
+**`cook_events`** (owner-only RLS, four separate per-op policies — matches the
+`grocery_items` convention; schema is dashboard-only, no in-repo migration, per
+existing convention): `id uuid` PK, `user_id uuid` FK→`auth.users` (on delete
+cascade), `recipe_id uuid` FK→`recipes` (on delete cascade — intentional: cook history
+is deleted along with its recipe), `cooked_on date`, `score numeric(3,1)` nullable,
+`note text` nullable, `created_at timestamptz`.
+
+**Key functions (`src/tipsy/data.ts`, COOK HISTORY section):**
+`loadCookEventsForRecipe`, `addCookEvent`, `updateCookEvent`, `deleteCookEvent`, plus
+two pure helpers: `headlineRatingFromEvents` (score of the most-recent scored cook, or
+null; ties broken by `created_at`) and `todayLocalDateString` (local-date, not UTC —
+same convention as `chips.ts`).
+
+Cook events ride along on the existing bulk category load — added as a nested
+relation in `getSavedRecipesForCategory` alongside `ingredients`; no per-recipe fetch
+exists or was introduced. `Recipe` gained optional `cookEvents?: CookEvent[]` and
+derived `headlineRating?: number | null`.
+
+**Live-refresh pattern (load-bearing).** The "Log cook" write UI is self-contained in
+`RecipeCard`. There is no other "write-and-stay-on-card" refresh pattern in the
+codebase — this one is new. `RecipeCard` holds local `cookEvents` state, seeded once
+from `recipe.cookEvents`; after any add/edit/delete it updates that local state, and
+both the HISTORY tab and the headline rating read from local state (headline
+recomputed via `headlineRatingFromEvents`), NOT from the `recipe` prop — otherwise the
+card shows stale data until re-navigation. `clearRecipeCache?.(categoryKey)` is also
+called after each write so the category list re-fetches truth on next visit. Any
+future change to the HISTORY tab or headline must preserve this local-state read, or
+live updates regress.
+
+**UI.** Third tab, HISTORY, is hardcoded (matching the existing Ingredients/Steps
+copy-paste style, not data-driven). "Log cook" button lives at the top of the HISTORY
+tab (not the header). Logging portal is a light `#FAF7F2` bottom sheet: editable date
+(pre-filled today), a net-new on-screen decimal keypad for score (0–9, `.`, backspace;
+one decimal; clamped 1.0–10.0; empty = no score), optional note; single Save. Tapping
+a cook row's pencil icon opens the same portal in edit mode (the row tap itself is
+reserved for the existing note-expand/collapse behavior); delete lives inside the edit
+portal and reuses the existing delete-confirm modal. Headline shows as "RATING 7.5"
+under the description (label styled like the category label; number 13px/weight 500,
+one decimal via `.toFixed(1)`); renders nothing when no scored cook exists.
 
 ---
 
 ## Session Rules for Claude Code
 
-- Design decisions are made in Claude.ai first — never figure out design in Claude Code
-- One screen per Claude Code session, clearly scoped
-- Ask Claude Code for a plan before it writes any code
-- Visual changes only unless explicitly told otherwise — never change functionality or data flow
-- Functionality and existing behavior is preserved exactly unless explicitly instructed to change it
-- Always read CLAUDE.md at the start of every session
-- When implementing a screen, reference the spec above for that screen exactly
+- Design decisions are made in Claude.ai first — never figure out design in Claude Code. Claude Code executes precise prompts and makes no decisions.
+- Read CLAUDE.md at the start of every session. Ask for a plan before writing code.
+- One clearly-scoped screen/task per session. Preserve existing functionality and data flow exactly unless explicitly told to change it.
+- **Diagnose before fixing (hard rule).** Always a read-pass that changes nothing before concluding anything is broken. This is a Lovable-built, incrementally-extended codebase whose failure modes don't announce themselves — first-guess causes have repeatedly been wrong, and bugs have hidden behind bugs. Confirm before fixing.
+
+**Branch workflow for risky/structural changes** (tipsydinner.com is live): work on a
+branch → push → Vercel builds a preview → test on a real phone → merge to main only
+once verified. **Gotcha:** Google OAuth redirects to PRODUCTION, so logging into a
+branch preview needs a separate test account (real accounts bounce to production).
+Keep one test account around — but be deliberate about which account you're in when
+diagnosing: stray test accounts have twice caused identity-mismatch confusion (a
+"delete bug" and a menu-save failure that were both session-identity artifacts, not
+code defects).
+
+- Auto-approve edits: `/permissions`. Git checkpoint before risky changes: `git commit --allow-empty -m "checkpoint" && git push`. Rollback: `git reset --hard <hash> && git push origin main --force`.
 
 ---
 
-## Current Build Status
+## Standing Cleanup / Watch Items
 
-**Complete and functional:**
-- Authentication — Supabase Auth with email/password and Google OAuth
-- Sign Up and Sign In screens with slide transitions
-- Session handling and protected routes
-- Onboarding flow (starts at first question, no legacy Welcome screen)
-- Profile page with sign out button
-- Recipes — Categories, Recipes, Recipe Card
-- Write Your Own flow
-- Screen transitions (slide left/right, including auth transitions)
-- Build AI — wired and functional, full conversation loop including save
-- Menus — full three-level hierarchy
-- RecipePicker
-- Universal save flow
-- Recipe card freeze pane — tab bar sticks, scroll position preserved
-- Build system prompt v2
-- Mini player fade and pulse animations
-- Recipe card auto-collapse on message send
-- Lazydog font registered (`src/fonts/lazydog.ttf`, `@font-face` as `'Lazydog'`)
-- Recipes migrated to Supabase ✓
-- Ingredients migrated to Supabase as separate table with sort_order ✓
-- localStorage key tipsyDinnerRecipes removed ✓
-- Categories migrated to Supabase ✓
-- recipe_categories join table wired ✓
-- getSavedRecipesForCategory now filters correctly by category ✓
-- localStorage key tipsyDinnerCategories removed ✓
-- Occasions migrated to Supabase ✓
-- Menus migrated to Supabase ✓
-- menu_recipes join table wired ✓
-- localStorage keys tipsyDinnerOccasions and tipsyDinnerMenus removed ✓
-- Profile data (display_name, palate, inspiration, constraints) migrated to Supabase ✓
-- onboarding_complete column added to profiles table ✓
-- Onboarding flow writes to Supabase on each question ✓
-- App.tsx session handling reads onboarding_complete from Supabase ✓
-- Profile page reads and writes to Supabase ✓
-- One-time localStorage migration wired and working ✓
-- localStorage keys tipsyDinnerPalate, tipsyDinnerInspiration, tipsyDinnerConstraints, tipsyDinnerOnboardingComplete removed ✓
-- Sign out working correctly ✓
-- Anthropic API key moved to Supabase Edge Function ✓
-- Edge Function ai-chat deployed to Supabase ✓
-- VITE_ANTHROPIC_API_KEY removed from .env and codebase ✓
-- AI calls now route through Supabase, key never exposed to browser ✓
-- Streaming preserved — responses still appear word by word ✓
-- RESET ONBOARDING button hidden in production (dev-only) ✓
-- Mobile viewport fixes — full-screen meta tag, height: 100% ✓
-- Delete functionality for recipes and categories with confirmation modals ✓
-- Recipe Card editable check fixed to handle UUID recipe IDs ✓
-- ScreenStage tree structure stabilized — transitions no longer cause unnecessary remounts ✓
-- Tab-return data loss bug FIXED — Supabase fires duplicate SIGNED_IN events on tab refocus; profileInitialized ref in onAuthStateChange ignores subsequent events after initial sign-in ✓
-- Full-screen layout — fixed 320×640 mockup frame removed; app now renders full-screen on real device viewport. S.page and S.phone in App.tsx use shared CSS class `td-fullscreen-height` (height:100vh with height:100dvh override). S.phone: width:100%, maxWidth:480, safe-area insets at container level via paddingTop/paddingBottom env(safe-area-inset-*). Verified on real phone via Vercel branch preview ✓
-- iOS input auto-zoom prevented — all input/textarea fields raised to fontSize:16 (TextInput, TextArea, EditInput, NameInput, inputStyleBase, Build chat textarea). Stops Safari auto-zoom-on-focus while preserving pinch-zoom ✓
-- Build conversation persistence — Build state (messages, history, current recipe) lifted to App scope, survives tab switches and save flows. Refresh button with animated clear (300ms slide transition). clearBuildConversation + clearBuildStateOnly helpers ✓
-- Chat from recipe card — floating chat icon on saved recipes, slide-up input bar, transfers to Build with full recipe context injected as XML, auto-fires AI on arrival. Single transfer path (no collision warning). RecipeCard → transferToRecipeChat prop pattern (module-level component, no App-scope closure) ✓
-- Update vs save-as-new — recipe origin tracking via sourceId, two-button choice on save (Update [name] / Save as new), Update path in-place overwrites with re-anchoring, Save-as-new spins off siblings from same base. Fixed updateSavedRecipe (user_id RLS, safe ingredient replace, empty-array gate, phantom column). Fixed AddYourOwn edit-duplicates bug (isEdit UUID check). Both paths verified end-to-end ✓
-- Build home-screen suggestion chips — curated, time-aware chip system (src/tipsy/chips.ts). Three chips selected at mount via pickChips(new Date()), stable within session, varied across sessions. 8 evergreen + 6 time-aware chips with 5 timing shapes (seasonal, fixedHoliday, floatingHoliday, recurringWeekly, oneOff). Fixed UTC-vs-local date bug (all dates now local-midnight). 29/29 unit tests pass (chips.test.ts). Verified on-device ✓
-
-**Known issues (next session priorities, in order):**
-- Saving a menu fails — data/logic bug, deferred from layout pass, needs dedicated session
-- Recipe List doesn't refresh after a recipe is deleted — cache clear works but list doesn't re-fetch on re-mount
-- AddYourOwn edit flow: delete button rendering unverified (may work now as side effect of isEdit fix), worth quick check
-- Add an "All Recipes" default category — design decision pending (real Supabase row vs virtual view)
-- Slight flash on screen transitions during async category/recipe loads
-- + button position shifts after category creation
-- Brief flash on Menu Interior load
-- RecipePicker category cards still showing legacy gradient color
-- ScreenStage paddingBottom:64 (App.tsx ~lines 1094 & 1107) is hard-coded nav-bar clearance — tested fine in production, low priority, revisit only if content crowds behind nav bar on any device
-
-**Visual redesign order (follow this sequence):**
-1. Build — empty state
-2. Build — active state
-3. Recipes — categories
-4. Recipes — recipe list
-5. Recipes — recipe card
-6. Write Your Own — all steps
-7. Menus — occasions
-8. Menus — menu list
-9. Menus — menu interior
-10. Profile
-11. Splash screen (last — dependent on logo assets)
-
-**Not yet built:**
-- Splash screen
-- Search
+- **System prompt triplicated** across `fireAICall` / `sendMessage` / `handleChipClick` — consolidate before any heavy prompt work (see AI Layer).
+- **`updateSavedRecipe` shared by two flows** — test both the chat Update path and AddYourOwn whenever it changes (see Update vs Save-as-New).
+- **Schema is dashboard-only** — no in-repo migrations. Cheap to fix now (export to a migration file), expensive to reconstruct later.
+- ~31 pre-existing TypeScript errors across app files (unrelated to recent work) — batch into one cleanup pass someday.
+- Reusable loading-spinner / "Updating…" pattern from the grocery work is a good candidate to reuse wherever async waits show poor feedback (e.g. Occasions/Menus load flash).
