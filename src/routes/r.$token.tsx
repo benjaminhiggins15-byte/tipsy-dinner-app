@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { getPublicRecipeByToken } from "../tipsy/data";
+import { getPublicRecipeByToken, normalizeStep } from "../tipsy/data";
 import watermarkCircle from "../Logos/watermark_circle.png";
 
 export const Route = createFileRoute("/r/$token")({
@@ -290,7 +290,7 @@ function PublicRecipePage() {
                       margin: 0,
                     }}
                   >
-                    {step}
+                    {normalizeStep(step).instruction}
                   </p>
                 </div>
               ))}

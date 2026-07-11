@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, shareRecipe, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents } from "./data";
+import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, shareRecipe, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
@@ -28,7 +28,7 @@ type RecipeDraft = {
   title: string;
   description: string;
   ingredients: { name: string; qty: string }[];
-  steps: string[];
+  steps: RecipeStep[];
   sourceId?: string; // Optional: tracks the saved recipe this draft originated from (for update-vs-save-as-new)
 };
 
@@ -53,11 +53,11 @@ type ProfileType = {
 };
 
 // Helper: Convert recipe to XML format for AI context (used in App and Cook components)
-const recipeToXML = (recipe: { title: string; description: string; ingredients: { name: string; qty: string }[]; steps: string[] }): string => {
+const recipeToXML = (recipe: { title: string; description: string; ingredients: { name: string; qty: string }[]; steps: RecipeStep[] }): string => {
   const ingredientsXML = recipe.ingredients.map(ing =>
     `<item><name>${ing.name}</name><qty>${ing.qty}</qty></item>`
   ).join('\n');
-  const stepsXML = recipe.steps.map(step => `<step>${step}</step>`).join('\n');
+  const stepsXML = recipe.steps.map(step => `<step>${normalizeStep(step).instruction}</step>`).join('\n');
 
   return `<recipe>
 <title>${recipe.title}</title>
@@ -2269,7 +2269,7 @@ function RecipeCard({
                   color: "#233C00",
                   lineHeight: 1.6,
                   margin: 0,
-                }}>{s}</p>
+                }}>{normalizeStep(s).instruction}</p>
               </div>
             ))}
             {steps.length === 0 && (
@@ -5174,7 +5174,7 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
     title: string;
     description: string;
     ingredients: { name: string; qty: string }[];
-    steps: string[];
+    steps: RecipeStep[];
   };
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
@@ -5392,7 +5392,7 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
                 color: "#233C00",
                 lineHeight: 1.6,
                 flex: 1,
-              }}>{s}</span>
+              }}>{normalizeStep(s).instruction}</span>
             </div>
           ))}
         </div>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type CSSProperties, type KeyboardEvent } from "react";
-import { saveRecipe, updateSavedRecipe, deleteSavedRecipe, loadCustomCategories, addRecipeToMenuSection, type Recipe, type MenuSection } from "./data";
+import { saveRecipe, updateSavedRecipe, deleteSavedRecipe, loadCustomCategories, addRecipeToMenuSection, type Recipe, type MenuSection, type RecipeStep, normalizeStep } from "./data";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 
 type Step = 1 | 2 | 3 | 4 | 6;
@@ -17,13 +17,13 @@ type Props = {
     title: string;
     description: string;
     ingredients: { name: string; qty: string }[];
-    steps: string[];
+    steps: RecipeStep[];
   }) => void;
   initialDraft?: {
     title: string;
     description: string;
     ingredients: { name: string; qty: string }[];
-    steps: string[];
+    steps: RecipeStep[];
     step?: Step;
     trayOpen?: boolean;
   };
@@ -98,7 +98,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
 
   const [stepInput, setStepInput] = useState("");
   const [stepErr, setStepErr] = useState(false);
-  const [steps, setSteps] = useState<string[]>(initialDraft?.steps ?? editRecipe?.steps ?? []);
+  const [steps, setSteps] = useState<RecipeStep[]>(initialDraft?.steps ?? editRecipe?.steps ?? []);
 
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
   const [trayOpen, setTrayOpen] = useState(!!initialDraft?.trayOpen);
@@ -130,7 +130,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
   };
   const startEditStep = (i: number) => {
     if (editing) cancelEdit();
-    setEditing({ kind: "step", index: i, text: steps[i] });
+    setEditing({ kind: "step", index: i, text: normalizeStep(steps[i]).instruction });
   };
   const confirmEditStep = () => {
     if (!editing || editing.kind !== "step") return;
@@ -527,7 +527,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                         </div>
                         <div style={{ flex: 1 }}>
                           <input
-                            value={s}
+                            value={normalizeStep(s).instruction}
                             readOnly
                             onClick={() => startEditStep(i)}
                             style={{
@@ -998,7 +998,7 @@ function PreviewCard({
                     fontFamily: fontSans, fontSize: 11, fontWeight: 500,
                     color: "rgba(35,60,0,0.45)",
                   }}>{i + 1}</div>
-                  <span style={{ fontFamily: fontSans, fontSize: 14, color: C.text, lineHeight: 1.5, flex: 1, paddingTop: 3 }}>{s}</span>
+                  <span style={{ fontFamily: fontSans, fontSize: 14, color: C.text, lineHeight: 1.5, flex: 1, paddingTop: 3 }}>{normalizeStep(s).instruction}</span>
                 </div>
               ))
         )}

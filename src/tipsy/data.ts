@@ -38,6 +38,16 @@ export async function* parseSSEStream(response: Response) {
   }
 }
 
+// A recipe step is either a plain instruction string (legacy shape) or a
+// structured object with an optional title. normalizeStep() is the single
+// place every reader should go through so both shapes render identically.
+export type RecipeStep = string | { title: string; instruction: string };
+
+export function normalizeStep(step: RecipeStep): { title: string; instruction: string } {
+  if (typeof step === 'string') return { title: '', instruction: step };
+  return { title: step.title ?? '', instruction: step.instruction ?? '' };
+}
+
 export type Recipe = {
   title: string;
   description: string;
@@ -45,7 +55,7 @@ export type Recipe = {
   category: string;
   yield?: string;
   ingredients?: { name: string; qty: string }[];
-  steps?: string[];
+  steps?: RecipeStep[];
   savedId?: number | string; // Can be UUID from Supabase or legacy number from localStorage
   categoryKey?: string;
   cookEvents?: CookEvent[];
@@ -230,7 +240,7 @@ export type SavedRecipe = {
   description: string;
   category: string; // category key
   ingredients: { name: string; qty: string }[];
-  steps: string[];
+  steps: RecipeStep[];
   createdAt: string;
   source?: 'ai' | 'manual';
 };
