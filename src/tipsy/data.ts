@@ -2067,6 +2067,149 @@ export async function deleteCookEvent(eventId: string): Promise<void> {
   }
 }
 
+// ==================== STEP-TITLE BACKFILL (one-time, not wired into UI) ====================
+// Titles every existing recipe's plain-string steps via an isolated AI call,
+// modeled on the grocery enrichment pattern above (own small system prompt,
+// never the conversational one). Not invoked anywhere in the app — run it
+// manually, once, from the browser console while logged into the app (it
+// needs the browser's Supabase session, same as every other function here):
+//   const { backfillStepTitles } = await import('/src/tipsy/data.ts');
+//   await backfillStepTitles();
+// Idempotent: only steps that are still a plain string (typeof step ===
+// 'string') are sent for titling; anything already a {title, instruction}
+// object is left untouched, so re-running is always safe.
+
+const STEP_TITLE_BACKFILL_SYSTEM_PROMPT = `You are a data-labeling utility. You are not a conversational assistant and must never write prose, greetings, or explanations.
+
+You will receive a JSON array of recipe step instructions. Each item has "index" and "instruction".
+
+For each item, produce a short, specific title for that step (a few words, plain text, no quotation marks or special characters) that names the action being taken, e.g. "Sear the chicken", "Reduce the sauce". Base the title only on the instruction's own words — never invent detail that isn't there.
+
+Never alter, rewrite, shorten, or paraphrase the instruction text itself. You are only generating a title; the instruction is not part of your output.
+
+Respond with ONLY a raw JSON array. No prose, no markdown code fences, no explanation, no leading or trailing text of any kind.
+Each output element must be an object with exactly these keys: "index", "title".
+The "index" of each output element must exactly match the "index" of its corresponding input item. Return exactly one output element per input item.`;
+
+function parseStepTitleBackfillResponse(rawText: string, validIndices: Set<number>): Map<number, string> {
+  const results = new Map<number, string>();
+
+  let parsed: unknown;
+  try {
+    const cleaned = rawText.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '');
+    parsed = JSON.parse(cleaned);
+  } catch (error) {
+    console.warn('Step-title backfill: could not parse AI response as JSON', error);
+    return results;
+  }
+
+  if (!Array.isArray(parsed)) {
+    console.warn('Step-title backfill: AI response was not a JSON array');
+    return results;
+  }
+
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== 'object') continue;
+    const e = entry as Record<string, unknown>;
+
+    const index = typeof e.index === 'number' ? e.index : null;
+    if (index === null || !validIndices.has(index)) continue;
+
+    const title = typeof e.title === 'string' ? e.title.trim() : '';
+    if (!title) continue; // nothing usable for this step
+
+    results.set(index, title);
+  }
+
+  return results;
+}
+
+// One isolated AI call per recipe: sends only that recipe's plain-string step
+// instructions (keyed by their index in recipe.steps) and gets back titles.
+async function generateStepTitlesForRecipe(
+  instructions: { index: number; instruction: string }[]
+): Promise<Map<number, string>> {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseAnonKey) throw new Error('Supabase config missing');
+
+  const inputPayload = instructions.map((s) => ({ index: s.index, instruction: s.instruction }));
+
+  const response = await fetch(`${supabaseUrl}/functions/v1/ai-chat`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${supabaseAnonKey}`,
+    },
+    body: JSON.stringify({
+      systemPrompt: STEP_TITLE_BACKFILL_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: JSON.stringify(inputPayload) }],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Edge function error: ${errorText}`);
+  }
+
+  let fullText = '';
+  for await (const chunk of parseSSEStream(response)) {
+    if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'text_delta') {
+      fullText += chunk.delta.text;
+    }
+  }
+
+  if (!fullText.trim()) throw new Error('Empty response from step-title backfill call');
+
+  const validIndices = new Set(instructions.map((s) => s.index));
+  return parseStepTitleBackfillResponse(fullText, validIndices);
+}
+
+// The one-time entry point. Loads every saved recipe for the current user,
+// titles only the steps that are still plain strings, and writes the result
+// back via updateSavedRecipe (shared with the AddYourOwn edit path — called
+// here, never modified). Logs per-recipe so a run is easy to audit.
+export async function backfillStepTitles(): Promise<void> {
+  const recipes = await loadSavedRecipes();
+  console.log(`Step-title backfill: found ${recipes.length} recipe(s).`);
+
+  for (const recipe of recipes) {
+    const plainStringSteps = recipe.steps
+      .map((step, index) => ({ step, index }))
+      .filter((entry): entry is { step: string; index: number } => typeof entry.step === 'string');
+
+    if (plainStringSteps.length === 0) {
+      console.log(`Skipping "${recipe.title}" (${recipe.id}) — no plain-string steps, already backfilled.`);
+      continue;
+    }
+
+    console.log(`Backfilling "${recipe.title}" (${recipe.id}) — ${plainStringSteps.length} step(s) need a title.`);
+
+    try {
+      const titles = await generateStepTitlesForRecipe(
+        plainStringSteps.map(({ step, index }) => ({ index, instruction: step }))
+      );
+
+      const newSteps: RecipeStep[] = recipe.steps.map((step, index) => {
+        if (typeof step !== 'string') return step; // already structured — leave untouched
+        const title = titles.get(index);
+        if (!title) {
+          console.warn(`  Step ${index} on "${recipe.title}" got no title back from the AI — leaving as plain string.`);
+          return step;
+        }
+        return { title, instruction: step }; // instruction preserved verbatim; title is the only new data
+      });
+
+      await updateSavedRecipe(recipe.id, { steps: newSteps });
+      console.log(`  Wrote ${titles.size} title(s) to "${recipe.title}".`);
+    } catch (error) {
+      console.error(`  Failed to backfill "${recipe.title}" (${recipe.id}):`, error);
+    }
+  }
+
+  console.log('Step-title backfill: done.');
+}
+
 // ==================== CLEANUP ====================
 
 export function cleanupMenusLocalStorage(): void {
