@@ -57,7 +57,12 @@ const recipeToXML = (recipe: { title: string; description: string; ingredients: 
   const ingredientsXML = recipe.ingredients.map(ing =>
     `<item><name>${ing.name}</name><qty>${ing.qty}</qty></item>`
   ).join('\n');
-  const stepsXML = recipe.steps.map(step => `<step>${normalizeStep(step).instruction}</step>`).join('\n');
+  const stepsXML = recipe.steps.map(step => {
+    const { title, instruction } = normalizeStep(step);
+    if (!title) return `<step>${instruction}</step>`;
+    const escapedTitle = title.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    return `<step title="${escapedTitle}">${instruction}</step>`;
+  }).join('\n');
 
   return `<recipe>
 <title>${recipe.title}</title>
@@ -93,7 +98,7 @@ When the user lands on a dish, confirm and move to recipe mode. If they pick mor
 Recipe mode rules:
 Only enter recipe mode when the user has chosen a specific dish and wants it built.
 Open with a natural one to two sentence handoff before the ingredient list. This is the moment to sound most like a person. Never lead cold with an ingredient list.
-Format: dish title, one-line description, then ingredients and steps. Ingredients as a clean list. Steps in plain prose, not numbered bullets.
+Format: dish title, one-line description, then ingredients and steps. Ingredients as a clean list. Steps in plain prose, not numbered bullets. Give each step a short, specific title (a few words, like "Sear the chicken" or "Reduce the sauce") in addition to its full instruction — plain text only, no quotation marks or special characters in the title.
 When updating a recipe based on user feedback, always confirm it with a short natural line above the updated recipe block — something like 'done, doubled below' or 'updated the recipe below.' Never let an updated recipe block appear with no text above it. No re-explanation of what changed unless the user asks.
 Technique and tangent questions:
 Answer wine pairing, technique, equipment, and any other cooking questions naturally as part of the conversation. Never preface these with a comment about what kind of question it is. Just answer it like a person would.
@@ -118,8 +123,8 @@ When you are ready to present a recipe, use this exact format:
 <item><name>Another ingredient</name><qty>Amount</qty></item>
 </ingredients>
 <steps>
-<step>First step instructions</step>
-<step>Second step instructions</step>
+<step title="Short step title">First step instructions</step>
+<step title="Short step title">Second step instructions</step>
 </steps>
 </recipe>
 
@@ -3765,11 +3770,12 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
           }
         }
 
-        const steps: string[] = [];
+        const steps: RecipeStep[] = [];
         if (stepsMatch) {
-          const stepMatches = [...stepsMatch[1].matchAll(/<step>(.*?)<\/step>/g)];
+          const stepMatches = [...stepsMatch[1].matchAll(/<step(?:\s+title="([^"]*)")?>(.*?)<\/step>/g)];
           for (const match of stepMatches) {
-            steps.push(match[1].trim());
+            const title = (match[1] ?? "").replace(/&quot;/g, '"').replace(/&amp;/g, "&").trim();
+            steps.push({ title, instruction: match[2].trim() });
           }
         }
 
@@ -3953,11 +3959,12 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
           }
         }
 
-        const steps: string[] = [];
+        const steps: RecipeStep[] = [];
         if (stepsMatch) {
-          const stepMatches = [...stepsMatch[1].matchAll(/<step>(.*?)<\/step>/g)];
+          const stepMatches = [...stepsMatch[1].matchAll(/<step(?:\s+title="([^"]*)")?>(.*?)<\/step>/g)];
           for (const match of stepMatches) {
-            steps.push(match[1].trim());
+            const title = (match[1] ?? "").replace(/&quot;/g, '"').replace(/&amp;/g, "&").trim();
+            steps.push({ title, instruction: match[2].trim() });
           }
         }
 
@@ -4244,11 +4251,12 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
             }
           }
 
-          const steps: string[] = [];
+          const steps: RecipeStep[] = [];
           if (stepsMatch) {
-            const stepMatches = [...stepsMatch[1].matchAll(/<step>(.*?)<\/step>/g)];
+            const stepMatches = [...stepsMatch[1].matchAll(/<step(?:\s+title="([^"]*)")?>(.*?)<\/step>/g)];
             for (const match of stepMatches) {
-              steps.push(match[1].trim());
+              const title = (match[1] ?? "").replace(/&quot;/g, '"').replace(/&amp;/g, "&").trim();
+              steps.push({ title, instruction: match[2].trim() });
             }
           }
 
