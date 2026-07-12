@@ -290,6 +290,12 @@ function PublicRecipePage() {
                       margin: 0,
                     }}
                   >
+                    {normalizeStep(step).title && (
+                      <span style={{ fontWeight: 600 }}>
+                        {normalizeStep(step).title}
+                        {" — "}
+                      </span>
+                    )}
                     {normalizeStep(step).instruction}
                   </p>
                 </div>

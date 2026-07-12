@@ -1779,6 +1779,7 @@ function RecipeCard({
   const [showChatInput, setShowChatInput] = useState(false);
   const [chatQuestion, setChatQuestion] = useState("");
   const [expandedCookEvents, setExpandedCookEvents] = useState<Set<string>>(new Set());
+  const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set());
   const [cookEvents, setCookEvents] = useState<CookEvent[]>(recipe.cookEvents ?? []);
   const [showLogSheet, setShowLogSheet] = useState(false);
   const [logMode, setLogMode] = useState<"create" | "edit">("create");
@@ -1801,6 +1802,16 @@ function RecipeCard({
       next.add(id);
     }
     setExpandedCookEvents(next);
+  };
+
+  const toggleStep = (idx: number) => {
+    const next = new Set(expandedSteps);
+    if (next.has(idx)) {
+      next.delete(idx);
+    } else {
+      next.add(idx);
+    }
+    setExpandedSteps(next);
   };
 
   const formatCookedOn = (dateStr: string): string => {
@@ -2314,32 +2325,93 @@ function RecipeCard({
             )}
           </div>
           <div style={{ display: tab === "steps" ? "block" : "none", padding: "20px 24px" }}>
-            {steps.map((s, idx) => (
-              <div key={idx} style={{
-                display: "flex",
-                gap: 14,
-                alignItems: "flex-start",
-                marginBottom: idx === steps.length - 1 ? 0 : 20,
-              }}>
-                <span style={{
-                  fontFamily: "Inter, sans-serif",
-                  fontSize: 18,
-                  fontWeight: 500,
-                  color: "rgba(35,60,0,0.3)",
-                  flexShrink: 0,
-                  lineHeight: 1.4,
-                }}>
-                  {idx + 1}
-                </span>
-                <p style={{
-                  fontFamily: "Inter, sans-serif",
-                  fontSize: 14,
-                  color: "#233C00",
-                  lineHeight: 1.6,
-                  margin: 0,
-                }}>{normalizeStep(s).instruction}</p>
-              </div>
-            ))}
+            {steps.map((s, idx) => {
+              const normalized = normalizeStep(s);
+              const hasTitle = !!(normalized.title && normalized.title.trim().length > 0);
+              const isExpanded = expandedSteps.has(idx);
+
+              if (!hasTitle) {
+                return (
+                  <div key={idx} style={{
+                    display: "flex",
+                    gap: 14,
+                    alignItems: "flex-start",
+                    marginBottom: idx === steps.length - 1 ? 0 : 20,
+                  }}>
+                    <span style={{
+                      fontFamily: "Inter, sans-serif",
+                      fontSize: 18,
+                      fontWeight: 500,
+                      color: "rgba(35,60,0,0.3)",
+                      flexShrink: 0,
+                      lineHeight: 1.4,
+                    }}>
+                      {idx + 1}
+                    </span>
+                    <p style={{
+                      fontFamily: "Inter, sans-serif",
+                      fontSize: 14,
+                      color: "#233C00",
+                      lineHeight: 1.6,
+                      margin: 0,
+                    }}>{normalized.instruction}</p>
+                  </div>
+                );
+              }
+
+              return (
+                <div key={idx} style={{ marginBottom: idx === steps.length - 1 ? 0 : 10 }}>
+                  <button
+                    onClick={() => toggleStep(idx)}
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      padding: "12px 14px",
+                      background: "rgba(35,60,0,0.03)",
+                      border: "1px solid rgba(35,60,0,0.08)",
+                      borderRadius: isExpanded ? "10px 10px 0 0" : 10,
+                      borderBottom: isExpanded ? "none" : "1px solid rgba(35,60,0,0.08)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span style={{
+                      fontFamily: "Inter, sans-serif",
+                      fontSize: 14,
+                      fontWeight: 500,
+                      color: "#233C00",
+                      textAlign: "left",
+                    }}>{idx + 1}) {normalized.title}</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.25)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{
+                      transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                      transition: "transform 200ms ease",
+                      flexShrink: 0,
+                    }}>
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
+                  </button>
+                  {isExpanded && (
+                    <div style={{
+                      background: "rgba(35,60,0,0.03)",
+                      border: "1px solid rgba(35,60,0,0.08)",
+                      borderTop: "none",
+                      borderRadius: "0 0 10px 10px",
+                      padding: "12px 14px",
+                    }}>
+                      <p style={{
+                        fontFamily: "Inter, sans-serif",
+                        fontSize: 14,
+                        color: "#233C00",
+                        lineHeight: 1.6,
+                        margin: 0,
+                      }}>{normalized.instruction}</p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
             {steps.length === 0 && (
               <p style={{
                 fontFamily: "Inter, sans-serif",
@@ -5305,7 +5377,15 @@ function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
                 color: "#233C00",
                 lineHeight: 1.6,
                 flex: 1,
-              }}>{normalizeStep(s).instruction}</span>
+              }}>
+                {normalizeStep(s).title && (
+                  <span style={{ fontWeight: 600 }}>
+                    {normalizeStep(s).title}
+                    {" — "}
+                  </span>
+                )}
+                {normalizeStep(s).instruction}
+              </span>
             </div>
           ))}
         </div>

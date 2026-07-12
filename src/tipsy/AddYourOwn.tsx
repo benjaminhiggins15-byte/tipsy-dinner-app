@@ -96,6 +96,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
   const [ingErr, setIngErr] = useState(false);
   const [ingredients, setIngredients] = useState<{ name: string; qty: string }[]>(initialDraft?.ingredients ?? editRecipe?.ingredients ?? []);
 
+  const [stepTitleInput, setStepTitleInput] = useState("");
   const [stepInput, setStepInput] = useState("");
   const [stepErr, setStepErr] = useState(false);
   const [steps, setSteps] = useState<RecipeStep[]>(initialDraft?.steps ?? editRecipe?.steps ?? []);
@@ -108,7 +109,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
   // Inline edit state
   const [editing, setEditing] = useState<
     | { kind: "ingredient"; index: number; name: string; qty: string }
-    | { kind: "step"; index: number; text: string }
+    | { kind: "step"; index: number; title: string; text: string }
     | null
   >(null);
   const editRowRef = useRef<HTMLDivElement | null>(null);
@@ -130,14 +131,15 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
   };
   const startEditStep = (i: number) => {
     if (editing) cancelEdit();
-    setEditing({ kind: "step", index: i, text: normalizeStep(steps[i]).instruction });
+    const s = normalizeStep(steps[i]);
+    setEditing({ kind: "step", index: i, title: s.title, text: s.instruction });
   };
   const confirmEditStep = () => {
     if (!editing || editing.kind !== "step") return;
     if (!editing.text.trim()) return;
     const idx = editing.index;
-    const text = editing.text.trim();
-    setSteps((arr) => arr.map((v, i) => (i === idx ? text : v)));
+    const next = { title: editing.title.trim(), instruction: editing.text.trim() };
+    setSteps((arr) => arr.map((v, i) => (i === idx ? next : v)));
     setEditing(null);
   };
 
@@ -172,7 +174,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
     setStep(1);
     setTitle(""); setDesc(""); setTitleErr(false); setDescErr(false);
     setIngName(""); setIngQty(""); setIngErr(false); setIngredients([]);
-    setStepInput(""); setStepErr(false); setSteps([]);
+    setStepTitleInput(""); setStepInput(""); setStepErr(false); setSteps([]);
     setTab("ingredients");
     setTrayOpen(false);
     setSavedCategory(null);
@@ -195,8 +197,8 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
 
   const addStep = () => {
     if (!stepInput.trim()) { setStepErr(true); return; }
-    setSteps((arr) => [...arr, stepInput.trim()]);
-    setStepInput(""); setStepErr(false);
+    setSteps((arr) => [...arr, { title: stepTitleInput.trim(), instruction: stepInput.trim() }]);
+    setStepTitleInput(""); setStepInput(""); setStepErr(false);
   };
   const removeStep = (i: number) => setSteps((arr) => arr.filter((_, idx) => idx !== i));
 
@@ -491,7 +493,13 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                                 color: C.stepNumText,
                               }}>{i + 1}</span>
                             </div>
-                            <div style={{ flex: 1 }}>
+                            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+                              <EditInput
+                                value={editing.title}
+                                onChange={(v) => setEditing({ ...editing, title: v })}
+                                placeholder="Step title (optional)"
+                                onEnter={confirmEditStep}
+                              />
                               <EditInput
                                 value={editing.text}
                                 onChange={(v) => setEditing({ ...editing, text: v })}
@@ -505,6 +513,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                         </div>
                       );
                     }
+                    const normalized = normalizeStep(s);
                     return (
                       <ListItem key={i}>
                         <div style={{
@@ -525,11 +534,29 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                             color: C.stepNumText,
                           }}>{i + 1}</span>
                         </div>
-                        <div style={{ flex: 1 }}>
+                        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4, cursor: "pointer" }} onClick={() => startEditStep(i)}>
                           <input
-                            value={normalizeStep(s).instruction}
+                            value={normalized.title}
                             readOnly
-                            onClick={() => startEditStep(i)}
+                            placeholder="Add a title (optional)"
+                            style={{
+                              width: "100%",
+                              background: "none",
+                              border: "none",
+                              padding: "0 2px",
+                              fontFamily: fontSans,
+                              fontSize: 11,
+                              fontWeight: 600,
+                              letterSpacing: "0.04em",
+                              textTransform: "uppercase",
+                              color: normalized.title ? C.textLight : C.textVeryLight,
+                              cursor: "pointer",
+                              pointerEvents: "none",
+                            }}
+                          />
+                          <input
+                            value={normalized.instruction}
+                            readOnly
                             style={{
                               width: "100%",
                               background: C.inputBg,
@@ -542,6 +569,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                               color: C.text,
                               lineHeight: 1.5,
                               cursor: "pointer",
+                              pointerEvents: "none",
                             }}
                           />
                         </div>
@@ -553,6 +581,17 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
               )}
 
               <TextInput
+                value={stepTitleInput}
+                onChange={setStepTitleInput}
+                placeholder="Step title (optional)"
+                onEnter={() => {
+                  const el = document.getElementById("step-instruction-input") as HTMLInputElement | null;
+                  el?.focus();
+                }}
+              />
+              <div style={{ height: 8 }} />
+              <TextInput
+                id="step-instruction-input"
                 value={stepInput}
                 onChange={(v) => { setStepInput(v); if (v.trim()) setStepErr(false); }}
                 placeholder="Describe the step"
@@ -984,23 +1023,29 @@ function PreviewCard({
         {tab === "steps" && (
           steps.length === 0
             ? <div style={{ fontFamily: fontSans, fontSize: 12, color: "rgba(35,60,0,0.35)", fontStyle: "italic", textAlign: "center", padding: 14 }}>No steps added.</div>
-            : steps.map((s, i) => (
-                <div key={i} style={{
-                  display: "flex", gap: 14, padding: "12px 0", alignItems: "flex-start",
-                  borderBottom: i === steps.length - 1 ? "none" : "1px dotted rgba(35,60,0,0.1)",
-                }}>
-                  <div style={{
-                    width: 28, height: 28, minWidth: 28,
-                    borderRadius: "50%",
-                    background: "rgba(35,60,0,0.06)",
-                    border: "1px solid rgba(35,60,0,0.1)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontFamily: fontSans, fontSize: 11, fontWeight: 500,
-                    color: "rgba(35,60,0,0.45)",
-                  }}>{i + 1}</div>
-                  <span style={{ fontFamily: fontSans, fontSize: 14, color: C.text, lineHeight: 1.5, flex: 1, paddingTop: 3 }}>{normalizeStep(s).instruction}</span>
-                </div>
-              ))
+            : steps.map((s, i) => {
+                const normalized = normalizeStep(s);
+                return (
+                  <div key={i} style={{
+                    display: "flex", gap: 14, padding: "12px 0", alignItems: "flex-start",
+                    borderBottom: i === steps.length - 1 ? "none" : "1px dotted rgba(35,60,0,0.1)",
+                  }}>
+                    <div style={{
+                      width: 28, height: 28, minWidth: 28,
+                      borderRadius: "50%",
+                      background: "rgba(35,60,0,0.06)",
+                      border: "1px solid rgba(35,60,0,0.1)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontFamily: fontSans, fontSize: 11, fontWeight: 500,
+                      color: "rgba(35,60,0,0.45)",
+                    }}>{i + 1}</div>
+                    <span style={{ fontFamily: fontSans, fontSize: 14, color: C.text, lineHeight: 1.5, flex: 1, paddingTop: 3 }}>
+                      {normalized.title && <strong style={{ fontWeight: 600 }}>{normalized.title}{" — "}</strong>}
+                      {normalized.instruction}
+                    </span>
+                  </div>
+                );
+              })
         )}
     </div>
   );
