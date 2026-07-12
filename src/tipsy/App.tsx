@@ -2325,6 +2325,19 @@ function RecipeCard({
             )}
           </div>
           <div style={{ display: tab === "steps" ? "block" : "none", padding: "20px 24px" }}>
+            {steps.some((s) => !!normalizeStep(s).title.trim()) && (
+              <div style={{
+                fontFamily: "Fraunces, serif",
+                fontStyle: "italic",
+                fontWeight: 300,
+                fontSize: 15,
+                color: "rgba(35,60,0,0.55)",
+                lineHeight: 1.5,
+                marginBottom: 18,
+              }}>
+                Tap each step for details
+              </div>
+            )}
             {steps.map((s, idx) => {
               const normalized = normalizeStep(s);
               const hasTitle = !!(normalized.title && normalized.title.trim().length > 0);
