@@ -2067,14 +2067,13 @@ export async function deleteCookEvent(eventId: string): Promise<void> {
   }
 }
 
-// ==================== STEP-TITLE BACKFILL (one-time, not wired into UI) ====================
-// Titles every existing recipe's plain-string steps via an isolated AI call,
+// ==================== STEP-TITLE BACKFILL (one-time, already run) ====================
+// Titled every existing recipe's plain-string steps via an isolated AI call,
 // modeled on the grocery enrichment pattern above (own small system prompt,
-// never the conversational one). Not invoked anywhere in the app's own UI —
-// run it manually, once, from the browser console while logged in, via the
-// temporary window.backfillStepTitles hook defined below this function.
-// (A dynamic import of this module's source path only works against Vite's
-// dev server, not the bundled production build — hence the window hook.)
+// never the conversational one). Run once against production on 2026-07-12
+// via a temporary window.backfillStepTitles console hook (since removed):
+// 14 recipes found, 11 backfilled, 3 already titled, zero failures. Left
+// here — not wired into any UI — since it's idempotent and harmless to keep.
 // Idempotent: only steps that are still a plain string (typeof step ===
 // 'string') are sent for titling; anything already a {title, instruction}
 // object is left untouched, so re-running is always safe.
@@ -2208,15 +2207,6 @@ export async function backfillStepTitles(): Promise<void> {
   }
 
   console.log('Step-title backfill: done.');
-}
-
-// Temporary console-invocation hook. `typeof window !== 'undefined'` makes
-// this a no-op during SSR (this module is also imported by server loaders,
-// e.g. the public recipe/grocery share routes). Exists only so the one-time
-// backfill above can be triggered from the production browser console —
-// remove this block once the backfill has been run.
-if (typeof window !== 'undefined') {
-  (window as unknown as { backfillStepTitles: typeof backfillStepTitles }).backfillStepTitles = backfillStepTitles;
 }
 
 // ==================== CLEANUP ====================
