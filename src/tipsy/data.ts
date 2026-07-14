@@ -2070,10 +2070,12 @@ export async function deleteCookEvent(eventId: string): Promise<void> {
 // ==================== STEP-TITLE BACKFILL (one-time, already run) ====================
 // Titled every existing recipe's plain-string steps via an isolated AI call,
 // modeled on the grocery enrichment pattern above (own small system prompt,
-// never the conversational one). Run once against production on 2026-07-12
-// via a temporary window.backfillStepTitles console hook (since removed):
+// never the conversational one). Ran once against production on 2026-07-12:
 // 14 recipes found, 11 backfilled, 3 already titled, zero failures. Left
 // here — not wired into any UI — since it's idempotent and harmless to keep.
+// (A window.backfillStepTitles console hook was used twice to invoke this:
+// once for production, once temporarily on the collapsible-steps-3-ui branch
+// to backfill a preview test account. Removed again after each run.)
 // Idempotent: only steps that are still a plain string (typeof step ===
 // 'string') are sent for titling; anything already a {title, instruction}
 // object is left untouched, so re-running is always safe.
