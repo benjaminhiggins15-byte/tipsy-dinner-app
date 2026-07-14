@@ -2067,14 +2067,15 @@ export async function deleteCookEvent(eventId: string): Promise<void> {
   }
 }
 
-// ==================== STEP-TITLE BACKFILL (one-time against production, temporarily re-wired for branch preview testing) ====================
+// ==================== STEP-TITLE BACKFILL (one-time, already run) ====================
 // Titled every existing recipe's plain-string steps via an isolated AI call,
 // modeled on the grocery enrichment pattern above (own small system prompt,
 // never the conversational one). Ran once against production on 2026-07-12:
-// 14 recipes found, 11 backfilled, 3 already titled, zero failures. The
-// window hook below was removed after that run, then temporarily re-added on
-// the collapsible-steps-3-ui branch to backfill the test2@test2.com preview
-// account — remove the hook again before merging to main.
+// 14 recipes found, 11 backfilled, 3 already titled, zero failures. Left
+// here — not wired into any UI — since it's idempotent and harmless to keep.
+// (A window.backfillStepTitles console hook was used twice to invoke this:
+// once for production, once temporarily on the collapsible-steps-3-ui branch
+// to backfill a preview test account. Removed again after each run.)
 // Idempotent: only steps that are still a plain string (typeof step ===
 // 'string') are sent for titling; anything already a {title, instruction}
 // object is left untouched, so re-running is always safe.
@@ -2208,19 +2209,6 @@ export async function backfillStepTitles(): Promise<void> {
   }
 
   console.log('Step-title backfill: done.');
-}
-
-// Temporary console-invocation hook, re-added on the collapsible-steps-3-ui
-// branch only. Needed to backfill the test2@test2.com account (used to sign
-// into Vercel preview builds, since Google OAuth always redirects to
-// production) so Build 3's title UI has real titled steps to verify against
-// on the preview. `typeof window !== 'undefined'` makes this a no-op during
-// SSR (this module is also imported by server loaders, e.g. the public
-// recipe/grocery share routes). Remove this block before merging to main —
-// the production account was already backfilled on 2026-07-12 and doesn't
-// need it again.
-if (typeof window !== 'undefined') {
-  (window as unknown as { backfillStepTitles: typeof backfillStepTitles }).backfillStepTitles = backfillStepTitles;
 }
 
 // ==================== CLEANUP ====================
