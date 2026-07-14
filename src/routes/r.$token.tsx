@@ -1,9 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { getPublicRecipeByToken, normalizeStep } from "../tipsy/data";
+import { getPublicRecipeByToken, getRecipeSnapshotByToken, normalizeStep } from "../tipsy/data";
 import watermarkCircle from "../Logos/watermark_circle.png";
 
 export const Route = createFileRoute("/r/$token")({
   loader: async ({ params }) => {
+    // Frozen snapshots (recipe_shares) are checked first — this is the path
+    // every new share writes to. Falls back to the live-recipe lookup for
+    // tokens minted before this change, so old links keep resolving.
+    const snapshot = await getRecipeSnapshotByToken(params.token);
+    if (snapshot) {
+      return { recipe: snapshot };
+    }
     const recipe = await getPublicRecipeByToken(params.token);
     return { recipe };
   },
