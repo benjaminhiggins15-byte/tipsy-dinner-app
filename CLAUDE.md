@@ -94,7 +94,9 @@ Menus, Profile. Active = cream icon + label + small cream dot below; inactive = 
 
 **Key schema decisions:**
 - Ingredients stored as **free-text strings**, NOT structured `{amount, unit}`. Deliberate and load-bearing: fits the free-text nature of AI cooking ("a good glug of olive oil"); AI normalizes on demand where structure is needed. The AI is the bridge between free-text recipes and any feature that computes over ingredients (grocery, future pantry/nutrition/scaling). Full structured-storage migration is a trigger-gated option — revisit ONLY if a feature must compute across the whole library's quantities in *stored* form.
-- `steps` is a JSONB array inside `recipes` (never searched independently).
+- `steps` is a JSONB array inside `recipes` (never searched independently). Each
+  element is a `RecipeStep` (`string | { title, instruction }`) — see "Recipe Step
+  Titles" below.
 - Menu section canonical order (enforced in app code, not DB): apps → mains → sides → desserts → drinks.
 
 **Schema lives ONLY in the Supabase dashboard** — no in-repo migration files. Known
@@ -115,11 +117,12 @@ longer used for app data.)
 - `max_tokens` = 4096 (raised from 2048 to give the grocery enrichment call headroom; Anthropic bills only generated tokens, so no cost/behavior change for normal turns)
 - Two modes: Brainstorm and Recipe. Never enter Recipe mode except on explicit user choice. Recipe card is never updated for technique/wine/tangent questions.
 
-**System prompt — TRIPLICATED (known debt).** The conversational system prompt is
-duplicated across three call sites in the Cook component: `fireAICall`,
-`sendMessage`, `handleChipClick`. **Any prompt edit must touch all three or they
-drift.** Consolidate before any heavy future prompt work. User profile (palate,
-inspiration, constraints) is interpolated at all three sites.
+**System prompt is consolidated.** A single module-level
+`buildSystemPrompt(profile, currentRecipe)` (App.tsx, immediately after
+`recipeToXML`) builds the conversational system prompt. All three call sites in the
+Cook component — `fireAICall`, `sendMessage`, `handleChipClick` — call this one
+function; future prompt edits happen in one place. User profile (palate,
+inspiration, constraints) is interpolated inside it.
 
 **Recipe context injection.** When a saved recipe is in scope (`currentRecipe !==
 null`), it is serialized via `recipeToXML` (module-level in App.tsx) and appended to
@@ -141,8 +144,9 @@ under-structuring (dense paragraphs).
 **Grocery enrichment is a SEPARATE AI island.** `enrichGroceryItems` (data.ts) is a
 structured JSON-in/JSON-out utility with its own prompt
 (`GROCERY_ENRICHMENT_SYSTEM_PROMPT`, defined just above it). **Never merge, adapt
-from, or share code with the triplicated conversational prompt** — different purposes
-(structured utility vs. conversational voice); mixing risks both contracts.
+from, or share code with the conversational system prompt (`buildSystemPrompt`)** —
+different purposes (structured utility vs. conversational voice); mixing risks both
+contracts.
 
 **Microcopy voice:** "pour a glass — what are we cooking?" (placeholder); "building
 the recipe…" / "uncorking…" / "tasting…" (loading); "filed away." (save); "nothing
@@ -417,6 +421,61 @@ one decimal via `.toFixed(1)`); renders nothing when no scored cook exists.
 
 ---
 
+## Recipe Step Titles
+
+Live in production (merged to main 2026-07-13, commit `4e5a394`). Steps carry an
+optional per-step title, rendered as collapsible rows on the Recipe Card.
+
+**`RecipeStep` is `string | { title: string; instruction: string }` (data.ts).**
+Legacy plain-string steps and new object steps both exist in the database and are
+both valid — string support must never be removed.
+
+**`normalizeStep()` (data.ts) is a load-bearing contract.** Takes a `RecipeStep`,
+returns `{ title, instruction }`, coercing a plain string to `{ title: '',
+instruction: step }`. Every step reader MUST route through it — a new reader that
+skips it will render `[object Object]`. Five readers exist today, all compliant:
+Recipe Card STEPS tab (App.tsx — collapsible accordion rows); `ExpandedRecipeOverlay`
+(App.tsx — the Recipe Preview sheet from the Build mini-player, flat, title
+prepended); `AddYourOwn.tsx` and its `PreviewCard` (Write Your Own editor); `src/routes/r.$token.tsx` (public shared route — flat, title prepended, deliberately
+not collapsible); `recipeToXML` (App.tsx — serializes steps for the AI).
+
+**Two surfaces diverge deliberately.** In-app STEPS tab: collapsible, collapsed by
+default, with a Fraunces-italic hint line ("Tap each step for details") shown only
+when ≥1 step has a title. Public shared route and `ExpandedRecipeOverlay`: always
+expanded, title prepended, nothing to tap — do not add collapsing there. Expanded
+step bodies use Inter, not Fraunces italic (Fraunces is reserved for
+personal/journal content like cook notes; step instructions are body copy).
+
+**AI step XML contract.** Steps are emitted as `<step title="Short
+title">Full instruction</step>`; the `title` attribute is omitted entirely when a
+step has no title (not `title=""`). Title escapes `&` → `&amp;` then `"` →
+`&quot;`, in that order; the parser reverses both (`&quot;` → `"` then `&amp;` →
+`&`). Parser regex: `/<step(?:\s+title="([^"]*)")?>(.*?)<\/step>/g` — matches both
+titled and untitled steps, always producing `{ title, instruction }` (title `''`
+when absent). This parsing logic is duplicated across the three former
+system-prompt call sites (see AI Layer) — parsing was not part of that
+consolidation, only the prompt-building was.
+
+**Step-title backfill.** `backfillStepTitles()` (data.ts) is a one-time, idempotent
+backfill that titles existing plain-string steps via an isolated JSON-in/JSON-out
+call to the `ai-chat` edge function (own prompt, `STEP_TITLE_BACKFILL_SYSTEM_PROMPT`
+— modeled on `enrichGroceryItems`, never merged with the conversational prompt).
+Sends only `{index, instruction}` / receives `{index, title}` — instructions are
+preserved verbatim, never regenerated. Writes via `updateSavedRecipe(id, { steps
+})` (steps-only patch; the ingredient code path is untouched). The function stays
+in the codebase permanently but is deliberately unwired — no UI, no persistent
+hook. Run pattern: temporarily attach to `window`, run once from the browser
+console while logged into the target account, then remove the hook. Used twice so
+far (production, and a preview test account).
+
+**`AddYourOwn.tsx` step-write paths must write objects, never strings.** `addStep`
+and `confirmEditStep` both previously wrote plain strings unconditionally, silently
+discarding any existing title — a live data-loss bug, now fixed. `startEditStep`
+seeds the title into edit state so it round-trips through an edit. Any future
+step-write path must preserve the `{ title, instruction }` shape.
+
+---
+
 ## Session Rules for Claude Code
 
 - Design decisions are made in Claude.ai first — never figure out design in Claude Code. Claude Code executes precise prompts and makes no decisions.
@@ -439,7 +498,6 @@ code defects).
 
 ## Standing Cleanup / Watch Items
 
-- **System prompt triplicated** across `fireAICall` / `sendMessage` / `handleChipClick` — consolidate before any heavy prompt work (see AI Layer).
 - **`updateSavedRecipe` shared by two flows** — test both the chat Update path and AddYourOwn whenever it changes (see Update vs Save-as-New).
 - **Schema is dashboard-only** — no in-repo migrations. Cheap to fix now (export to a migration file), expensive to reconstruct later.
 - ~31 pre-existing TypeScript errors across app files (unrelated to recent work) — batch into one cleanup pass someday.
