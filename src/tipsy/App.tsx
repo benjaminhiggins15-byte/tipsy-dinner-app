@@ -30,6 +30,7 @@ type RecipeDraft = {
   ingredients: { name: string; qty: string }[];
   steps: RecipeStep[];
   sourceId?: string; // Optional: tracks the saved recipe this draft originated from (for update-vs-save-as-new)
+  sourceTitle?: string; // Optional: origin recipe's title at chat launch, used to detect whether the AI drifted onto a different dish
 };
 
 type BuildMessage = {
@@ -142,10 +143,17 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
 // Single source of truth for parsing a recipe out of the AI's raw response text,
 // previously triplicated byte-for-byte (modulo nesting depth) across fireAICall,
 // sendMessage, and handleChipClick. Any parsing edit now only needs to happen here.
-// sourceId is carried forward as-is from the in-progress recipe, exactly as each
-// call site did before consolidation — including the known update-vs-save-as-new
-// mislabeling risk this preserves; fixing that is out of scope here.
-const parseRecipeFromAIResponse = (fullText: string, sourceId?: string): RecipeDraft | null => {
+// sourceId/sourceTitle are carried forward from the in-progress recipe UNLESS the
+// newly-parsed title no longer matches sourceTitle — in that case the anchor is
+// severed (both dropped) because the AI has drifted onto a different dish, and
+// carrying the anchor forward would let a later "Update" write this new dish's
+// content into the original recipe's row. Comparison is deliberately exact
+// (case-insensitive, trimmed) — no fuzzy matching, no ingredient-overlap heuristic,
+// no AI call. Biased toward severing: a false "new dish" (losing the anchor when an
+// edit really was the same dish) just means the user sees "save as new" instead of
+// "update" — a harmless inconvenience. A false "evolution" (keeping the anchor for a
+// genuinely different dish) is permanent data loss. Fail toward the harmless side.
+const parseRecipeFromAIResponse = (fullText: string, sourceId?: string, sourceTitle?: string): RecipeDraft | null => {
   // Parse for recipe XML
   const recipeMatch = fullText.match(/<recipe>([\s\S]*?)<\/recipe>/);
   let parsedRecipe: RecipeDraft | null = null;
@@ -180,12 +188,17 @@ const parseRecipeFromAIResponse = (fullText: string, sourceId?: string): RecipeD
     }
 
     if (titleMatch && descMatch && ingredients.length > 0 && steps.length > 0) {
+      const parsedTitle = titleMatch[1].trim();
+      const sameDish = !sourceTitle || parsedTitle.toLowerCase() === sourceTitle.trim().toLowerCase();
       parsedRecipe = {
-        title: titleMatch[1].trim(),
+        title: parsedTitle,
         description: descMatch[1].trim(),
         ingredients,
         steps,
-        sourceId, // Preserve origin across AI edits (undefined for from-scratch builds)
+        // Preserve origin across AI edits of the same dish; sever it the moment the
+        // title no longer matches (undefined for from-scratch builds either way).
+        sourceId: sameDish ? sourceId : undefined,
+        sourceTitle: sameDish ? sourceTitle : undefined,
       };
       console.log("Recipe parsed:", parsedRecipe.title);
     }
@@ -876,6 +889,7 @@ export default function App() {
       ingredients: recipe.ingredients,
       steps: recipe.steps,
       sourceId: String(recipe.id), // Preserve origin for update-vs-save-as-new choice
+      sourceTitle: recipe.title, // Snapshot origin's title to detect drift onto a different dish later
     };
 
     // Set the recipe as the in-progress recipe (shows in mini player)
@@ -3742,6 +3756,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
   const [trayOpen, setTrayOpen] = useState(!!screen.newCategory);
   const [newCategorySelection, setNewCategorySelection] = useState<{ key: string; label: string } | null>(screen.newCategory || null);
   const [showUpdateChoice, setShowUpdateChoice] = useState(false); // Two-button choice for update vs save-as-new
+  const [showOverwriteConfirm, setShowOverwriteConfirm] = useState(false); // Confirm-before-destroy modal, shown after tapping Update
   const [showNameInput, setShowNameInput] = useState(false); // Name input for save-as-new
   const [saveAsNewName, setSaveAsNewName] = useState(""); // Temporary name for save-as-new
   const [typing, setTyping] = useState(false);
@@ -3886,7 +3901,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
         throw new Error("Empty response from API");
       }
 
-      const parsedRecipe = parseRecipeFromAIResponse(fullText, currentRecipe?.sourceId);
+      const parsedRecipe = parseRecipeFromAIResponse(fullText, currentRecipe?.sourceId, currentRecipe?.sourceTitle);
 
       // Final update to ensure clean text without recipe XML
       const displayText = fullText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "").trim();
@@ -4032,7 +4047,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
         throw new Error("Empty response from API");
       }
 
-      const parsedRecipe = parseRecipeFromAIResponse(fullText, currentRecipe?.sourceId);
+      const parsedRecipe = parseRecipeFromAIResponse(fullText, currentRecipe?.sourceId, currentRecipe?.sourceTitle);
 
       // Final update to ensure clean text without recipe XML
       const displayText = fullText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "").trim();
@@ -4099,10 +4114,13 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
         return;
       }
 
-      // Re-anchor: keep sourceId pointing at the updated recipe (same ID)
+      // Re-anchor: keep sourceId pointing at the updated recipe (same ID), and
+      // refresh sourceTitle to what was just written so the next AI turn's
+      // drift check compares against the recipe's current true title.
       setCurrentRecipe({
         ...currentRecipe,
         sourceId: String(updatedRecipe.id), // Explicitly re-anchor for next save
+        sourceTitle: updatedRecipe.title,
       });
 
       // Query the first category this recipe is in (for navigation)
@@ -4282,7 +4300,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
           throw new Error("Empty response from API");
         }
 
-        const parsedRecipe = parseRecipeFromAIResponse(fullText, currentRecipe?.sourceId);
+        const parsedRecipe = parseRecipeFromAIResponse(fullText, currentRecipe?.sourceId, currentRecipe?.sourceTitle);
 
         const displayText = fullText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "").trim();
         setMessages((m) => m.map(msg =>
@@ -4607,12 +4625,14 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
 
             {/* Buttons */}
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {/* Primary: Update */}
+              {/* Primary: Update — labeled with the recipe being overwritten (sourceTitle),
+                  not the in-progress recipe's title, so the label always names the same
+                  row the write will target. Tapping opens a confirm step rather than
+                  writing immediately. */}
               <button
-                onClick={async () => {
+                onClick={() => {
                   setShowUpdateChoice(false);
-                  // Update path (Step 4)
-                  await onUpdateRecipe();
+                  setShowOverwriteConfirm(true);
                 }}
                 style={{
                   width: "100%",
@@ -4629,7 +4649,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
                   cursor: "pointer",
                 }}
               >
-                Update {currentRecipe.title}
+                Update {currentRecipe.sourceTitle ?? currentRecipe.title}
               </button>
 
               {/* Secondary: Save as new */}
@@ -4660,6 +4680,119 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
           </div>
         </div>
       )}
+
+      {/* Overwrite confirmation modal — shown after tapping Update, before any write
+          happens. Reuses the same centered-card pattern as the recipe-delete and
+          Build-refresh confirm modals. Names the recipe being destroyed (sourceTitle)
+          explicitly so the user can't mistake this for a routine save. Cancel writes
+          nothing and returns to the update-vs-save-as-new sheet. */}
+      {showOverwriteConfirm && currentRecipe && currentRecipe.sourceId && (() => {
+        const destroyedTitle = currentRecipe.sourceTitle ?? currentRecipe.title;
+        const sameName = destroyedTitle.trim().toLowerCase() === currentRecipe.title.trim().toLowerCase();
+        const headline = sameName
+          ? `Overwrite ${destroyedTitle}?`
+          : `Replace ${destroyedTitle} with ${currentRecipe.title}?`;
+        const body = sameName
+          ? `Your saved ${destroyedTitle} will be permanently replaced with this version. This can't be undone.`
+          : `${destroyedTitle} will be permanently overwritten. This can't be undone.`;
+
+        return (
+          <div
+            onClick={() => {
+              setShowOverwriteConfirm(false);
+              setShowUpdateChoice(true);
+            }}
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: "rgba(35,60,0,0.25)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 90,
+              padding: 24,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: "#FAF7F2",
+                borderRadius: 16,
+                padding: "24px 20px",
+                width: "100%",
+                maxWidth: 280,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                border: "0.5px solid rgba(35,60,0,0.1)",
+              }}
+            >
+              <div style={{
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 16,
+                fontWeight: 700,
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+                color: "#233C00",
+                textAlign: "center",
+              }}>
+                {headline}
+              </div>
+              <div style={{
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 13,
+                color: "#233C00",
+                textAlign: "center",
+                marginBottom: 12,
+              }}>
+                {body}
+              </div>
+              <button
+                onClick={() => {
+                  setShowOverwriteConfirm(false);
+                  setShowUpdateChoice(true);
+                }}
+                style={{
+                  width: "100%",
+                  padding: "12px",
+                  borderRadius: 10,
+                  background: "transparent",
+                  border: "0.5px solid rgba(35,60,0,0.1)",
+                  color: "#233C00",
+                  fontFamily: "'Inter', sans-serif",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setShowOverwriteConfirm(false);
+                  await onUpdateRecipe();
+                }}
+                style={{
+                  width: "100%",
+                  padding: "12px",
+                  borderRadius: 10,
+                  background: "#FEE7C0",
+                  border: "none",
+                  color: "#233C00",
+                  fontFamily: "'Inter', sans-serif",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                  cursor: "pointer",
+                }}
+              >
+                Overwrite
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Name input sheet for save-as-new */}
       {showNameInput && currentRecipe && (
