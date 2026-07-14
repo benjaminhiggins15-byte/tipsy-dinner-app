@@ -139,6 +139,61 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
   return systemPrompt;
 };
 
+// Single source of truth for parsing a recipe out of the AI's raw response text,
+// previously triplicated byte-for-byte (modulo nesting depth) across fireAICall,
+// sendMessage, and handleChipClick. Any parsing edit now only needs to happen here.
+// sourceId is carried forward as-is from the in-progress recipe, exactly as each
+// call site did before consolidation — including the known update-vs-save-as-new
+// mislabeling risk this preserves; fixing that is out of scope here.
+const parseRecipeFromAIResponse = (fullText: string, sourceId?: string): RecipeDraft | null => {
+  // Parse for recipe XML
+  const recipeMatch = fullText.match(/<recipe>([\s\S]*?)<\/recipe>/);
+  let parsedRecipe: RecipeDraft | null = null;
+
+  if (recipeMatch) {
+    const recipeXml = recipeMatch[1];
+
+    const titleMatch = recipeXml.match(/<title>(.*?)<\/title>/);
+    const descMatch = recipeXml.match(/<description>(.*?)<\/description>/);
+    const ingredientsMatch = recipeXml.match(/<ingredients>([\s\S]*?)<\/ingredients>/);
+    const stepsMatch = recipeXml.match(/<steps>([\s\S]*?)<\/steps>/);
+
+    const ingredients: { name: string; qty: string }[] = [];
+    if (ingredientsMatch) {
+      const itemMatches = [
+        ...ingredientsMatch[1].matchAll(
+          /<item>[\s\S]*?<name>(.*?)<\/name>[\s\S]*?<qty>(.*?)<\/qty>[\s\S]*?<\/item>/g
+        ),
+      ];
+      for (const match of itemMatches) {
+        ingredients.push({ name: match[1].trim(), qty: match[2].trim() });
+      }
+    }
+
+    const steps: RecipeStep[] = [];
+    if (stepsMatch) {
+      const stepMatches = [...stepsMatch[1].matchAll(/<step(?:\s+title="([^"]*)")?>(.*?)<\/step>/g)];
+      for (const match of stepMatches) {
+        const title = (match[1] ?? "").replace(/&quot;/g, '"').replace(/&amp;/g, "&").trim();
+        steps.push({ title, instruction: match[2].trim() });
+      }
+    }
+
+    if (titleMatch && descMatch && ingredients.length > 0 && steps.length > 0) {
+      parsedRecipe = {
+        title: titleMatch[1].trim(),
+        description: descMatch[1].trim(),
+        ingredients,
+        steps,
+        sourceId, // Preserve origin across AI edits (undefined for from-scratch builds)
+      };
+      console.log("Recipe parsed:", parsedRecipe.title);
+    }
+  }
+
+  return parsedRecipe;
+};
+
 type Screen =
   | { name: "cook"; newCategory?: { key: string; label: string }; draft?: RecipeDraft; resetKey?: number }
   | { name: "addown"; editRecipe?: Recipe; editCategoryLabel?: string; draft?: RecipeDraft & { trayOpen?: boolean; newCategory?: { key: string; label: string } } }
@@ -3831,50 +3886,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
         throw new Error("Empty response from API");
       }
 
-      // Parse for recipe XML
-      const recipeMatch = fullText.match(/<recipe>([\s\S]*?)<\/recipe>/);
-      let parsedRecipe = null;
-
-      if (recipeMatch) {
-        const recipeXml = recipeMatch[1];
-
-        const titleMatch = recipeXml.match(/<title>(.*?)<\/title>/);
-        const descMatch = recipeXml.match(/<description>(.*?)<\/description>/);
-        const ingredientsMatch = recipeXml.match(/<ingredients>([\s\S]*?)<\/ingredients>/);
-        const stepsMatch = recipeXml.match(/<steps>([\s\S]*?)<\/steps>/);
-
-        const ingredients: { name: string; qty: string }[] = [];
-        if (ingredientsMatch) {
-          const itemMatches = [
-            ...ingredientsMatch[1].matchAll(
-              /<item>[\s\S]*?<name>(.*?)<\/name>[\s\S]*?<qty>(.*?)<\/qty>[\s\S]*?<\/item>/g
-            ),
-          ];
-          for (const match of itemMatches) {
-            ingredients.push({ name: match[1].trim(), qty: match[2].trim() });
-          }
-        }
-
-        const steps: RecipeStep[] = [];
-        if (stepsMatch) {
-          const stepMatches = [...stepsMatch[1].matchAll(/<step(?:\s+title="([^"]*)")?>(.*?)<\/step>/g)];
-          for (const match of stepMatches) {
-            const title = (match[1] ?? "").replace(/&quot;/g, '"').replace(/&amp;/g, "&").trim();
-            steps.push({ title, instruction: match[2].trim() });
-          }
-        }
-
-        if (titleMatch && descMatch && ingredients.length > 0 && steps.length > 0) {
-          parsedRecipe = {
-            title: titleMatch[1].trim(),
-            description: descMatch[1].trim(),
-            ingredients,
-            steps,
-            sourceId: currentRecipe?.sourceId, // Preserve origin across AI edits (undefined for from-scratch builds)
-          };
-          console.log("Recipe parsed:", parsedRecipe.title);
-        }
-      }
+      const parsedRecipe = parseRecipeFromAIResponse(fullText, currentRecipe?.sourceId);
 
       // Final update to ensure clean text without recipe XML
       const displayText = fullText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "").trim();
@@ -4020,50 +4032,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
         throw new Error("Empty response from API");
       }
 
-      // Parse for recipe XML
-      const recipeMatch = fullText.match(/<recipe>([\s\S]*?)<\/recipe>/);
-      let parsedRecipe = null;
-
-      if (recipeMatch) {
-        const recipeXml = recipeMatch[1];
-
-        const titleMatch = recipeXml.match(/<title>(.*?)<\/title>/);
-        const descMatch = recipeXml.match(/<description>(.*?)<\/description>/);
-        const ingredientsMatch = recipeXml.match(/<ingredients>([\s\S]*?)<\/ingredients>/);
-        const stepsMatch = recipeXml.match(/<steps>([\s\S]*?)<\/steps>/);
-
-        const ingredients: { name: string; qty: string }[] = [];
-        if (ingredientsMatch) {
-          const itemMatches = [
-            ...ingredientsMatch[1].matchAll(
-              /<item>[\s\S]*?<name>(.*?)<\/name>[\s\S]*?<qty>(.*?)<\/qty>[\s\S]*?<\/item>/g
-            ),
-          ];
-          for (const match of itemMatches) {
-            ingredients.push({ name: match[1].trim(), qty: match[2].trim() });
-          }
-        }
-
-        const steps: RecipeStep[] = [];
-        if (stepsMatch) {
-          const stepMatches = [...stepsMatch[1].matchAll(/<step(?:\s+title="([^"]*)")?>(.*?)<\/step>/g)];
-          for (const match of stepMatches) {
-            const title = (match[1] ?? "").replace(/&quot;/g, '"').replace(/&amp;/g, "&").trim();
-            steps.push({ title, instruction: match[2].trim() });
-          }
-        }
-
-        if (titleMatch && descMatch && ingredients.length > 0 && steps.length > 0) {
-          parsedRecipe = {
-            title: titleMatch[1].trim(),
-            description: descMatch[1].trim(),
-            ingredients,
-            steps,
-            sourceId: currentRecipe?.sourceId, // Preserve origin across AI edits (undefined for from-scratch builds)
-          };
-          console.log("Recipe parsed:", parsedRecipe.title);
-        }
-      }
+      const parsedRecipe = parseRecipeFromAIResponse(fullText, currentRecipe?.sourceId);
 
       // Final update to ensure clean text without recipe XML
       const displayText = fullText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "").trim();
@@ -4313,48 +4282,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
           throw new Error("Empty response from API");
         }
 
-        const recipeMatch = fullText.match(/<recipe>([\s\S]*?)<\/recipe>/);
-        let parsedRecipe = null;
-
-        if (recipeMatch) {
-          const recipeXml = recipeMatch[1];
-
-          const titleMatch = recipeXml.match(/<title>(.*?)<\/title>/);
-          const descMatch = recipeXml.match(/<description>(.*?)<\/description>/);
-          const ingredientsMatch = recipeXml.match(/<ingredients>([\s\S]*?)<\/ingredients>/);
-          const stepsMatch = recipeXml.match(/<steps>([\s\S]*?)<\/steps>/);
-
-          const ingredients: { name: string; qty: string }[] = [];
-          if (ingredientsMatch) {
-            const itemMatches = [
-              ...ingredientsMatch[1].matchAll(
-                /<item>[\s\S]*?<name>(.*?)<\/name>[\s\S]*?<qty>(.*?)<\/qty>[\s\S]*?<\/item>/g
-              ),
-            ];
-            for (const match of itemMatches) {
-              ingredients.push({ name: match[1].trim(), qty: match[2].trim() });
-            }
-          }
-
-          const steps: RecipeStep[] = [];
-          if (stepsMatch) {
-            const stepMatches = [...stepsMatch[1].matchAll(/<step(?:\s+title="([^"]*)")?>(.*?)<\/step>/g)];
-            for (const match of stepMatches) {
-              const title = (match[1] ?? "").replace(/&quot;/g, '"').replace(/&amp;/g, "&").trim();
-              steps.push({ title, instruction: match[2].trim() });
-            }
-          }
-
-          if (titleMatch && descMatch && ingredients.length > 0 && steps.length > 0) {
-            parsedRecipe = {
-              title: titleMatch[1].trim(),
-              description: descMatch[1].trim(),
-              ingredients,
-              steps,
-              sourceId: currentRecipe?.sourceId, // Preserve origin across AI edits (undefined for from-scratch builds)
-            };
-          }
-        }
+        const parsedRecipe = parseRecipeFromAIResponse(fullText, currentRecipe?.sourceId);
 
         const displayText = fullText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "").trim();
         setMessages((m) => m.map(msg =>
