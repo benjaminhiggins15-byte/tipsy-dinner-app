@@ -696,6 +696,116 @@ export async function shareRecipe(recipeId: string): Promise<string | null> {
   }
 }
 
+// ==================== RECIPE SHARING (frozen-copy snapshot) ====================
+// New snapshot-based sharing path for individual recipes, modeled on
+// shareGroceryList/getPublicGroceryListByToken above: sharing captures a
+// point-in-time copy into recipe_shares rather than pointing at the live
+// recipes row, so a later edit or delete of the recipe never affects an
+// already-minted link. Deliberately separate from the legacy
+// shareRecipe/getPublicRecipeByToken pair above, which is left untouched
+// pending a routing decision — see BUILD 2 report.
+
+export type RecipeShareSnapshot = {
+  title: string;
+  description: string;
+  ingredients: { name: string; qty: string }[];
+  steps: { title: string; instruction: string }[];
+  cookTime: string | null;
+  serves: string | null;
+};
+
+export async function shareRecipeSnapshot(recipeId: number | string): Promise<string | null> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot share recipe: no user session');
+    return null;
+  }
+
+  try {
+    const { data: recipe, error } = await supabase
+      .from('recipes')
+      .select(`
+        title,
+        description,
+        steps,
+        cook_time,
+        serves,
+        ingredients (
+          name,
+          quantity,
+          sort_order
+        )
+      `)
+      .eq('id', recipeId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!recipe) return null;
+
+    // Normalize once, at capture time, so the frozen blob always holds
+    // {title, instruction} objects — never a mix of legacy plain strings and
+    // objects, which is what a naive copy of the union-typed steps would freeze.
+    const snapshot: RecipeShareSnapshot = {
+      title: recipe.title,
+      description: recipe.description,
+      ingredients: (recipe.ingredients || [])
+        .sort((a: any, b: any) => a.sort_order - b.sort_order)
+        .map((ing: any) => ({ name: ing.name, qty: ing.quantity })),
+      steps: (recipe.steps || []).map((step: RecipeStep) => normalizeStep(step)),
+      cookTime: recipe.cook_time ?? null,
+      serves: recipe.serves ?? null,
+    };
+
+    // Fresh token every share — deliberately does not reuse an existing
+    // token the way the legacy shareRecipe does. A snapshot is a
+    // point-in-time capture, so sharing again later must mint a new one
+    // rather than resurface an old frozen copy (matches shareGroceryList).
+    const token = crypto.randomUUID();
+
+    const { error: insertError } = await supabase
+      .from('recipe_shares')
+      .insert({ user_id: userId, share_token: token, recipe: snapshot });
+
+    if (insertError) throw insertError;
+
+    // Path is provisional — final prefix depends on the routing decision
+    // (see BUILD 2 report); update here once that's settled.
+    return `${window.location.origin}/r/${token}`;
+  } catch (error) {
+    console.error('Error sharing recipe snapshot:', error);
+    return null;
+  }
+}
+
+// Reads a frozen snapshot for the public route. No user_id filter —
+// anonymous access is governed entirely by the anon-read RLS policy on
+// recipe_shares, mirroring getPublicGroceryListByToken's reliance on
+// share_token as the sole access grant.
+export async function getRecipeSnapshotByToken(token: string): Promise<RecipeShareSnapshot | null> {
+  try {
+    const { data, error } = await supabase
+      .from('recipe_shares')
+      .select('recipe')
+      .eq('share_token', token)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error loading recipe snapshot:', error);
+      return null;
+    }
+
+    if (!data) {
+      return null;
+    }
+
+    return data.recipe as RecipeShareSnapshot;
+  } catch (error) {
+    console.error('Error loading recipe snapshot:', error);
+    return null;
+  }
+}
+
 // One-time migration from localStorage to Supabase
 export async function migrateRecipesFromLocalStorage(): Promise<boolean> {
   try {
