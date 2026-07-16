@@ -23,6 +23,7 @@ import {
   IconMessageCircle,
 } from "@tabler/icons-react";
 import { pickChips } from "./chips";
+import TempBucketCheck from "./_tempBucketCheck"; // TEMPORARY — checkpoint 1 verification, remove before Step 1
 
 type RecipeDraft = {
   title: string;
@@ -1081,6 +1082,7 @@ export default function App() {
           transferToRecipeChat={transferToRecipeChat}
         />
         <BottomTabBar activeTab={activeTab} onTabClick={switchToTab} />
+        {import.meta.env.DEV && <TempBucketCheck />}
       </div>
     );
   };
