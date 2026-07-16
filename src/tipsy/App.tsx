@@ -1082,7 +1082,10 @@ export default function App() {
           transferToRecipeChat={transferToRecipeChat}
         />
         <BottomTabBar activeTab={activeTab} onTabClick={switchToTab} />
-        {import.meta.env.DEV && <TempBucketCheck />}
+        {/* TEMPORARY — checkpoint 1 bucket verification; never on production (tipsydinner.com), removed before Step 1 */}
+        {typeof window !== "undefined" && !/tipsydinner\.com$/.test(window.location.hostname) && (
+          <TempBucketCheck />
+        )}
       </div>
     );
   };

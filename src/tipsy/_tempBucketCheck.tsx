@@ -55,20 +55,21 @@ export default function TempBucketCheck() {
         position: "fixed",
         top: 8,
         left: 8,
+        right: 8,
         zIndex: 9999,
         background: "#FAF7F2",
         border: "2px solid red",
         padding: 10,
         borderRadius: 8,
-        maxWidth: 320,
-        fontSize: 11,
+        maxWidth: "calc(100vw - 16px)",
+        fontSize: 12,
         fontFamily: "monospace",
       }}
     >
-      <button onClick={runCheck} disabled={running} style={{ marginBottom: 6 }}>
+      <button onClick={runCheck} disabled={running} style={{ marginBottom: 6, padding: "8px 12px" }}>
         {running ? "running..." : "TEMP: run bucket check"}
       </button>
-      <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{result}</pre>
+      <pre style={{ whiteSpace: "pre-wrap", margin: 0, wordBreak: "break-all" }}>{result}</pre>
     </div>
   );
 }
