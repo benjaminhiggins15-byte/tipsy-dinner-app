@@ -23,7 +23,6 @@ import {
   IconMessageCircle,
 } from "@tabler/icons-react";
 import { pickChips } from "./chips";
-import TempBucketCheck from "./_tempBucketCheck"; // TEMPORARY — checkpoint 1 verification, remove before Step 1
 
 type RecipeDraft = {
   title: string;
@@ -1082,10 +1081,6 @@ export default function App() {
           transferToRecipeChat={transferToRecipeChat}
         />
         <BottomTabBar activeTab={activeTab} onTabClick={switchToTab} />
-        {/* TEMPORARY — checkpoint 1 bucket verification; never on production (tipsydinner.com), removed before Step 1 */}
-        {typeof window !== "undefined" && !/tipsydinner\.com$/.test(window.location.hostname) && (
-          <TempBucketCheck />
-        )}
       </div>
     );
   };
