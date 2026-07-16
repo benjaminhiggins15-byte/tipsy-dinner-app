@@ -60,6 +60,7 @@ export type Recipe = {
   categoryKey?: string;
   cookEvents?: CookEvent[];
   headlineRating?: number | null;
+  photo_url?: string | null;
 };
 
 // Gradient palette for categories
@@ -243,6 +244,7 @@ export type SavedRecipe = {
   steps: RecipeStep[];
   createdAt: string;
   source?: 'ai' | 'manual';
+  photo_url?: string | null;
 };
 
 // Helper to get current user ID
@@ -274,6 +276,7 @@ export async function loadSavedRecipes(): Promise<SavedRecipe[]> {
         steps,
         created_at,
         source,
+        photo_url,
         ingredients (
           name,
           quantity,
@@ -300,6 +303,7 @@ export async function loadSavedRecipes(): Promise<SavedRecipe[]> {
       steps: recipe.steps || [],
       createdAt: recipe.created_at,
       source: recipe.source,
+      photo_url: recipe.photo_url ?? null,
     }));
   } catch (error) {
     console.error('Error loading recipes:', error);
@@ -326,6 +330,7 @@ export async function saveRecipe(r: SavedRecipe, source: 'ai' | 'manual' = 'manu
         steps: r.steps,
         created_at: r.createdAt,
         source: source,
+        photo_url: r.photo_url ?? null,
       })
       .select()
       .single();
@@ -372,7 +377,7 @@ export async function saveRecipe(r: SavedRecipe, source: 'ai' | 'manual' = 'manu
 // Update saved recipe
 export async function updateSavedRecipe(
   id: number | string,
-  patch: Partial<Pick<SavedRecipe, "title" | "description" | "ingredients" | "steps">>,
+  patch: Partial<Pick<SavedRecipe, "title" | "description" | "ingredients" | "steps" | "photo_url">>,
 ): Promise<SavedRecipe | null> {
   const userId = await getCurrentUserId();
   if (!userId) {
@@ -386,6 +391,7 @@ export async function updateSavedRecipe(
     if (patch.title !== undefined) updateData.title = patch.title;
     if (patch.description !== undefined) updateData.description = patch.description;
     if (patch.steps !== undefined) updateData.steps = patch.steps;
+    if (patch.photo_url !== undefined) updateData.photo_url = patch.photo_url;
 
     // Update recipe
     if (Object.keys(updateData).length > 0) {
@@ -461,6 +467,7 @@ export async function updateSavedRecipe(
         steps,
         created_at,
         source,
+        photo_url,
         ingredients (
           name,
           quantity,
@@ -487,6 +494,7 @@ export async function updateSavedRecipe(
       steps: recipe.steps || [],
       createdAt: recipe.created_at,
       source: recipe.source,
+      photo_url: recipe.photo_url ?? null,
     };
   } catch (error) {
     console.error('Error updating recipe:', error);
@@ -534,6 +542,7 @@ export async function getSavedRecipesForCategory(categoryId: string, label: stri
           steps,
           created_at,
           source,
+          photo_url,
           ingredients (
             name,
             quantity,
@@ -574,6 +583,7 @@ export async function getSavedRecipesForCategory(categoryId: string, label: stri
         categoryKey: categoryId,
         cookEvents,
         headlineRating: headlineRatingFromEvents(cookEvents),
+        photo_url: recipe.photo_url ?? null,
       };
     });
   } catch (error) {
