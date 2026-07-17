@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents } from "./data";
+import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
@@ -1850,6 +1850,9 @@ function RecipeCard({
   const [expandedCookEvents, setExpandedCookEvents] = useState<Set<string>>(new Set());
   const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set());
   const [cookEvents, setCookEvents] = useState<CookEvent[]>(recipe.cookEvents ?? []);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(recipe.photo_url ?? null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const [showLogSheet, setShowLogSheet] = useState(false);
   const [logMode, setLogMode] = useState<"create" | "edit">("create");
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
@@ -2052,6 +2055,21 @@ function RecipeCard({
     }
   }
 
+  async function handlePhotoSelected(file: File) {
+    if (!recipe.savedId) return;
+    setPhotoError(null);
+    setPhotoUploading(true);
+    try {
+      const url = await uploadRecipePhoto(recipe.savedId, file);
+      setPhotoUrl(url);
+      clearRecipeCache?.(categoryKey);
+    } catch (err) {
+      setPhotoError(err instanceof Error ? err.message : "Couldn't upload photo. Please try again.");
+    } finally {
+      setPhotoUploading(false);
+    }
+  }
+
   const handleChatIconClick = () => {
     setShowChatInput(true);
   };
@@ -2194,6 +2212,34 @@ function RecipeCard({
           }}>
             {recipe.description}
           </div>
+
+          {/* Photo upload status (transient) */}
+          {photoUploading && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 18 }}>
+              <div style={{
+                width: 14, height: 14,
+                border: "1.5px solid rgba(35,60,0,0.25)",
+                borderTopColor: "rgba(35,60,0,0.6)",
+                borderRadius: "50%",
+                animation: "photoUploadSpin 0.8s linear infinite",
+              }} />
+              <span style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: 13,
+                fontWeight: 500,
+                letterSpacing: "0.04em",
+                color: "rgba(35,60,0,0.6)",
+              }}>
+                Uploading photo…
+              </span>
+              <style>{`@keyframes photoUploadSpin { to { transform: rotate(360deg); } }`}</style>
+            </div>
+          )}
+          {photoError && !photoUploading && (
+            <div style={{ fontFamily: "Inter, sans-serif", fontSize: 12, color: "#B85C5C", marginBottom: 18 }}>
+              {photoError}
+            </div>
+          )}
 
           {/* Headline rating */}
           {headlineRating != null && (

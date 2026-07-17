@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { compressImageFile } from './image';
 
 // Generic SSE stream decoder for the ai-chat edge function. Shared so isolated,
 // non-conversational AI calls (e.g. grocery enrichment) don't need to import
@@ -704,6 +705,51 @@ export async function shareRecipe(recipeId: string): Promise<string | null> {
     console.error('Error sharing recipe:', error);
     return null;
   }
+}
+
+// ==================== RECIPE PHOTOS ====================
+// Uploads a hero photo for a saved recipe: compresses client-side (image.ts),
+// uploads to the recipe-photos Storage bucket under a stable per-recipe path
+// (owner-keyed, so a later "replace" overwrites in place rather than
+// accumulating orphaned objects), then writes the resulting public URL to
+// the recipe's photo_url column via updateSavedRecipe. Throws on any
+// failure — compressImageFile's UnsupportedImageError propagates as-is;
+// upload/DB failures are wrapped with a clear message. Does not touch the
+// frozen share snapshot or the legacy live-share path (separate, later build).
+export async function uploadRecipePhoto(recipeId: string | number, file: File): Promise<string> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    throw new Error('No user session');
+  }
+
+  const compressed = await compressImageFile(file);
+
+  const path = `${userId}/${recipeId}.jpg`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('recipe-photos')
+    .upload(path, compressed, { contentType: 'image/jpeg', upsert: true });
+
+  if (uploadError) {
+    throw new Error(`Couldn't upload photo: ${uploadError.message}`);
+  }
+
+  const { data: publicUrlData } = supabase.storage.from('recipe-photos').getPublicUrl(path);
+  const publicUrl = publicUrlData.publicUrl;
+
+  const updated = await updateSavedRecipe(recipeId, { photo_url: publicUrl });
+  if (!updated) {
+    // Best-effort cleanup so a failed DB write doesn't leave an orphaned object;
+    // secondary failure here is swallowed — the original error below still surfaces.
+    try {
+      await supabase.storage.from('recipe-photos').remove([path]);
+    } catch {
+      // ignore
+    }
+    throw new Error("Photo uploaded but couldn't be saved to the recipe. Please try again.");
+  }
+
+  return publicUrl;
 }
 
 // ==================== RECIPE SHARING (frozen-copy snapshot) ====================
