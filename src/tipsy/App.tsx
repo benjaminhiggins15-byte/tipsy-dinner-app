@@ -1665,15 +1665,25 @@ function Recipes({
               cursor: "pointer",
             }}
           >
-            {/* Icon placeholder */}
+            {/* Thumbnail — photo if the recipe has one, else the existing icon placeholder */}
             <div style={{
               width: 40, height: 40, minWidth: 40,
               borderRadius: 10,
               background: "rgba(35,60,0,0.06)",
               display: "flex", alignItems: "center", justifyContent: "center",
               flexShrink: 0,
+              overflow: "hidden",
             }}>
-              <IconBook size={22} stroke={1.5} color="rgba(35,60,0,0.2)" />
+              {r.photo_url ? (
+                <img
+                  src={r.photo_url}
+                  alt=""
+                  loading="lazy"
+                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                />
+              ) : (
+                <IconBook size={22} stroke={1.5} color="rgba(35,60,0,0.2)" />
+              )}
             </div>
 
             {/* Recipe info */}
@@ -2282,6 +2292,83 @@ function RecipeCard({
             </div>
           </div>
 
+          {/* Hero photo — renders only when there's a photo, an in-flight
+              upload/remove, or an error to show; a recipe with photo_url
+              null and no in-flight action renders none of this, unchanged
+              from before this feature existed. */}
+          {(photoUrl || photoUploading || photoRemoving || photoError) && (
+            <div style={{ marginBottom: 18 }}>
+              {(photoUrl || photoUploading || photoRemoving || (photoError && !photoUrl)) && (
+                <div style={{
+                  position: "relative",
+                  width: "100%",
+                  aspectRatio: "4 / 3",
+                  borderRadius: 16,
+                  overflow: "hidden",
+                  background: "rgba(35,60,0,0.06)",
+                }}>
+                  {photoUrl && (
+                    <img
+                      src={photoUrl}
+                      alt=""
+                      style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                    />
+                  )}
+                  {(photoUploading || photoRemoving) && (
+                    <div style={{
+                      position: "absolute",
+                      inset: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 8,
+                      background: photoUrl ? "rgba(35,60,0,0.35)" : "transparent",
+                    }}>
+                      <div style={{
+                        width: 16, height: 16,
+                        border: photoUrl ? "1.5px solid rgba(254,231,192,0.4)" : "1.5px solid rgba(35,60,0,0.25)",
+                        borderTopColor: photoUrl ? "#FEE7C0" : "rgba(35,60,0,0.6)",
+                        borderRadius: "50%",
+                        animation: "photoUploadSpin 0.8s linear infinite",
+                      }} />
+                      <span style={{
+                        fontFamily: "Inter, sans-serif",
+                        fontSize: 12,
+                        fontWeight: 500,
+                        letterSpacing: "0.04em",
+                        color: photoUrl ? "#FEE7C0" : "rgba(35,60,0,0.6)",
+                      }}>
+                        {photoRemoving ? "Removing photo…" : "Uploading photo…"}
+                      </span>
+                      <style>{`@keyframes photoUploadSpin { to { transform: rotate(360deg); } }`}</style>
+                    </div>
+                  )}
+                  {photoError && !photoUrl && !photoUploading && !photoRemoving && (
+                    <div style={{
+                      position: "absolute",
+                      inset: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 16,
+                      textAlign: "center",
+                    }}>
+                      <span style={{ fontFamily: "Inter, sans-serif", fontSize: 12, color: "#B85C5C" }}>
+                        {photoError}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+              {photoError && photoUrl && !photoUploading && !photoRemoving && (
+                <div style={{ marginTop: 8, fontFamily: "Inter, sans-serif", fontSize: 12, color: "#B85C5C" }}>
+                  {photoError}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Category label */}
           <div style={{
             fontFamily: "Inter, sans-serif",
@@ -2323,34 +2410,6 @@ function RecipeCard({
           }}>
             {recipe.description}
           </div>
-
-          {/* Photo upload/remove status (transient) */}
-          {(photoUploading || photoRemoving) && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 18 }}>
-              <div style={{
-                width: 14, height: 14,
-                border: "1.5px solid rgba(35,60,0,0.25)",
-                borderTopColor: "rgba(35,60,0,0.6)",
-                borderRadius: "50%",
-                animation: "photoUploadSpin 0.8s linear infinite",
-              }} />
-              <span style={{
-                fontFamily: "Inter, sans-serif",
-                fontSize: 13,
-                fontWeight: 500,
-                letterSpacing: "0.04em",
-                color: "rgba(35,60,0,0.6)",
-              }}>
-                {photoRemoving ? "Removing photo…" : "Uploading photo…"}
-              </span>
-              <style>{`@keyframes photoUploadSpin { to { transform: rotate(360deg); } }`}</style>
-            </div>
-          )}
-          {photoError && !photoUploading && !photoRemoving && (
-            <div style={{ fontFamily: "Inter, sans-serif", fontSize: 12, color: "#B85C5C", marginBottom: 18 }}>
-              {photoError}
-            </div>
-          )}
 
           {/* Headline rating */}
           {headlineRating != null && (
