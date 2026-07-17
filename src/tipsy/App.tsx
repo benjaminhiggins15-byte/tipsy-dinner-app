@@ -1865,6 +1865,7 @@ function RecipeCard({
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
   const [confirmRemovePhoto, setConfirmRemovePhoto] = useState(false);
+  const [photoDebug, setPhotoDebug] = useState<string | null>(null); // TEMP DIAGNOSTIC — remove before merge
   const photoInputRef = useRef<HTMLInputElement>(null);
   const [showLogSheet, setShowLogSheet] = useState(false);
   const [logMode, setLogMode] = useState<"create" | "edit">("create");
@@ -2072,11 +2073,16 @@ function RecipeCard({
     if (!recipe.savedId) return;
     setPhotoError(null);
     setPhotoUploading(true);
+    const prevUrl = photoUrl; // TEMP DIAGNOSTIC
     try {
       const url = await uploadRecipePhoto(recipe.savedId, file);
+      setPhotoDebug( // TEMP DIAGNOSTIC — remove before merge
+        `TEMP DEBUG: file=${file.name} (${file.size}b) prevUrl=${prevUrl ?? "null"} newUrl=${url} sameString=${url === prevUrl}`
+      );
       setPhotoUrl(url);
       clearRecipeCache?.(categoryKey);
     } catch (err) {
+      setPhotoDebug(`TEMP DEBUG: upload threw — ${err instanceof Error ? err.message : String(err)}`); // TEMP DIAGNOSTIC
       setPhotoError(err instanceof Error ? err.message : "Couldn't upload photo. Please try again.");
     } finally {
       setPhotoUploading(false);
@@ -2093,6 +2099,7 @@ function RecipeCard({
 
   function handleReplacePhoto() {
     setPhotoMenuOpen(false);
+    setPhotoDebug("TEMP DEBUG: Replace tapped, opening file picker…"); // TEMP DIAGNOSTIC
     photoInputRef.current?.click();
   }
 
@@ -2101,6 +2108,8 @@ function RecipeCard({
     e.target.value = "";
     if (file) {
       handlePhotoSelected(file);
+    } else {
+      setPhotoDebug("TEMP DEBUG: file input change fired with NO file (picker cancelled or empty selection)"); // TEMP DIAGNOSTIC
     }
   }
 
@@ -2366,6 +2375,23 @@ function RecipeCard({
                   {photoError}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* TEMP DIAGNOSTIC — Replace-photo bug investigation, remove before merge */}
+          {photoDebug && (
+            <div style={{
+              fontFamily: "monospace",
+              fontSize: 11,
+              color: "#B85C5C",
+              background: "rgba(184,92,92,0.1)",
+              border: "1px solid #B85C5C",
+              borderRadius: 8,
+              padding: 8,
+              marginBottom: 18,
+              wordBreak: "break-all",
+            }}>
+              {photoDebug}
             </div>
           )}
 
