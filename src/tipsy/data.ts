@@ -752,6 +752,31 @@ export async function uploadRecipePhoto(recipeId: string | number, file: File): 
   return publicUrl;
 }
 
+// Removes a recipe's hero photo: deletes the storage object first, then
+// clears photo_url. Deleting first (rather than clearing the DB field first)
+// means a failure at either step leaves photo_url untouched — either the
+// delete never ran, or it ran but the DB write failed and the recipe still
+// points at a now-missing file, which is the same "surface an error, change
+// nothing you can still call unchanged" bias uploadRecipePhoto follows.
+export async function removeRecipePhoto(recipeId: string | number): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    throw new Error('No user session');
+  }
+
+  const path = `${userId}/${recipeId}.jpg`;
+
+  const { error: removeError } = await supabase.storage.from('recipe-photos').remove([path]);
+  if (removeError) {
+    throw new Error(`Couldn't remove photo: ${removeError.message}`);
+  }
+
+  const updated = await updateSavedRecipe(recipeId, { photo_url: null });
+  if (!updated) {
+    throw new Error("Photo was removed but couldn't be cleared from the recipe. Please try again.");
+  }
+}
+
 // ==================== RECIPE SHARING (frozen-copy snapshot) ====================
 // New snapshot-based sharing path for individual recipes, modeled on
 // shareGroceryList/getPublicGroceryListByToken above: sharing captures a
