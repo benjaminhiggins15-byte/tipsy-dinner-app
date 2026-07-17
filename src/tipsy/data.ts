@@ -62,6 +62,7 @@ export type Recipe = {
   cookEvents?: CookEvent[];
   headlineRating?: number | null;
   photo_url?: string | null;
+  photo_version?: number;
 };
 
 // Gradient palette for categories
@@ -246,6 +247,7 @@ export type SavedRecipe = {
   createdAt: string;
   source?: 'ai' | 'manual';
   photo_url?: string | null;
+  photo_version?: number;
 };
 
 // Helper to get current user ID
@@ -278,6 +280,7 @@ export async function loadSavedRecipes(): Promise<SavedRecipe[]> {
         created_at,
         source,
         photo_url,
+        photo_version,
         ingredients (
           name,
           quantity,
@@ -305,6 +308,7 @@ export async function loadSavedRecipes(): Promise<SavedRecipe[]> {
       createdAt: recipe.created_at,
       source: recipe.source,
       photo_url: recipe.photo_url ?? null,
+      photo_version: recipe.photo_version ?? 0,
     }));
   } catch (error) {
     console.error('Error loading recipes:', error);
@@ -378,7 +382,7 @@ export async function saveRecipe(r: SavedRecipe, source: 'ai' | 'manual' = 'manu
 // Update saved recipe
 export async function updateSavedRecipe(
   id: number | string,
-  patch: Partial<Pick<SavedRecipe, "title" | "description" | "ingredients" | "steps" | "photo_url">>,
+  patch: Partial<Pick<SavedRecipe, "title" | "description" | "ingredients" | "steps" | "photo_url" | "photo_version">>,
 ): Promise<SavedRecipe | null> {
   const userId = await getCurrentUserId();
   if (!userId) {
@@ -393,6 +397,7 @@ export async function updateSavedRecipe(
     if (patch.description !== undefined) updateData.description = patch.description;
     if (patch.steps !== undefined) updateData.steps = patch.steps;
     if (patch.photo_url !== undefined) updateData.photo_url = patch.photo_url;
+    if (patch.photo_version !== undefined) updateData.photo_version = patch.photo_version;
 
     // Update recipe
     if (Object.keys(updateData).length > 0) {
@@ -469,6 +474,7 @@ export async function updateSavedRecipe(
         created_at,
         source,
         photo_url,
+        photo_version,
         ingredients (
           name,
           quantity,
@@ -496,6 +502,7 @@ export async function updateSavedRecipe(
       createdAt: recipe.created_at,
       source: recipe.source,
       photo_url: recipe.photo_url ?? null,
+      photo_version: recipe.photo_version ?? 0,
     };
   } catch (error) {
     console.error('Error updating recipe:', error);
@@ -544,6 +551,7 @@ export async function getSavedRecipesForCategory(categoryId: string, label: stri
           created_at,
           source,
           photo_url,
+          photo_version,
           ingredients (
             name,
             quantity,
@@ -585,6 +593,7 @@ export async function getSavedRecipesForCategory(categoryId: string, label: stri
         cookEvents,
         headlineRating: headlineRatingFromEvents(cookEvents),
         photo_url: recipe.photo_url ?? null,
+        photo_version: recipe.photo_version ?? 0,
       };
     });
   } catch (error) {
@@ -716,7 +725,17 @@ export async function shareRecipe(recipeId: string): Promise<string | null> {
 // failure — compressImageFile's UnsupportedImageError propagates as-is;
 // upload/DB failures are wrapped with a clear message. Does not touch the
 // frozen share snapshot or the legacy live-share path (separate, later build).
-export async function uploadRecipePhoto(recipeId: string | number, file: File): Promise<string> {
+//
+// Because the storage path is stable and the upload uses upsert, a replaced
+// photo's public URL string is byte-for-byte identical to the old one — so
+// browsers cache-serve the stale image forever unless something in the URL
+// changes. photo_version exists purely to bust that cache: it's read fresh
+// from the DB (never from component state, which could be stale) immediately
+// before the write, so the bump is always relative to committed truth.
+export async function uploadRecipePhoto(
+  recipeId: string | number,
+  file: File
+): Promise<{ url: string; version: number }> {
   const userId = await getCurrentUserId();
   if (!userId) {
     throw new Error('No user session');
@@ -737,7 +756,20 @@ export async function uploadRecipePhoto(recipeId: string | number, file: File): 
   const { data: publicUrlData } = supabase.storage.from('recipe-photos').getPublicUrl(path);
   const publicUrl = publicUrlData.publicUrl;
 
-  const updated = await updateSavedRecipe(recipeId, { photo_url: publicUrl });
+  const { data: currentRow, error: versionFetchError } = await supabase
+    .from('recipes')
+    .select('photo_version')
+    .eq('id', recipeId)
+    .eq('user_id', userId)
+    .single();
+
+  if (versionFetchError) {
+    throw new Error(`Couldn't upload photo: ${versionFetchError.message}`);
+  }
+
+  const nextVersion = (currentRow?.photo_version ?? 0) + 1;
+
+  const updated = await updateSavedRecipe(recipeId, { photo_url: publicUrl, photo_version: nextVersion });
   if (!updated) {
     // Best-effort cleanup so a failed DB write doesn't leave an orphaned object;
     // secondary failure here is swallowed — the original error below still surfaces.
@@ -749,7 +781,7 @@ export async function uploadRecipePhoto(recipeId: string | number, file: File): 
     throw new Error("Photo uploaded but couldn't be saved to the recipe. Please try again.");
   }
 
-  return publicUrl;
+  return { url: publicUrl, version: updated.photo_version ?? nextVersion };
 }
 
 // Removes a recipe's hero photo: deletes the storage object first, then
@@ -758,7 +790,9 @@ export async function uploadRecipePhoto(recipeId: string | number, file: File): 
 // delete never ran, or it ran but the DB write failed and the recipe still
 // points at a now-missing file, which is the same "surface an error, change
 // nothing you can still call unchanged" bias uploadRecipePhoto follows.
-export async function removeRecipePhoto(recipeId: string | number): Promise<void> {
+// Also bumps photo_version (fresh-read, same as uploadRecipePhoto) so a
+// stale cached image can't resurface if a photo is later re-added.
+export async function removeRecipePhoto(recipeId: string | number): Promise<number> {
   const userId = await getCurrentUserId();
   if (!userId) {
     throw new Error('No user session');
@@ -771,10 +805,25 @@ export async function removeRecipePhoto(recipeId: string | number): Promise<void
     throw new Error(`Couldn't remove photo: ${removeError.message}`);
   }
 
-  const updated = await updateSavedRecipe(recipeId, { photo_url: null });
+  const { data: currentRow, error: versionFetchError } = await supabase
+    .from('recipes')
+    .select('photo_version')
+    .eq('id', recipeId)
+    .eq('user_id', userId)
+    .single();
+
+  if (versionFetchError) {
+    throw new Error(`Couldn't remove photo: ${versionFetchError.message}`);
+  }
+
+  const nextVersion = (currentRow?.photo_version ?? 0) + 1;
+
+  const updated = await updateSavedRecipe(recipeId, { photo_url: null, photo_version: nextVersion });
   if (!updated) {
     throw new Error("Photo was removed but couldn't be cleared from the recipe. Please try again.");
   }
+
+  return updated.photo_version ?? nextVersion;
 }
 
 // ==================== RECIPE SHARING (frozen-copy snapshot) ====================

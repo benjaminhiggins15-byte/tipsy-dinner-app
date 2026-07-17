@@ -1676,7 +1676,7 @@ function Recipes({
             }}>
               {r.photo_url ? (
                 <img
-                  src={r.photo_url}
+                  src={`${r.photo_url}?v=${r.photo_version ?? 0}`}
                   alt=""
                   loading="lazy"
                   style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
@@ -1860,12 +1860,12 @@ function RecipeCard({
   const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set());
   const [cookEvents, setCookEvents] = useState<CookEvent[]>(recipe.cookEvents ?? []);
   const [photoUrl, setPhotoUrl] = useState<string | null>(recipe.photo_url ?? null);
+  const [photoVersion, setPhotoVersion] = useState<number>(recipe.photo_version ?? 0);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoRemoving, setPhotoRemoving] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
   const [confirmRemovePhoto, setConfirmRemovePhoto] = useState(false);
-  const [photoDebug, setPhotoDebug] = useState<string | null>(null); // TEMP DIAGNOSTIC — remove before merge
   const photoInputRef = useRef<HTMLInputElement>(null);
   const [showLogSheet, setShowLogSheet] = useState(false);
   const [logMode, setLogMode] = useState<"create" | "edit">("create");
@@ -2073,16 +2073,12 @@ function RecipeCard({
     if (!recipe.savedId) return;
     setPhotoError(null);
     setPhotoUploading(true);
-    const prevUrl = photoUrl; // TEMP DIAGNOSTIC
     try {
-      const url = await uploadRecipePhoto(recipe.savedId, file);
-      setPhotoDebug( // TEMP DIAGNOSTIC — remove before merge
-        `TEMP DEBUG: file=${file.name} (${file.size}b) prevUrl=${prevUrl ?? "null"} newUrl=${url} sameString=${url === prevUrl}`
-      );
+      const { url, version } = await uploadRecipePhoto(recipe.savedId, file);
       setPhotoUrl(url);
+      setPhotoVersion(version);
       clearRecipeCache?.(categoryKey);
     } catch (err) {
-      setPhotoDebug(`TEMP DEBUG: upload threw — ${err instanceof Error ? err.message : String(err)}`); // TEMP DIAGNOSTIC
       setPhotoError(err instanceof Error ? err.message : "Couldn't upload photo. Please try again.");
     } finally {
       setPhotoUploading(false);
@@ -2099,7 +2095,6 @@ function RecipeCard({
 
   function handleReplacePhoto() {
     setPhotoMenuOpen(false);
-    setPhotoDebug("TEMP DEBUG: Replace tapped, opening file picker…"); // TEMP DIAGNOSTIC
     photoInputRef.current?.click();
   }
 
@@ -2108,8 +2103,6 @@ function RecipeCard({
     e.target.value = "";
     if (file) {
       handlePhotoSelected(file);
-    } else {
-      setPhotoDebug("TEMP DEBUG: file input change fired with NO file (picker cancelled or empty selection)"); // TEMP DIAGNOSTIC
     }
   }
 
@@ -2124,8 +2117,9 @@ function RecipeCard({
     setPhotoError(null);
     setPhotoRemoving(true);
     try {
-      await removeRecipePhoto(recipe.savedId);
+      const version = await removeRecipePhoto(recipe.savedId);
       setPhotoUrl(null);
+      setPhotoVersion(version);
       clearRecipeCache?.(categoryKey);
     } catch (err) {
       setPhotoError(err instanceof Error ? err.message : "Couldn't remove photo. Please try again.");
@@ -2318,7 +2312,7 @@ function RecipeCard({
                 }}>
                   {photoUrl && (
                     <img
-                      src={photoUrl}
+                      src={`${photoUrl}?v=${photoVersion}`}
                       alt=""
                       style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                     />
@@ -2375,23 +2369,6 @@ function RecipeCard({
                   {photoError}
                 </div>
               )}
-            </div>
-          )}
-
-          {/* TEMP DIAGNOSTIC — Replace-photo bug investigation, remove before merge */}
-          {photoDebug && (
-            <div style={{
-              fontFamily: "monospace",
-              fontSize: 11,
-              color: "#B85C5C",
-              background: "rgba(184,92,92,0.1)",
-              border: "1px solid #B85C5C",
-              borderRadius: 8,
-              padding: 8,
-              marginBottom: 18,
-              wordBreak: "break-all",
-            }}>
-              {photoDebug}
             </div>
           )}
 
