@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { compressImageFile } from './image';
 
 // Generic SSE stream decoder for the ai-chat edge function. Shared so isolated,
 // non-conversational AI calls (e.g. grocery enrichment) don't need to import
@@ -60,6 +61,8 @@ export type Recipe = {
   categoryKey?: string;
   cookEvents?: CookEvent[];
   headlineRating?: number | null;
+  photo_url?: string | null;
+  photo_version?: number;
 };
 
 // Gradient palette for categories
@@ -243,6 +246,8 @@ export type SavedRecipe = {
   steps: RecipeStep[];
   createdAt: string;
   source?: 'ai' | 'manual';
+  photo_url?: string | null;
+  photo_version?: number;
 };
 
 // Helper to get current user ID
@@ -274,6 +279,8 @@ export async function loadSavedRecipes(): Promise<SavedRecipe[]> {
         steps,
         created_at,
         source,
+        photo_url,
+        photo_version,
         ingredients (
           name,
           quantity,
@@ -300,6 +307,8 @@ export async function loadSavedRecipes(): Promise<SavedRecipe[]> {
       steps: recipe.steps || [],
       createdAt: recipe.created_at,
       source: recipe.source,
+      photo_url: recipe.photo_url ?? null,
+      photo_version: recipe.photo_version ?? 0,
     }));
   } catch (error) {
     console.error('Error loading recipes:', error);
@@ -326,6 +335,7 @@ export async function saveRecipe(r: SavedRecipe, source: 'ai' | 'manual' = 'manu
         steps: r.steps,
         created_at: r.createdAt,
         source: source,
+        photo_url: r.photo_url ?? null,
       })
       .select()
       .single();
@@ -372,7 +382,7 @@ export async function saveRecipe(r: SavedRecipe, source: 'ai' | 'manual' = 'manu
 // Update saved recipe
 export async function updateSavedRecipe(
   id: number | string,
-  patch: Partial<Pick<SavedRecipe, "title" | "description" | "ingredients" | "steps">>,
+  patch: Partial<Pick<SavedRecipe, "title" | "description" | "ingredients" | "steps" | "photo_url" | "photo_version">>,
 ): Promise<SavedRecipe | null> {
   const userId = await getCurrentUserId();
   if (!userId) {
@@ -386,6 +396,8 @@ export async function updateSavedRecipe(
     if (patch.title !== undefined) updateData.title = patch.title;
     if (patch.description !== undefined) updateData.description = patch.description;
     if (patch.steps !== undefined) updateData.steps = patch.steps;
+    if (patch.photo_url !== undefined) updateData.photo_url = patch.photo_url;
+    if (patch.photo_version !== undefined) updateData.photo_version = patch.photo_version;
 
     // Update recipe
     if (Object.keys(updateData).length > 0) {
@@ -461,6 +473,8 @@ export async function updateSavedRecipe(
         steps,
         created_at,
         source,
+        photo_url,
+        photo_version,
         ingredients (
           name,
           quantity,
@@ -487,6 +501,8 @@ export async function updateSavedRecipe(
       steps: recipe.steps || [],
       createdAt: recipe.created_at,
       source: recipe.source,
+      photo_url: recipe.photo_url ?? null,
+      photo_version: recipe.photo_version ?? 0,
     };
   } catch (error) {
     console.error('Error updating recipe:', error);
@@ -534,6 +550,8 @@ export async function getSavedRecipesForCategory(categoryId: string, label: stri
           steps,
           created_at,
           source,
+          photo_url,
+          photo_version,
           ingredients (
             name,
             quantity,
@@ -574,6 +592,8 @@ export async function getSavedRecipesForCategory(categoryId: string, label: stri
         categoryKey: categoryId,
         cookEvents,
         headlineRating: headlineRatingFromEvents(cookEvents),
+        photo_url: recipe.photo_url ?? null,
+        photo_version: recipe.photo_version ?? 0,
       };
     });
   } catch (error) {
@@ -694,6 +714,116 @@ export async function shareRecipe(recipeId: string): Promise<string | null> {
     console.error('Error sharing recipe:', error);
     return null;
   }
+}
+
+// ==================== RECIPE PHOTOS ====================
+// Uploads a hero photo for a saved recipe: compresses client-side (image.ts),
+// uploads to the recipe-photos Storage bucket under a stable per-recipe path
+// (owner-keyed, so a later "replace" overwrites in place rather than
+// accumulating orphaned objects), then writes the resulting public URL to
+// the recipe's photo_url column via updateSavedRecipe. Throws on any
+// failure — compressImageFile's UnsupportedImageError propagates as-is;
+// upload/DB failures are wrapped with a clear message. Does not touch the
+// frozen share snapshot or the legacy live-share path (separate, later build).
+//
+// Because the storage path is stable and the upload uses upsert, a replaced
+// photo's public URL string is byte-for-byte identical to the old one — so
+// browsers cache-serve the stale image forever unless something in the URL
+// changes. photo_version exists purely to bust that cache: it's read fresh
+// from the DB (never from component state, which could be stale) immediately
+// before the write, so the bump is always relative to committed truth.
+export async function uploadRecipePhoto(
+  recipeId: string | number,
+  file: File
+): Promise<{ url: string; version: number }> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    throw new Error('No user session');
+  }
+
+  const compressed = await compressImageFile(file);
+
+  const path = `${userId}/${recipeId}.jpg`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('recipe-photos')
+    .upload(path, compressed, { contentType: 'image/jpeg', upsert: true });
+
+  if (uploadError) {
+    throw new Error(`Couldn't upload photo: ${uploadError.message}`);
+  }
+
+  const { data: publicUrlData } = supabase.storage.from('recipe-photos').getPublicUrl(path);
+  const publicUrl = publicUrlData.publicUrl;
+
+  const { data: currentRow, error: versionFetchError } = await supabase
+    .from('recipes')
+    .select('photo_version')
+    .eq('id', recipeId)
+    .eq('user_id', userId)
+    .single();
+
+  if (versionFetchError) {
+    throw new Error(`Couldn't upload photo: ${versionFetchError.message}`);
+  }
+
+  const nextVersion = (currentRow?.photo_version ?? 0) + 1;
+
+  const updated = await updateSavedRecipe(recipeId, { photo_url: publicUrl, photo_version: nextVersion });
+  if (!updated) {
+    // Best-effort cleanup so a failed DB write doesn't leave an orphaned object;
+    // secondary failure here is swallowed — the original error below still surfaces.
+    try {
+      await supabase.storage.from('recipe-photos').remove([path]);
+    } catch {
+      // ignore
+    }
+    throw new Error("Photo uploaded but couldn't be saved to the recipe. Please try again.");
+  }
+
+  return { url: publicUrl, version: updated.photo_version ?? nextVersion };
+}
+
+// Removes a recipe's hero photo: deletes the storage object first, then
+// clears photo_url. Deleting first (rather than clearing the DB field first)
+// means a failure at either step leaves photo_url untouched — either the
+// delete never ran, or it ran but the DB write failed and the recipe still
+// points at a now-missing file, which is the same "surface an error, change
+// nothing you can still call unchanged" bias uploadRecipePhoto follows.
+// Also bumps photo_version (fresh-read, same as uploadRecipePhoto) so a
+// stale cached image can't resurface if a photo is later re-added.
+export async function removeRecipePhoto(recipeId: string | number): Promise<number> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    throw new Error('No user session');
+  }
+
+  const path = `${userId}/${recipeId}.jpg`;
+
+  const { error: removeError } = await supabase.storage.from('recipe-photos').remove([path]);
+  if (removeError) {
+    throw new Error(`Couldn't remove photo: ${removeError.message}`);
+  }
+
+  const { data: currentRow, error: versionFetchError } = await supabase
+    .from('recipes')
+    .select('photo_version')
+    .eq('id', recipeId)
+    .eq('user_id', userId)
+    .single();
+
+  if (versionFetchError) {
+    throw new Error(`Couldn't remove photo: ${versionFetchError.message}`);
+  }
+
+  const nextVersion = (currentRow?.photo_version ?? 0) + 1;
+
+  const updated = await updateSavedRecipe(recipeId, { photo_url: null, photo_version: nextVersion });
+  if (!updated) {
+    throw new Error("Photo was removed but couldn't be cleared from the recipe. Please try again.");
+  }
+
+  return updated.photo_version ?? nextVersion;
 }
 
 // ==================== RECIPE SHARING (frozen-copy snapshot) ====================

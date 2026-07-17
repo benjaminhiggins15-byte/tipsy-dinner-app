@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteSavedRecipe, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents } from "./data";
+import { getAllCategories, getRecipesForCategory, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto } from "./data";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
@@ -1665,15 +1665,25 @@ function Recipes({
               cursor: "pointer",
             }}
           >
-            {/* Icon placeholder */}
+            {/* Thumbnail — photo if the recipe has one, else the existing icon placeholder */}
             <div style={{
               width: 40, height: 40, minWidth: 40,
               borderRadius: 10,
               background: "rgba(35,60,0,0.06)",
               display: "flex", alignItems: "center", justifyContent: "center",
               flexShrink: 0,
+              overflow: "hidden",
             }}>
-              <IconBook size={22} stroke={1.5} color="rgba(35,60,0,0.2)" />
+              {r.photo_url ? (
+                <img
+                  src={`${r.photo_url}?v=${r.photo_version ?? 0}`}
+                  alt=""
+                  loading="lazy"
+                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                />
+              ) : (
+                <IconBook size={22} stroke={1.5} color="rgba(35,60,0,0.2)" />
+              )}
             </div>
 
             {/* Recipe info */}
@@ -1842,7 +1852,6 @@ function RecipeCard({
   transferToRecipeChat?: (recipe: SavedRecipe, question: string, onCollisionCancel: () => void) => void;
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps" | "history">("ingredients");
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [shareConfirm, setShareConfirm] = useState(false);
   const [groceryAddedConfirm, setGroceryAddedConfirm] = useState(false);
   const [showChatInput, setShowChatInput] = useState(false);
@@ -1850,6 +1859,14 @@ function RecipeCard({
   const [expandedCookEvents, setExpandedCookEvents] = useState<Set<string>>(new Set());
   const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set());
   const [cookEvents, setCookEvents] = useState<CookEvent[]>(recipe.cookEvents ?? []);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(recipe.photo_url ?? null);
+  const [photoVersion, setPhotoVersion] = useState<number>(recipe.photo_version ?? 0);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoRemoving, setPhotoRemoving] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
+  const [confirmRemovePhoto, setConfirmRemovePhoto] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement>(null);
   const [showLogSheet, setShowLogSheet] = useState(false);
   const [logMode, setLogMode] = useState<"create" | "edit">("create");
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
@@ -2052,6 +2069,65 @@ function RecipeCard({
     }
   }
 
+  async function handlePhotoSelected(file: File) {
+    if (!recipe.savedId) return;
+    setPhotoError(null);
+    setPhotoUploading(true);
+    try {
+      const { url, version } = await uploadRecipePhoto(recipe.savedId, file);
+      setPhotoUrl(url);
+      setPhotoVersion(version);
+      clearRecipeCache?.(categoryKey);
+    } catch (err) {
+      setPhotoError(err instanceof Error ? err.message : "Couldn't upload photo. Please try again.");
+    } finally {
+      setPhotoUploading(false);
+    }
+  }
+
+  function handleCameraIconClick() {
+    if (photoUrl) {
+      setPhotoMenuOpen(true);
+    } else {
+      photoInputRef.current?.click();
+    }
+  }
+
+  function handleReplacePhoto() {
+    setPhotoMenuOpen(false);
+    photoInputRef.current?.click();
+  }
+
+  function handlePhotoFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) {
+      handlePhotoSelected(file);
+    }
+  }
+
+  function handleRemovePhotoRequest() {
+    setPhotoMenuOpen(false);
+    setConfirmRemovePhoto(true);
+  }
+
+  async function handleConfirmRemovePhoto() {
+    if (!recipe.savedId) return;
+    setConfirmRemovePhoto(false);
+    setPhotoError(null);
+    setPhotoRemoving(true);
+    try {
+      const version = await removeRecipePhoto(recipe.savedId);
+      setPhotoUrl(null);
+      setPhotoVersion(version);
+      clearRecipeCache?.(categoryKey);
+    } catch (err) {
+      setPhotoError(err instanceof Error ? err.message : "Couldn't remove photo. Please try again.");
+    } finally {
+      setPhotoRemoving(false);
+    }
+  }
+
   const handleChatIconClick = () => {
     setShowChatInput(true);
   };
@@ -2125,17 +2201,83 @@ function RecipeCard({
                 </button>
               )}
               {editable && (
-                <button
-                  onClick={() => setConfirmDelete(true)}
-                  aria-label="Delete"
-                  style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="3 6 5 6 21 6" />
-                    <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-                    <path d="M10 11v6M14 11v6" />
-                  </svg>
-                </button>
+                <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                  <input
+                    ref={photoInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handlePhotoFileInputChange}
+                    style={{ display: "none" }}
+                  />
+                  <button
+                    onClick={handleCameraIconClick}
+                    aria-label="Recipe photo"
+                    style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
+                      <circle cx="12" cy="13" r="4" />
+                    </svg>
+                  </button>
+                  {photoMenuOpen && (
+                    <>
+                      <div
+                        onClick={() => setPhotoMenuOpen(false)}
+                        style={{ position: "fixed", inset: 0, zIndex: 25 }}
+                      />
+                      <div style={{
+                        position: "absolute",
+                        top: "calc(100% + 6px)",
+                        right: 0,
+                        background: "#FAF7F2",
+                        borderRadius: 12,
+                        border: "0.5px solid rgba(35,60,0,0.1)",
+                        boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
+                        overflow: "hidden",
+                        zIndex: 26,
+                        minWidth: 150,
+                      }}>
+                        <button
+                          onClick={handleReplacePhoto}
+                          style={{
+                            display: "block",
+                            width: "100%",
+                            textAlign: "left",
+                            padding: "12px 16px",
+                            background: "transparent",
+                            border: "none",
+                            fontFamily: "'Inter', sans-serif",
+                            fontSize: 14,
+                            fontWeight: 500,
+                            color: "#233C00",
+                            cursor: "pointer",
+                          }}
+                        >
+                          Replace photo
+                        </button>
+                        <button
+                          onClick={handleRemovePhotoRequest}
+                          style={{
+                            display: "block",
+                            width: "100%",
+                            textAlign: "left",
+                            padding: "12px 16px",
+                            background: "transparent",
+                            border: "none",
+                            borderTop: "0.5px solid rgba(35,60,0,0.08)",
+                            fontFamily: "'Inter', sans-serif",
+                            fontSize: 14,
+                            fontWeight: 500,
+                            color: "#B85C5C",
+                            cursor: "pointer",
+                          }}
+                        >
+                          Remove photo
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
               )}
               {editable && ingredients.length > 0 && (
                 <button
@@ -2152,6 +2294,83 @@ function RecipeCard({
               )}
             </div>
           </div>
+
+          {/* Hero photo — renders only when there's a photo, an in-flight
+              upload/remove, or an error to show; a recipe with photo_url
+              null and no in-flight action renders none of this, unchanged
+              from before this feature existed. */}
+          {(photoUrl || photoUploading || photoRemoving || photoError) && (
+            <div style={{ marginBottom: 18 }}>
+              {(photoUrl || photoUploading || photoRemoving || (photoError && !photoUrl)) && (
+                <div style={{
+                  position: "relative",
+                  width: "100%",
+                  aspectRatio: "4 / 3",
+                  borderRadius: 16,
+                  overflow: "hidden",
+                  background: "rgba(35,60,0,0.06)",
+                }}>
+                  {photoUrl && (
+                    <img
+                      src={`${photoUrl}?v=${photoVersion}`}
+                      alt=""
+                      style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                    />
+                  )}
+                  {(photoUploading || photoRemoving) && (
+                    <div style={{
+                      position: "absolute",
+                      inset: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 8,
+                      background: photoUrl ? "rgba(35,60,0,0.35)" : "transparent",
+                    }}>
+                      <div style={{
+                        width: 16, height: 16,
+                        border: photoUrl ? "1.5px solid rgba(254,231,192,0.4)" : "1.5px solid rgba(35,60,0,0.25)",
+                        borderTopColor: photoUrl ? "#FEE7C0" : "rgba(35,60,0,0.6)",
+                        borderRadius: "50%",
+                        animation: "photoUploadSpin 0.8s linear infinite",
+                      }} />
+                      <span style={{
+                        fontFamily: "Inter, sans-serif",
+                        fontSize: 12,
+                        fontWeight: 500,
+                        letterSpacing: "0.04em",
+                        color: photoUrl ? "#FEE7C0" : "rgba(35,60,0,0.6)",
+                      }}>
+                        {photoRemoving ? "Removing photo…" : "Uploading photo…"}
+                      </span>
+                      <style>{`@keyframes photoUploadSpin { to { transform: rotate(360deg); } }`}</style>
+                    </div>
+                  )}
+                  {photoError && !photoUrl && !photoUploading && !photoRemoving && (
+                    <div style={{
+                      position: "absolute",
+                      inset: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 16,
+                      textAlign: "center",
+                    }}>
+                      <span style={{ fontFamily: "Inter, sans-serif", fontSize: 12, color: "#B85C5C" }}>
+                        {photoError}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+              {photoError && photoUrl && !photoUploading && !photoRemoving && (
+                <div style={{ marginTop: 8, fontFamily: "Inter, sans-serif", fontSize: 12, color: "#B85C5C" }}>
+                  {photoError}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Category label */}
           <div style={{
@@ -2667,10 +2886,10 @@ function RecipeCard({
         </div>
       </div>
 
-      {/* Delete confirmation modal */}
-      {confirmDelete && (
+      {/* Remove-photo confirmation modal */}
+      {confirmRemovePhoto && (
         <div
-          onClick={() => setConfirmDelete(false)}
+          onClick={() => setConfirmRemovePhoto(false)}
           style={{
             position: "absolute",
             inset: 0,
@@ -2704,20 +2923,12 @@ function RecipeCard({
               textTransform: "uppercase",
               color: "#233C00",
               textAlign: "center",
-            }}>
-              Delete this recipe?
-            </div>
-            <div style={{
-              fontFamily: "'Inter', sans-serif",
-              fontSize: 13,
-              color: "#233C00",
-              textAlign: "center",
               marginBottom: 12,
             }}>
-              This can't be undone.
+              Remove this photo?
             </div>
             <button
-              onClick={() => setConfirmDelete(false)}
+              onClick={() => setConfirmRemovePhoto(false)}
               style={{
                 width: "100%",
                 padding: "12px",
@@ -2734,14 +2945,7 @@ function RecipeCard({
               Cancel
             </button>
             <button
-              onClick={async () => {
-                if (recipe.savedId) {
-                  await deleteSavedRecipe(recipe.savedId);
-                  clearRecipeCache?.(categoryKey);
-                  setConfirmDelete(false);
-                  back();
-                }
-              }}
+              onClick={handleConfirmRemovePhoto}
               style={{
                 width: "100%",
                 padding: "12px",
@@ -2755,7 +2959,7 @@ function RecipeCard({
                 cursor: "pointer",
               }}
             >
-              Delete
+              Remove
             </button>
           </div>
         </div>
