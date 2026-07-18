@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { getPublicRecipeByToken, getRecipeSnapshotByToken, normalizeStep } from "../tipsy/data";
 import watermarkCircle from "../Logos/watermark_circle.png";
@@ -19,6 +20,7 @@ export const Route = createFileRoute("/r/$token")({
 
 function PublicRecipePage() {
   const { recipe } = Route.useLoaderData();
+  const [photoFailed, setPhotoFailed] = useState(false);
 
   if (!recipe) {
     return (
@@ -112,6 +114,10 @@ function PublicRecipePage() {
 
   const ingredients = recipe.ingredients ?? [];
   const steps = recipe.steps ?? [];
+  // Legacy live-shared recipes (getPublicRecipeByToken) have no photoUrl
+  // field at all — 'in' narrows the union so this stays a no-op for them,
+  // deliberately leaving that path untouched.
+  const photoUrl = "photoUrl" in recipe ? recipe.photoUrl : null;
 
   return (
     <div
@@ -131,6 +137,29 @@ function PublicRecipePage() {
           paddingTop: "56px",
         }}
       >
+        {/* Hero photo — renders only when the share has a photo that hasn't
+            failed to load; on failure, collapses with no broken-image icon,
+            matching a share that never had one. */}
+        {photoUrl && !photoFailed && (
+          <div
+            style={{
+              width: "100%",
+              aspectRatio: "4 / 3",
+              borderRadius: 16,
+              overflow: "hidden",
+              background: "rgba(35,60,0,0.06)",
+              marginBottom: 18,
+            }}
+          >
+            <img
+              src={photoUrl}
+              alt=""
+              onError={() => setPhotoFailed(true)}
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+            />
+          </div>
+        )}
+
         {/* Title */}
         <h1
           style={{
