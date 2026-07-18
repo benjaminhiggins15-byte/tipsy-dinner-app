@@ -1853,6 +1853,7 @@ function RecipeCard({
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps" | "history">("ingredients");
   const [shareConfirm, setShareConfirm] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
   const [groceryAddedConfirm, setGroceryAddedConfirm] = useState(false);
   const [showChatInput, setShowChatInput] = useState(false);
   const [chatQuestion, setChatQuestion] = useState("");
@@ -2027,8 +2028,12 @@ function RecipeCard({
 
   async function handleShare() {
     if (!recipe.savedId) return;
+    setShareError(null);
     const url = await shareRecipeSnapshot(recipe.savedId.toString());
-    if (!url) return;
+    if (!url) {
+      setShareError("Couldn't share this recipe. Try again.");
+      return;
+    }
 
     // Try native share sheet first
     if (navigator.share) {
@@ -2294,6 +2299,12 @@ function RecipeCard({
               )}
             </div>
           </div>
+
+          {shareError && (
+            <div style={{ marginBottom: 12, fontFamily: "Inter, sans-serif", fontSize: 12, color: "#B85C5C" }}>
+              {shareError}
+            </div>
+          )}
 
           {/* Hero photo — renders only when there's a photo, an in-flight
               upload/remove, or an error to show; a recipe with photo_url
