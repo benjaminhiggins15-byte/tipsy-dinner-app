@@ -889,7 +889,9 @@ export async function shareRecipeSnapshot(recipeId: number | string): Promise<st
     // mutable {userId}/{recipeId}.jpg. This is what makes the shared photo
     // immune to the owner later deleting the recipe, removing the photo, or
     // replacing it: uploadRecipePhoto/removeRecipePhoto/deleteSavedRecipe
-    // only ever touch the {recipeId}.jpg path, never shares/{token}.jpg.
+    // only ever touch the bare {recipeId}.jpg path, never share-{token}.jpg.
+    // Nested under the user's own folder (not a top-level "shares/" prefix)
+    // because the bucket's INSERT policy is owner-folder-scoped.
     let photoUrl: string | null = null;
     if (recipe.photo_url) {
       const sourcePath = `${userId}/${recipeId}.jpg`;
@@ -899,7 +901,7 @@ export async function shareRecipeSnapshot(recipeId: number | string): Promise<st
 
       if (downloadError) throw downloadError;
 
-      const sharePath = `shares/${token}.jpg`;
+      const sharePath = `${userId}/share-${token}.jpg`;
       const { error: shareUploadError } = await supabase.storage
         .from('recipe-photos')
         .upload(sharePath, photoBlob, { contentType: 'image/jpeg', upsert: true });
