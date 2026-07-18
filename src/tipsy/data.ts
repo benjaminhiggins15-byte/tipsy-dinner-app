@@ -842,6 +842,7 @@ export type RecipeShareSnapshot = {
   steps: { title: string; instruction: string }[];
   cookTime: string | null;
   serves: string | null;
+  photoUrl: string | null;
 };
 
 export async function shareRecipeSnapshot(recipeId: number | string): Promise<string | null> {
@@ -860,6 +861,8 @@ export async function shareRecipeSnapshot(recipeId: number | string): Promise<st
         steps,
         cook_time,
         serves,
+        photo_url,
+        photo_version,
         ingredients (
           name,
           quantity,
@@ -873,6 +876,42 @@ export async function shareRecipeSnapshot(recipeId: number | string): Promise<st
     if (error) throw error;
     if (!recipe) return null;
 
+    // Fresh token every share — deliberately does not reuse an existing
+    // token the way the legacy shareRecipe does. A snapshot is a
+    // point-in-time capture, so sharing again later must mint a new one
+    // rather than resurface an old frozen copy (matches shareGroceryList).
+    // Minted before the photo copy below because the copy's destination
+    // path is keyed by this token.
+    const token = crypto.randomUUID();
+
+    // If the recipe has a photo, freeze an independent byte-copy under this
+    // share's own token-keyed path — never a reference to the owner's
+    // mutable {userId}/{recipeId}.jpg. This is what makes the shared photo
+    // immune to the owner later deleting the recipe, removing the photo, or
+    // replacing it: uploadRecipePhoto/removeRecipePhoto/deleteSavedRecipe
+    // only ever touch the {recipeId}.jpg path, never shares/{token}.jpg.
+    let photoUrl: string | null = null;
+    if (recipe.photo_url) {
+      const sourcePath = `${userId}/${recipeId}.jpg`;
+      const { data: photoBlob, error: downloadError } = await supabase.storage
+        .from('recipe-photos')
+        .download(sourcePath);
+
+      if (downloadError) throw downloadError;
+
+      const sharePath = `shares/${token}.jpg`;
+      const { error: shareUploadError } = await supabase.storage
+        .from('recipe-photos')
+        .upload(sharePath, photoBlob, { contentType: 'image/jpeg', upsert: true });
+
+      if (shareUploadError) throw shareUploadError;
+
+      const { data: sharePublicUrlData } = supabase.storage
+        .from('recipe-photos')
+        .getPublicUrl(sharePath);
+      photoUrl = sharePublicUrlData.publicUrl;
+    }
+
     // Normalize once, at capture time, so the frozen blob always holds
     // {title, instruction} objects — never a mix of legacy plain strings and
     // objects, which is what a naive copy of the union-typed steps would freeze.
@@ -885,13 +924,8 @@ export async function shareRecipeSnapshot(recipeId: number | string): Promise<st
       steps: (recipe.steps || []).map((step: RecipeStep) => normalizeStep(step)),
       cookTime: recipe.cook_time ?? null,
       serves: recipe.serves ?? null,
+      photoUrl,
     };
-
-    // Fresh token every share — deliberately does not reuse an existing
-    // token the way the legacy shareRecipe does. A snapshot is a
-    // point-in-time capture, so sharing again later must mint a new one
-    // rather than resurface an old frozen copy (matches shareGroceryList).
-    const token = crypto.randomUUID();
 
     const { error: insertError } = await supabase
       .from('recipe_shares')
