@@ -1869,8 +1869,6 @@ function RecipeCard({
   const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
   const [confirmRemovePhoto, setConfirmRemovePhoto] = useState(false);
   const [cropFile, setCropFile] = useState<File | null>(null);
-  // TEMP DIAGNOSTIC (photo-crop-radius branch only) — strip before merge.
-  const [cropDiag, setCropDiag] = useState<{ t0: number; size: number; type: string } | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const [showLogSheet, setShowLogSheet] = useState(false);
   const [logMode, setLogMode] = useState<"create" | "edit">("create");
@@ -2108,13 +2106,9 @@ function RecipeCard({
   }
 
   function handlePhotoFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
-    // TEMP DIAGNOSTIC (photo-crop-radius branch only) — t0, the first moment
-    // our code has control after the OS picker returns. Strip before merge.
-    const t0 = performance.now();
     const file = e.target.files?.[0];
     e.target.value = "";
     if (file) {
-      setCropDiag({ t0, size: file.size, type: file.type });
       setCropFile(file);
     }
   }
@@ -3438,7 +3432,7 @@ function RecipeCard({
         </div>
       )}
 
-      <PhotoCropOverlay file={cropFile} onCancel={handleCropCancel} onConfirm={handleCropConfirm} diag={cropDiag} />
+      <PhotoCropOverlay file={cropFile} onCancel={handleCropCancel} onConfirm={handleCropConfirm} />
     </div>
   );
 }
@@ -5480,12 +5474,10 @@ const CROP_PREVIEW_MAX_EDGE = 1200;
 // the source file's — cropRect is derived once, at Confirm, by inverting that same
 // offset/scale math into a fraction (0-1) of the preview's own size, which
 // compressImageFile then resolves against the true original's pixel dimensions.
-function PhotoCropOverlay({ file, onCancel, onConfirm, diag }: {
+function PhotoCropOverlay({ file, onCancel, onConfirm }: {
   file: File | null;
   onCancel: () => void;
   onConfirm: (cropRect: CropRect) => void;
-  // TEMP DIAGNOSTIC (photo-crop-radius branch only) — strip before merge.
-  diag?: { t0: number; size: number; type: string } | null;
 }) {
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
@@ -5495,14 +5487,6 @@ function PhotoCropOverlay({ file, onCancel, onConfirm, diag }: {
   const frameRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startX: number; startY: number; startOffsetX: number; startOffsetY: number } | null>(null);
   const initializedRef = useRef(false);
-  // TEMP DIAGNOSTIC (photo-crop-radius branch only) — t1: downscaled preview
-  // decoded and its blob URL set (post-fix: this now includes the resized
-  // decode, not just an object-URL reference). t2: overlay chrome's first paint
-  // after imgUrl goes truthy. t3: <img> onLoad, i.e. preview decode complete.
-  // Strip before merge.
-  const [diagT1, setDiagT1] = useState<number | null>(null);
-  const [diagT2, setDiagT2] = useState<number | null>(null);
-  const [diagT3, setDiagT3] = useState<number | null>(null);
 
   useEffect(() => {
     if (!file) {
@@ -5511,11 +5495,9 @@ function PhotoCropOverlay({ file, onCancel, onConfirm, diag }: {
       setOffset({ x: 0, y: 0 });
       setZoomMultiplier(1);
       initializedRef.current = false;
-      setDiagT1(null); setDiagT2(null); setDiagT3(null); // TEMP DIAGNOSTIC
       return;
     }
     initializedRef.current = false;
-    setDiagT1(null); setDiagT2(null); setDiagT3(null); // TEMP DIAGNOSTIC
     let cancelled = false;
     let blobUrl: string | null = null;
     (async () => {
@@ -5545,7 +5527,6 @@ function PhotoCropOverlay({ file, onCancel, onConfirm, diag }: {
       if (cancelled || !blob) return;
       blobUrl = URL.createObjectURL(blob);
       setImgUrl(blobUrl);
-      setDiagT1(performance.now()); // TEMP DIAGNOSTIC
     })();
     return () => {
       cancelled = true;
@@ -5563,13 +5544,6 @@ function PhotoCropOverlay({ file, onCancel, onConfirm, diag }: {
     observer.observe(el);
     return () => observer.disconnect();
   }, [imgUrl]);
-
-  // TEMP DIAGNOSTIC (photo-crop-radius branch only) — strip before merge.
-  useEffect(() => {
-    if (imgUrl && diagT2 === null) {
-      requestAnimationFrame(() => setDiagT2(performance.now()));
-    }
-  }, [imgUrl, diagT2]);
 
   // Center the image in the frame once, the first time both its natural size and
   // the frame's rendered size are known for this file — not on every resize, so a
@@ -5678,33 +5652,6 @@ function PhotoCropOverlay({ file, onCancel, onConfirm, diag }: {
         <span style={{ width: 52 }} />
       </div>
 
-      {/* TEMP DIAGNOSTIC (photo-crop-radius branch only) — on-screen timing panel,
-          strip before merge. All deltas are ms since t0 (handlePhotoFileInputChange
-          entry, the first moment our code has control after the OS picker returns). */}
-      {diag && (
-        <div
-          style={{
-            margin: "0 20px 12px",
-            padding: "8px 10px",
-            background: "rgba(0,0,0,0.85)",
-            color: "#5CFFA0",
-            fontFamily: "monospace",
-            fontSize: 11,
-            lineHeight: 1.6,
-            borderRadius: 8,
-            whiteSpace: "pre-wrap",
-            flexShrink: 0,
-          }}
-        >
-          {`TEMP DIAG — strip before merge
-file: ${(diag.size / 1024 / 1024).toFixed(2)}MB  ${diag.type || "(no type)"}
-t0 handlePhotoFileInputChange entry:  0ms
-t1 preview decoded, blobUrl set:      ${diagT1 !== null ? (diagT1 - diag.t0).toFixed(0) : "…"}ms
-t2 overlay chrome first paint:        ${diagT2 !== null ? (diagT2 - diag.t0).toFixed(0) : "…"}ms
-t3 <img> onLoad (preview decode done):${diagT3 !== null ? (diagT3 - diag.t0).toFixed(0) : "…"}ms`}
-        </div>
-      )}
-
       {/* Crop frame — fixed 4:3, drag to reposition */}
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 24px", minHeight: 0 }}>
         <div
@@ -5732,7 +5679,6 @@ t3 <img> onLoad (preview decode done):${diagT3 !== null ? (diagT3 - diag.t0).toF
             onLoad={(e) => {
               const el = e.currentTarget;
               setNaturalSize({ w: el.naturalWidth, h: el.naturalHeight });
-              setDiagT3(performance.now()); // TEMP DIAGNOSTIC
             }}
             style={{
               position: "absolute",
