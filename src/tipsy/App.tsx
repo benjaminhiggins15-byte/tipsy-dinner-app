@@ -5638,6 +5638,7 @@ function PhotoCropOverlay({ file, onCancel, onConfirm }: {
               top: offset.y,
               width: dispW || undefined,
               height: dispH || undefined,
+              maxWidth: "none",
               userSelect: "none",
               pointerEvents: "none",
             }}
