@@ -13,9 +13,14 @@ export class UnsupportedImageError extends Error {
   }
 }
 
-// Source-bitmap pixel-space rectangle selecting the region to keep. Optional —
-// when omitted, the whole bitmap is used (unchanged pre-crop behavior).
-export type CropRect = { sx: number; sy: number; sWidth: number; sHeight: number };
+// Fractional (0-1) rectangle selecting the region to keep, expressed relative
+// to the source image's own width/height rather than absolute pixels. Optional —
+// when omitted, the whole bitmap is used (unchanged pre-crop behavior). Fractional
+// on purpose: the crop UI may compute this against a downscaled preview of the
+// file (for decode speed) rather than the full-resolution original — a fraction
+// is resolution-independent, so the same rect is correct whether applied to the
+// preview or, as here, the true original bitmap this function decodes.
+export type CropRect = { fx: number; fy: number; fWidth: number; fHeight: number };
 
 // Compresses a File into a JPEG Blob with its longest edge capped at
 // MAX_EDGE (aspect ratio preserved, smaller images left at their native
@@ -44,12 +49,15 @@ export async function compressImageFile(file: File, cropRect?: CropRect): Promis
     // compressImageFile doesn't trust that: an out-of-bounds or malformed rect
     // is clamped back onto the bitmap rather than trusted as-is, so a UI bug
     // can't corrupt storage with a garbage draw or a throw deep in canvas code.
+    // Fractions are resolved against THIS bitmap's actual dimensions — the
+    // full-resolution original, always, regardless of what resolution image the
+    // crop UI computed the fraction from.
     let sx = 0, sy = 0, sWidth = width, sHeight = height;
     if (cropRect) {
-      sWidth = Math.min(Math.max(1, Math.round(cropRect.sWidth)), width);
-      sHeight = Math.min(Math.max(1, Math.round(cropRect.sHeight)), height);
-      sx = Math.min(Math.max(0, Math.round(cropRect.sx)), width - sWidth);
-      sy = Math.min(Math.max(0, Math.round(cropRect.sy)), height - sHeight);
+      sWidth = Math.min(Math.max(1, Math.round(cropRect.fWidth * width)), width);
+      sHeight = Math.min(Math.max(1, Math.round(cropRect.fHeight * height)), height);
+      sx = Math.min(Math.max(0, Math.round(cropRect.fx * width)), width - sWidth);
+      sy = Math.min(Math.max(0, Math.round(cropRect.fy * height)), height - sHeight);
     }
 
     const longestEdge = Math.max(sWidth, sHeight);

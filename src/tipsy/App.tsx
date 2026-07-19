@@ -5462,12 +5462,24 @@ function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
   );
 }
 
+// Longest edge for the crop overlay's PREVIEW image only — not the final output.
+// Decoding the raw multi-megapixel source directly into the preview <img> was
+// what made the overlay take seconds to appear; requesting a resize at decode
+// time lets the browser use a cheaper scaled-decode path instead of decoding
+// every source pixel just to shrink it. Matches
+// image.ts's own MAX_EDGE so preview sharpness at rest matches the final output;
+// some softening is possible at the crop UI's 3x max zoom, an accepted tradeoff
+// since the actual saved photo is always re-decoded from the untouched original.
+const CROP_PREVIEW_MAX_EDGE = 1200;
+
 // Full-screen pan/zoom crop step shown on every photo upload (first upload and
 // replace), before the file reaches compressImageFile. `offset` is the image's
 // top-left in frame-local px; `minZoom` is the "image fully covers frame" floor
 // (zoom can't go below it, so the frame is never under-covered); `zoomMultiplier`
-// (>=1) scales up from there. cropRect is derived once, at Confirm, by inverting
-// that same offset/scale math back into source-bitmap pixel space.
+// (>=1) scales up from there. `naturalSize` is the PREVIEW image's dimensions, not
+// the source file's — cropRect is derived once, at Confirm, by inverting that same
+// offset/scale math into a fraction (0-1) of the preview's own size, which
+// compressImageFile then resolves against the true original's pixel dimensions.
 function PhotoCropOverlay({ file, onCancel, onConfirm, diag }: {
   file: File | null;
   onCancel: () => void;
@@ -5483,9 +5495,11 @@ function PhotoCropOverlay({ file, onCancel, onConfirm, diag }: {
   const frameRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startX: number; startY: number; startOffsetX: number; startOffsetY: number } | null>(null);
   const initializedRef = useRef(false);
-  // TEMP DIAGNOSTIC (photo-crop-radius branch only) — t1: imgUrl set (no decode,
-  // just an object-URL reference). t2: overlay chrome's first paint after imgUrl
-  // goes truthy. t3: <img> onLoad, i.e. decode complete. Strip before merge.
+  // TEMP DIAGNOSTIC (photo-crop-radius branch only) — t1: downscaled preview
+  // decoded and its blob URL set (post-fix: this now includes the resized
+  // decode, not just an object-URL reference). t2: overlay chrome's first paint
+  // after imgUrl goes truthy. t3: <img> onLoad, i.e. preview decode complete.
+  // Strip before merge.
   const [diagT1, setDiagT1] = useState<number | null>(null);
   const [diagT2, setDiagT2] = useState<number | null>(null);
   const [diagT3, setDiagT3] = useState<number | null>(null);
@@ -5502,10 +5516,41 @@ function PhotoCropOverlay({ file, onCancel, onConfirm, diag }: {
     }
     initializedRef.current = false;
     setDiagT1(null); setDiagT2(null); setDiagT3(null); // TEMP DIAGNOSTIC
-    const url = URL.createObjectURL(file);
-    setImgUrl(url);
-    setDiagT1(performance.now()); // TEMP DIAGNOSTIC
-    return () => URL.revokeObjectURL(url);
+    let cancelled = false;
+    let blobUrl: string | null = null;
+    (async () => {
+      // Decode a resized preview only — the original `file` is untouched and is
+      // what compressImageFile decodes again, at full resolution, at Confirm.
+      // resizeWidth alone (not resizeHeight too) is deliberate: passing both is
+      // ambiguous about aspect-ratio preservation across engines, and a distorted
+      // preview would mean the user crops against a shape that doesn't match the
+      // real photo. Single-dimension resize is spec-guaranteed to preserve it.
+      let bitmap: ImageBitmap;
+      try {
+        bitmap = await createImageBitmap(file, { resizeWidth: CROP_PREVIEW_MAX_EDGE });
+      } catch {
+        return;
+      }
+      if (cancelled) {
+        bitmap.close();
+        return;
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const ctx = canvas.getContext("2d");
+      ctx?.drawImage(bitmap, 0, 0);
+      bitmap.close();
+      const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+      if (cancelled || !blob) return;
+      blobUrl = URL.createObjectURL(blob);
+      setImgUrl(blobUrl);
+      setDiagT1(performance.now()); // TEMP DIAGNOSTIC
+    })();
+    return () => {
+      cancelled = true;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
   }, [file]);
 
   useEffect(() => {
@@ -5599,11 +5644,15 @@ function PhotoCropOverlay({ file, onCancel, onConfirm, diag }: {
 
   function handleConfirm() {
     if (!naturalSize || !frameSize) return;
+    // naturalSize is the PREVIEW's dimensions, not the source file's — dividing
+    // by it here (rather than by the original's pixel size, which this component
+    // never knows) produces a fraction of the image's own extent, so it resolves
+    // correctly against the full-resolution original in compressImageFile.
     onConfirm({
-      sx: -offset.x / displayScale,
-      sy: -offset.y / displayScale,
-      sWidth: frameSize.w / displayScale,
-      sHeight: frameSize.h / displayScale,
+      fx: (-offset.x / displayScale) / naturalSize.w,
+      fy: (-offset.y / displayScale) / naturalSize.h,
+      fWidth: (frameSize.w / displayScale) / naturalSize.w,
+      fHeight: (frameSize.h / displayScale) / naturalSize.h,
     });
   }
 
@@ -5650,9 +5699,9 @@ function PhotoCropOverlay({ file, onCancel, onConfirm, diag }: {
           {`TEMP DIAG — strip before merge
 file: ${(diag.size / 1024 / 1024).toFixed(2)}MB  ${diag.type || "(no type)"}
 t0 handlePhotoFileInputChange entry:  0ms
-t1 imgUrl set:                        ${diagT1 !== null ? (diagT1 - diag.t0).toFixed(0) : "…"}ms
+t1 preview decoded, blobUrl set:      ${diagT1 !== null ? (diagT1 - diag.t0).toFixed(0) : "…"}ms
 t2 overlay chrome first paint:        ${diagT2 !== null ? (diagT2 - diag.t0).toFixed(0) : "…"}ms
-t3 <img> onLoad (decode complete):    ${diagT3 !== null ? (diagT3 - diag.t0).toFixed(0) : "…"}ms`}
+t3 <img> onLoad (preview decode done):${diagT3 !== null ? (diagT3 - diag.t0).toFixed(0) : "…"}ms`}
         </div>
       )}
 
@@ -5679,6 +5728,7 @@ t3 <img> onLoad (decode complete):    ${diagT3 !== null ? (diagT3 - diag.t0).toF
             src={imgUrl}
             alt=""
             draggable={false}
+            decoding="async"
             onLoad={(e) => {
               const el = e.currentTarget;
               setNaturalSize({ w: el.naturalWidth, h: el.naturalHeight });
