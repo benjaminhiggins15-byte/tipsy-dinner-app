@@ -13,11 +13,22 @@ export class UnsupportedImageError extends Error {
   }
 }
 
+// Fractional (0-1) rectangle selecting the region to keep, expressed relative
+// to the source image's own width/height rather than absolute pixels. Optional —
+// when omitted, the whole bitmap is used (unchanged pre-crop behavior). Fractional
+// on purpose: the crop UI may compute this against a downscaled preview of the
+// file (for decode speed) rather than the full-resolution original — a fraction
+// is resolution-independent, so the same rect is correct whether applied to the
+// preview or, as here, the true original bitmap this function decodes.
+export type CropRect = { fx: number; fy: number; fWidth: number; fHeight: number };
+
 // Compresses a File into a JPEG Blob with its longest edge capped at
 // MAX_EDGE (aspect ratio preserved, smaller images left at their native
 // size) and re-encoded at JPEG_QUALITY. Targets roughly 200KB — some
-// images will land above or below depending on content.
-export async function compressImageFile(file: File): Promise<Blob> {
+// images will land above or below depending on content. When cropRect is
+// given, the crop and the resize happen in the same single canvas draw (the
+// 9-argument drawImage form) rather than as two passes.
+export async function compressImageFile(file: File, cropRect?: CropRect): Promise<Blob> {
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(file);
@@ -33,10 +44,26 @@ export async function compressImageFile(file: File): Promise<Blob> {
 
   try {
     const { width, height } = bitmap;
-    const longestEdge = Math.max(width, height);
+
+    // Defensive clamp — the crop UI should only ever produce a valid rect, but
+    // compressImageFile doesn't trust that: an out-of-bounds or malformed rect
+    // is clamped back onto the bitmap rather than trusted as-is, so a UI bug
+    // can't corrupt storage with a garbage draw or a throw deep in canvas code.
+    // Fractions are resolved against THIS bitmap's actual dimensions — the
+    // full-resolution original, always, regardless of what resolution image the
+    // crop UI computed the fraction from.
+    let sx = 0, sy = 0, sWidth = width, sHeight = height;
+    if (cropRect) {
+      sWidth = Math.min(Math.max(1, Math.round(cropRect.fWidth * width)), width);
+      sHeight = Math.min(Math.max(1, Math.round(cropRect.fHeight * height)), height);
+      sx = Math.min(Math.max(0, Math.round(cropRect.fx * width)), width - sWidth);
+      sy = Math.min(Math.max(0, Math.round(cropRect.fy * height)), height - sHeight);
+    }
+
+    const longestEdge = Math.max(sWidth, sHeight);
     const scale = longestEdge > MAX_EDGE ? MAX_EDGE / longestEdge : 1; // never upscale
-    const targetWidth = Math.round(width * scale);
-    const targetHeight = Math.round(height * scale);
+    const targetWidth = Math.round(sWidth * scale);
+    const targetHeight = Math.round(sHeight * scale);
 
     const canvas = document.createElement("canvas");
     canvas.width = targetWidth;
@@ -45,7 +72,7 @@ export async function compressImageFile(file: File): Promise<Blob> {
     if (!ctx) {
       throw new UnsupportedImageError("Couldn't process this photo. Please try a different one.");
     }
-    ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
+    ctx.drawImage(bitmap, sx, sy, sWidth, sHeight, 0, 0, targetWidth, targetHeight);
 
     const blob: Blob | null = await new Promise((resolve) =>
       canvas.toBlob(resolve, "image/jpeg", JPEG_QUALITY)
