@@ -145,7 +145,7 @@ function PublicRecipePage() {
             style={{
               width: "100%",
               aspectRatio: "4 / 3",
-              borderRadius: 16,
+              borderRadius: 30,
               overflow: "hidden",
               background: "rgba(35,60,0,0.06)",
               marginBottom: 18,

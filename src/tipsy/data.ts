@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase';
-import { compressImageFile } from './image';
+import { compressImageFile, type CropRect } from './image';
 
 // Generic SSE stream decoder for the ai-chat edge function. Shared so isolated,
 // non-conversational AI calls (e.g. grocery enrichment) don't need to import
@@ -734,14 +734,15 @@ export async function shareRecipe(recipeId: string): Promise<string | null> {
 // before the write, so the bump is always relative to committed truth.
 export async function uploadRecipePhoto(
   recipeId: string | number,
-  file: File
+  file: File,
+  cropRect?: CropRect
 ): Promise<{ url: string; version: number }> {
   const userId = await getCurrentUserId();
   if (!userId) {
     throw new Error('No user session');
   }
 
-  const compressed = await compressImageFile(file);
+  const compressed = await compressImageFile(file, cropRect);
 
   const path = `${userId}/${recipeId}.jpg`;
 
