@@ -15,11 +15,23 @@ const HEIC_NAME_PATTERN = /\.(heic|heif)$/i;
 // conservative — a genuinely full-range photo should see ~no shift.
 const AUTO_LEVELS_CLIP_FRACTION = 0.005;
 
-// Auto-white-balance (grey-world): per-channel scale factor is capped at this
+// Auto-white-balance (grey-world): per-channel scale factor is capped at a
 // fraction above/below 1.0. Without this cap, a photo dominated by one real
 // color (tomato soup, a green salad) reads as a color cast and gets drained of
 // its actual color. Do not remove.
-const WHITE_BALANCE_MAX_SHIFT = 0.15;
+//
+// The cap is asymmetric, biased against cooling: warm-dominant food photos
+// (e.g. a sandwich with orange sauce and golden bread) legitimately have more
+// red/less blue than a neutral scene, and grey-world reads that as a warm
+// light cast — correcting it pulls a blue-grey tint into food that should
+// stay warm. A correction that would warm the image (boost red / reduce blue)
+// is capped at WHITE_BALANCE_MAX_SHIFT; one that would cool it (boost blue /
+// reduce red) is capped at the tighter WHITE_BALANCE_MAX_COOLING_SHIFT — see
+// enhancePhoto() for exactly how "warming" vs "cooling" is determined per
+// channel. Green isn't part of the warm/cool axis, so it stays symmetric at
+// the general ceiling.
+const WHITE_BALANCE_MAX_SHIFT = 0.08;
+const WHITE_BALANCE_MAX_COOLING_SHIFT = 0.04;
 
 // Contrast: fixed nudge applied around the 128 midpoint. +8% is meant to read
 // as "a little crisper," not punchy.
@@ -120,19 +132,31 @@ function enhancePhoto(ctx: CanvasRenderingContext2D, width: number, height: numb
   }
   const levelsRange = whitePoint - blackPoint;
 
-  // Grey-world means, clamped per channel to WHITE_BALANCE_MAX_SHIFT.
+  // Grey-world means. Raw (unclamped) scale factor per channel: >1 boosts the
+  // channel toward the grey average, <1 reduces it.
   const rMean = rSum / sampleCount;
   const gMean = gSum / sampleCount;
   const bMean = bSum / sampleCount;
   const grayMean = (rMean + gMean + bMean) / 3;
-  const channelScale = (mean: number) => {
-    if (mean <= 0) return 1;
-    const raw = grayMean / mean;
-    return Math.min(1 + WHITE_BALANCE_MAX_SHIFT, Math.max(1 - WHITE_BALANCE_MAX_SHIFT, raw));
-  };
-  const rScale = channelScale(rMean);
-  const gScale = channelScale(gMean);
-  const bScale = channelScale(bMean);
+  const rRawScale = rMean > 0 ? grayMean / rMean : 1;
+  const gRawScale = gMean > 0 ? grayMean / gMean : 1;
+  const bRawScale = bMean > 0 ? grayMean / bMean : 1;
+
+  // Clamps a raw scale to [1 - ceilingDown, 1 + ceilingUp]. Which ceiling is
+  // "up" vs "down" depends on which direction on THIS channel warms vs cools
+  // the image — see call sites below.
+  const clampScale = (raw: number, ceilingUp: number, ceilingDown: number) =>
+    Math.min(1 + ceilingUp, Math.max(1 - ceilingDown, raw));
+
+  // Red: boosting it (raw > 1) warms the image, reducing it (raw < 1) cools
+  // it — so the boost side gets the general ceiling and the reduce side gets
+  // the tighter cooling ceiling.
+  const rScale = clampScale(rRawScale, WHITE_BALANCE_MAX_SHIFT, WHITE_BALANCE_MAX_COOLING_SHIFT);
+  // Blue is red's mirror image: boosting it (raw > 1) cools the image,
+  // reducing it (raw < 1) warms it.
+  const bScale = clampScale(bRawScale, WHITE_BALANCE_MAX_COOLING_SHIFT, WHITE_BALANCE_MAX_SHIFT);
+  // Green doesn't sit on the warm/cool axis — symmetric at the general ceiling.
+  const gScale = clampScale(gRawScale, WHITE_BALANCE_MAX_SHIFT, WHITE_BALANCE_MAX_SHIFT);
 
   // --- Apply: auto-levels -> white-balance -> contrast -> saturation, every pixel ---
   for (let i = 0; i < data.length; i += 4) {
