@@ -15,6 +15,16 @@ const HEIC_NAME_PATTERN = /\.(heic|heif)$/i;
 // conservative — a genuinely full-range photo should see ~no shift.
 const AUTO_LEVELS_CLIP_FRACTION = 0.005;
 
+// Auto-levels highlight roll-off: the measured white point is stretched to
+// this value instead of all the way to 255. A straight stretch-to-255 hard-
+// clips any pixel that was already at or above the white point (common on
+// bright areas — countertops, plates, window light); leaving a few points of
+// headroom below full white means those highlights land just short of pure
+// white instead of slamming into it, which is simpler and more predictable
+// than a curved soft-knee. 248 is a first guess — small enough to be roughly
+// invisible on midtones, big enough to noticeably soften clipping.
+const AUTO_LEVELS_WHITE_CEILING = 248;
+
 // Auto-white-balance (grey-world): per-channel scale factor is capped at a
 // fraction above/below 1.0. Without this cap, a photo dominated by one real
 // color (tomato soup, a green salad) reads as a color cast and gets drained of
@@ -33,13 +43,31 @@ const AUTO_LEVELS_CLIP_FRACTION = 0.005;
 const WHITE_BALANCE_MAX_SHIFT = 0.08;
 const WHITE_BALANCE_MAX_COOLING_SHIFT = 0.04;
 
-// Contrast: fixed nudge applied around the 128 midpoint. +8% is meant to read
+// Contrast: fixed nudge applied around the 128 midpoint. +4% is meant to read
 // as "a little crisper," not punchy.
-const CONTRAST_AMOUNT = 0.08;
+const CONTRAST_AMOUNT = 0.04;
 
-// Saturation: fixed lift, blending each pixel away from its own luminance.
-// +10% is meant to read as "a little more alive," not saturated.
-const SATURATION_AMOUNT = 0.1;
+// Saturation: lift ceiling, blending each pixel away from its own luminance.
+// This is now adaptive (see SATURATION_TAPER_CEILING below) — +5% is the most
+// a low-saturation image gets; an already-vibrant image gets a fraction of
+// this, tapering to none. A flat, non-adaptive +10% made an already-saturated
+// photo (green risotto) go olive and heavy, losing the airiness it started
+// with — the taper is the fix, not just a lower flat number.
+const SATURATION_AMOUNT = 0.05;
+
+// Mean per-pixel chroma — (max(r,g,b) - min(r,g,b)) / 255, averaged across the
+// sampled pixels — above which the saturation lift tapers to zero. Scale is
+// 0-1: 0 is perfectly grey, 1 would be every sampled pixel at full chroma
+// (e.g. pure red or pure green), which no real photo approaches on average —
+// most food photos average well under 0.3 even when they read as vibrant,
+// because plates, backgrounds, highlights, and shadows pull the mean down.
+// Deliberately using mean (max-min)/255 rather than true per-pixel HSV
+// saturation ((max-min)/max): HSV saturation blows up on near-black pixels
+// (tiny max, so tiny chroma reads as "100% saturated"), which would bias the
+// average upward from noise in dark regions rather than reflecting how
+// colorful the photo actually looks. 0.18 is a first guess for "already
+// vibrant" on this scale — expect tuning against more real photos.
+const SATURATION_TAPER_CEILING = 0.18;
 
 // Statistics (histogram + grey-world means) are measured on every Nth pixel
 // rather than all of them — see enhancePhoto() for why. The correction itself
@@ -89,9 +117,10 @@ function enhancePhoto(ctx: CanvasRenderingContext2D, width: number, height: numb
   const data = imageData.data;
   const pixelCount = width * height;
 
-  // --- Measure: luminance histogram + per-channel sums, subsampled ---
+  // --- Measure: luminance histogram + per-channel sums + chroma, subsampled ---
   const histogram = new Uint32Array(256);
   let rSum = 0, gSum = 0, bSum = 0;
+  let chromaSum = 0;
   let sampleCount = 0;
   for (let p = 0; p < pixelCount; p += STATS_SAMPLE_STRIDE) {
     const i = p * 4;
@@ -100,6 +129,7 @@ function enhancePhoto(ctx: CanvasRenderingContext2D, width: number, height: numb
     rSum += r;
     gSum += g;
     bSum += b;
+    chromaSum += Math.max(r, g, b) - Math.min(r, g, b);
     sampleCount++;
   }
 
@@ -158,13 +188,22 @@ function enhancePhoto(ctx: CanvasRenderingContext2D, width: number, height: numb
   // Green doesn't sit on the warm/cool axis — symmetric at the general ceiling.
   const gScale = clampScale(gRawScale, WHITE_BALANCE_MAX_SHIFT, WHITE_BALANCE_MAX_SHIFT);
 
+  // Adaptive saturation lift: mean chroma (see SATURATION_TAPER_CEILING above)
+  // scales the applied lift down as the image's own saturation rises, linearly
+  // reaching zero at the ceiling. A grey/dim photo (meanChroma near 0) gets
+  // close to the full SATURATION_AMOUNT; an already-vibrant one gets a small
+  // fraction of it, avoiding the over-saturated/heavy look a flat lift caused.
+  const meanChroma = chromaSum / sampleCount / 255;
+  const saturationTaper = Math.max(0, Math.min(1, 1 - meanChroma / SATURATION_TAPER_CEILING));
+  const effectiveSaturationAmount = SATURATION_AMOUNT * saturationTaper;
+
   // --- Apply: auto-levels -> white-balance -> contrast -> saturation, every pixel ---
   for (let i = 0; i < data.length; i += 4) {
     let r = data[i], g = data[i + 1], b = data[i + 2];
 
-    r = ((r - blackPoint) / levelsRange) * 255;
-    g = ((g - blackPoint) / levelsRange) * 255;
-    b = ((b - blackPoint) / levelsRange) * 255;
+    r = ((r - blackPoint) / levelsRange) * AUTO_LEVELS_WHITE_CEILING;
+    g = ((g - blackPoint) / levelsRange) * AUTO_LEVELS_WHITE_CEILING;
+    b = ((b - blackPoint) / levelsRange) * AUTO_LEVELS_WHITE_CEILING;
 
     r *= rScale;
     g *= gScale;
@@ -175,9 +214,9 @@ function enhancePhoto(ctx: CanvasRenderingContext2D, width: number, height: numb
     b = (b - 128) * (1 + CONTRAST_AMOUNT) + 128;
 
     const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-    r = lum + (r - lum) * (1 + SATURATION_AMOUNT);
-    g = lum + (g - lum) * (1 + SATURATION_AMOUNT);
-    b = lum + (b - lum) * (1 + SATURATION_AMOUNT);
+    r = lum + (r - lum) * (1 + effectiveSaturationAmount);
+    g = lum + (g - lum) * (1 + effectiveSaturationAmount);
+    b = lum + (b - lum) * (1 + effectiveSaturationAmount);
 
     data[i] = clamp8(r);
     data[i + 1] = clamp8(g);
