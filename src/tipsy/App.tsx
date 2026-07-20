@@ -22,6 +22,7 @@ import {
   IconUser,
   IconRefresh,
   IconMessageCircle,
+  IconWand,
 } from "@tabler/icons-react";
 import { pickChips } from "./chips";
 
@@ -2076,12 +2077,12 @@ function RecipeCard({
     }
   }
 
-  async function handlePhotoSelected(file: File, cropRect?: CropRect) {
+  async function handlePhotoSelected(file: File, cropRect?: CropRect, enhance?: boolean) {
     if (!recipe.savedId) return;
     setPhotoError(null);
     setPhotoUploading(true);
     try {
-      const { url, version } = await uploadRecipePhoto(recipe.savedId, file, cropRect);
+      const { url, version } = await uploadRecipePhoto(recipe.savedId, file, cropRect, enhance);
       setPhotoUrl(url);
       setPhotoVersion(version);
       clearRecipeCache?.(categoryKey);
@@ -2117,11 +2118,11 @@ function RecipeCard({
     setCropFile(null);
   }
 
-  function handleCropConfirm(cropRect: CropRect) {
+  function handleCropConfirm(cropRect: CropRect, enhance: boolean) {
     const file = cropFile;
     setCropFile(null);
     if (file) {
-      handlePhotoSelected(file, cropRect);
+      handlePhotoSelected(file, cropRect, enhance);
     }
   }
 
@@ -5477,18 +5478,23 @@ const CROP_PREVIEW_MAX_EDGE = 1200;
 function PhotoCropOverlay({ file, onCancel, onConfirm }: {
   file: File | null;
   onCancel: () => void;
-  onConfirm: (cropRect: CropRect) => void;
+  onConfirm: (cropRect: CropRect, enhance: boolean) => void;
 }) {
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const [frameSize, setFrameSize] = useState<{ w: number; h: number } | null>(null);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [zoomMultiplier, setZoomMultiplier] = useState(1);
+  // Optional one-tap deterministic photo enhancement (auto-levels/white-balance/
+  // contrast/saturation, applied at Confirm — see image.ts). No live preview in
+  // this build; defaults off on every open.
+  const [enhance, setEnhance] = useState(false);
   const frameRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startX: number; startY: number; startOffsetX: number; startOffsetY: number } | null>(null);
   const initializedRef = useRef(false);
 
   useEffect(() => {
+    setEnhance(false);
     if (!file) {
       setImgUrl(null);
       setNaturalSize(null);
@@ -5627,7 +5633,7 @@ function PhotoCropOverlay({ file, onCancel, onConfirm }: {
       fy: (-offset.y / displayScale) / naturalSize.h,
       fWidth: (frameSize.w / displayScale) / naturalSize.w,
       fHeight: (frameSize.h / displayScale) / naturalSize.h,
-    });
+    }, enhance);
   }
 
   return (
@@ -5649,7 +5655,36 @@ function PhotoCropOverlay({ file, onCancel, onConfirm }: {
         <div style={{ fontFamily: "Inter, sans-serif", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: "rgba(35,60,0,0.4)", fontWeight: 500 }}>
           Position photo
         </div>
-        <span style={{ width: 52 }} />
+        <button
+          onClick={() => setEnhance((v) => !v)}
+          aria-label={enhance ? "Turn off photo enhancement" : "Turn on photo enhancement"}
+          aria-pressed={enhance}
+          style={{
+            width: 52,
+            height: 32,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            background: "transparent",
+            border: "none",
+            padding: 0,
+            cursor: "pointer",
+          }}
+        >
+          <span
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: "50%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: enhance ? "#233C00" : "transparent",
+            }}
+          >
+            <IconWand size={18} color={enhance ? "#FAF7F2" : "#233C00"} style={{ opacity: enhance ? 1 : 0.4 }} />
+          </span>
+        </button>
       </div>
 
       {/* Crop frame — fixed 4:3, drag to reposition */}

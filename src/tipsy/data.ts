@@ -735,14 +735,15 @@ export async function shareRecipe(recipeId: string): Promise<string | null> {
 export async function uploadRecipePhoto(
   recipeId: string | number,
   file: File,
-  cropRect?: CropRect
+  cropRect?: CropRect,
+  enhance?: boolean
 ): Promise<{ url: string; version: number }> {
   const userId = await getCurrentUserId();
   if (!userId) {
     throw new Error('No user session');
   }
 
-  const compressed = await compressImageFile(file, cropRect);
+  const compressed = await compressImageFile(file, cropRect, enhance);
 
   const path = `${userId}/${recipeId}.jpg`;
 
