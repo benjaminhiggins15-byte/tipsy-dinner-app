@@ -6,74 +6,6 @@ const MAX_EDGE = 1200;
 const JPEG_QUALITY = 0.8;
 const HEIC_NAME_PATTERN = /\.(heic|heif)$/i;
 
-// --- "Enhance photo" tuning constants ---
-// All of these are first guesses, meant to be tuned against real photos —
-// expect them to change. Target is "good natural light," not an HDR/filter look.
-
-// Auto-levels: fraction of pixels clipped as outliers at each end of the
-// luminance histogram when finding the black/white point. 0.5% per end is
-// conservative — a genuinely full-range photo should see ~no shift.
-const AUTO_LEVELS_CLIP_FRACTION = 0.005;
-
-// Auto-levels highlight roll-off: the measured white point is stretched to
-// this value instead of all the way to 255. A straight stretch-to-255 hard-
-// clips any pixel that was already at or above the white point (common on
-// bright areas — countertops, plates, window light); leaving a few points of
-// headroom below full white means those highlights land just short of pure
-// white instead of slamming into it, which is simpler and more predictable
-// than a curved soft-knee. 248 is a first guess — small enough to be roughly
-// invisible on midtones, big enough to noticeably soften clipping.
-const AUTO_LEVELS_WHITE_CEILING = 248;
-
-// Auto-white-balance (grey-world): per-channel scale factor is capped at a
-// fraction above/below 1.0. Without this cap, a photo dominated by one real
-// color (tomato soup, a green salad) reads as a color cast and gets drained of
-// its actual color. Do not remove.
-//
-// The cap is asymmetric, biased against cooling: warm-dominant food photos
-// (e.g. a sandwich with orange sauce and golden bread) legitimately have more
-// red/less blue than a neutral scene, and grey-world reads that as a warm
-// light cast — correcting it pulls a blue-grey tint into food that should
-// stay warm. A correction that would warm the image (boost red / reduce blue)
-// is capped at WHITE_BALANCE_MAX_SHIFT; one that would cool it (boost blue /
-// reduce red) is capped at the tighter WHITE_BALANCE_MAX_COOLING_SHIFT — see
-// enhancePhoto() for exactly how "warming" vs "cooling" is determined per
-// channel. Green isn't part of the warm/cool axis, so it stays symmetric at
-// the general ceiling.
-const WHITE_BALANCE_MAX_SHIFT = 0.08;
-const WHITE_BALANCE_MAX_COOLING_SHIFT = 0.04;
-
-// Contrast: fixed nudge applied around the 128 midpoint. +4% is meant to read
-// as "a little crisper," not punchy.
-const CONTRAST_AMOUNT = 0.04;
-
-// Saturation: lift ceiling, blending each pixel away from its own luminance.
-// This is now adaptive (see SATURATION_TAPER_CEILING below) — +5% is the most
-// a low-saturation image gets; an already-vibrant image gets a fraction of
-// this, tapering to none. A flat, non-adaptive +10% made an already-saturated
-// photo (green risotto) go olive and heavy, losing the airiness it started
-// with — the taper is the fix, not just a lower flat number.
-const SATURATION_AMOUNT = 0.05;
-
-// Mean per-pixel chroma — (max(r,g,b) - min(r,g,b)) / 255, averaged across the
-// sampled pixels — above which the saturation lift tapers to zero. Scale is
-// 0-1: 0 is perfectly grey, 1 would be every sampled pixel at full chroma
-// (e.g. pure red or pure green), which no real photo approaches on average —
-// most food photos average well under 0.3 even when they read as vibrant,
-// because plates, backgrounds, highlights, and shadows pull the mean down.
-// Deliberately using mean (max-min)/255 rather than true per-pixel HSV
-// saturation ((max-min)/max): HSV saturation blows up on near-black pixels
-// (tiny max, so tiny chroma reads as "100% saturated"), which would bias the
-// average upward from noise in dark regions rather than reflecting how
-// colorful the photo actually looks. 0.18 is a first guess for "already
-// vibrant" on this scale — expect tuning against more real photos.
-const SATURATION_TAPER_CEILING = 0.18;
-
-// Statistics (histogram + grey-world means) are measured on every Nth pixel
-// rather than all of them — see enhancePhoto() for why. The correction itself
-// is still applied to every pixel; only the measurement pass is subsampled.
-const STATS_SAMPLE_STRIDE = 4;
-
 export class UnsupportedImageError extends Error {
   constructor(message: string) {
     super(message);
@@ -90,153 +22,13 @@ export class UnsupportedImageError extends Error {
 // preview or, as here, the true original bitmap this function decodes.
 export type CropRect = { fx: number; fy: number; fWidth: number; fHeight: number };
 
-function clamp8(v: number): number {
-  return v < 0 ? 0 : v > 255 ? 255 : Math.round(v);
-}
-
-// Deterministic "good natural light" pass: auto-levels, then grey-world
-// auto-white-balance, then a mild fixed contrast + saturation nudge. Runs
-// directly on the canvas that drawImage already painted — no second canvas,
-// no second encode, just a getImageData/putImageData round-trip on the
-// existing pixel buffer.
-//
-// The histogram and grey-world channel means are both measured in a single
-// subsampled pass (every STATS_SAMPLE_STRIDE-th pixel) over the ORIGINAL pixel
-// data — not re-measured between corrections. By the time compressImageFile
-// calls this, the canvas is already downscaled to at most MAX_EDGE (1200) on
-// its longest edge, so a full-resolution scan here is at most ~1.4MP — already
-// cheap. Subsampling is a further, deliberate margin: global statistics like a
-// histogram clip point or a channel mean don't need every pixel to be stable,
-// so sampling 1-in-4 cuts the measurement pass to ~25% of the work while still
-// drawing on hundreds of thousands of samples for a typical photo — far more
-// than enough given the clip fraction is only 0.5%. The correction itself is
-// NOT subsampled: every pixel in the buffer is rewritten, since a sparse
-// correction would leave visible untouched pixels.
-function enhancePhoto(ctx: CanvasRenderingContext2D, width: number, height: number) {
-  const imageData = ctx.getImageData(0, 0, width, height);
-  const data = imageData.data;
-  const pixelCount = width * height;
-
-  // --- Measure: luminance histogram + per-channel sums + chroma, subsampled ---
-  const histogram = new Uint32Array(256);
-  let rSum = 0, gSum = 0, bSum = 0;
-  let chromaSum = 0;
-  let sampleCount = 0;
-  for (let p = 0; p < pixelCount; p += STATS_SAMPLE_STRIDE) {
-    const i = p * 4;
-    const r = data[i], g = data[i + 1], b = data[i + 2];
-    histogram[clamp8(0.299 * r + 0.587 * g + 0.114 * b)]++;
-    rSum += r;
-    gSum += g;
-    bSum += b;
-    chromaSum += Math.max(r, g, b) - Math.min(r, g, b);
-    sampleCount++;
-  }
-
-  // Black/white point: walk the histogram in from each end until the clip
-  // fraction of sampled pixels has been passed.
-  const clipCount = Math.max(1, Math.round(sampleCount * AUTO_LEVELS_CLIP_FRACTION));
-  let blackPoint = 0;
-  let cumulative = 0;
-  for (let v = 0; v < 256; v++) {
-    cumulative += histogram[v];
-    if (cumulative >= clipCount) {
-      blackPoint = v;
-      break;
-    }
-  }
-  let whitePoint = 255;
-  cumulative = 0;
-  for (let v = 255; v >= 0; v--) {
-    cumulative += histogram[v];
-    if (cumulative >= clipCount) {
-      whitePoint = v;
-      break;
-    }
-  }
-  // Degenerate/near-flat image guard — an inverted or zero range would blow up
-  // the stretch below into a no-op-or-worse; fall back to leaving levels alone.
-  if (whitePoint <= blackPoint) {
-    blackPoint = 0;
-    whitePoint = 255;
-  }
-  const levelsRange = whitePoint - blackPoint;
-
-  // Grey-world means. Raw (unclamped) scale factor per channel: >1 boosts the
-  // channel toward the grey average, <1 reduces it.
-  const rMean = rSum / sampleCount;
-  const gMean = gSum / sampleCount;
-  const bMean = bSum / sampleCount;
-  const grayMean = (rMean + gMean + bMean) / 3;
-  const rRawScale = rMean > 0 ? grayMean / rMean : 1;
-  const gRawScale = gMean > 0 ? grayMean / gMean : 1;
-  const bRawScale = bMean > 0 ? grayMean / bMean : 1;
-
-  // Clamps a raw scale to [1 - ceilingDown, 1 + ceilingUp]. Which ceiling is
-  // "up" vs "down" depends on which direction on THIS channel warms vs cools
-  // the image — see call sites below.
-  const clampScale = (raw: number, ceilingUp: number, ceilingDown: number) =>
-    Math.min(1 + ceilingUp, Math.max(1 - ceilingDown, raw));
-
-  // Red: boosting it (raw > 1) warms the image, reducing it (raw < 1) cools
-  // it — so the boost side gets the general ceiling and the reduce side gets
-  // the tighter cooling ceiling.
-  const rScale = clampScale(rRawScale, WHITE_BALANCE_MAX_SHIFT, WHITE_BALANCE_MAX_COOLING_SHIFT);
-  // Blue is red's mirror image: boosting it (raw > 1) cools the image,
-  // reducing it (raw < 1) warms it.
-  const bScale = clampScale(bRawScale, WHITE_BALANCE_MAX_COOLING_SHIFT, WHITE_BALANCE_MAX_SHIFT);
-  // Green doesn't sit on the warm/cool axis — symmetric at the general ceiling.
-  const gScale = clampScale(gRawScale, WHITE_BALANCE_MAX_SHIFT, WHITE_BALANCE_MAX_SHIFT);
-
-  // Adaptive saturation lift: mean chroma (see SATURATION_TAPER_CEILING above)
-  // scales the applied lift down as the image's own saturation rises, linearly
-  // reaching zero at the ceiling. A grey/dim photo (meanChroma near 0) gets
-  // close to the full SATURATION_AMOUNT; an already-vibrant one gets a small
-  // fraction of it, avoiding the over-saturated/heavy look a flat lift caused.
-  const meanChroma = chromaSum / sampleCount / 255;
-  const saturationTaper = Math.max(0, Math.min(1, 1 - meanChroma / SATURATION_TAPER_CEILING));
-  const effectiveSaturationAmount = SATURATION_AMOUNT * saturationTaper;
-
-  // --- Apply: auto-levels -> white-balance -> contrast -> saturation, every pixel ---
-  for (let i = 0; i < data.length; i += 4) {
-    let r = data[i], g = data[i + 1], b = data[i + 2];
-
-    r = ((r - blackPoint) / levelsRange) * AUTO_LEVELS_WHITE_CEILING;
-    g = ((g - blackPoint) / levelsRange) * AUTO_LEVELS_WHITE_CEILING;
-    b = ((b - blackPoint) / levelsRange) * AUTO_LEVELS_WHITE_CEILING;
-
-    r *= rScale;
-    g *= gScale;
-    b *= bScale;
-
-    r = (r - 128) * (1 + CONTRAST_AMOUNT) + 128;
-    g = (g - 128) * (1 + CONTRAST_AMOUNT) + 128;
-    b = (b - 128) * (1 + CONTRAST_AMOUNT) + 128;
-
-    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-    r = lum + (r - lum) * (1 + effectiveSaturationAmount);
-    g = lum + (g - lum) * (1 + effectiveSaturationAmount);
-    b = lum + (b - lum) * (1 + effectiveSaturationAmount);
-
-    data[i] = clamp8(r);
-    data[i + 1] = clamp8(g);
-    data[i + 2] = clamp8(b);
-    // alpha (data[i + 3]) untouched
-  }
-
-  ctx.putImageData(imageData, 0, 0);
-}
-
 // Compresses a File into a JPEG Blob with its longest edge capped at
 // MAX_EDGE (aspect ratio preserved, smaller images left at their native
 // size) and re-encoded at JPEG_QUALITY. Targets roughly 200KB — some
 // images will land above or below depending on content. When cropRect is
 // given, the crop and the resize happen in the same single canvas draw (the
-// 9-argument drawImage form) rather than as two passes. `enhance` (default
-// false — existing callers that omit it are unaffected) runs the
-// deterministic auto-levels/white-balance/contrast/saturation pass above, in
-// the same canvas, before the encode.
-export async function compressImageFile(file: File, cropRect?: CropRect, enhance: boolean = false): Promise<Blob> {
+// 9-argument drawImage form) rather than as two passes.
+export async function compressImageFile(file: File, cropRect?: CropRect): Promise<Blob> {
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(file);
@@ -281,10 +73,6 @@ export async function compressImageFile(file: File, cropRect?: CropRect, enhance
       throw new UnsupportedImageError("Couldn't process this photo. Please try a different one.");
     }
     ctx.drawImage(bitmap, sx, sy, sWidth, sHeight, 0, 0, targetWidth, targetHeight);
-
-    if (enhance) {
-      enhancePhoto(ctx, targetWidth, targetHeight);
-    }
 
     const blob: Blob | null = await new Promise((resolve) =>
       canvas.toBlob(resolve, "image/jpeg", JPEG_QUALITY)
