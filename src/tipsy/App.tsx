@@ -22,7 +22,7 @@ import {
   IconUser,
   IconRefresh,
   IconMessageCircle,
-  IconWand,
+  IconLemon,
 } from "@tabler/icons-react";
 import { pickChips } from "./chips";
 
@@ -5657,7 +5657,7 @@ function PhotoCropOverlay({ file, onCancel, onConfirm }: {
         </div>
         <button
           onClick={() => setEnhance((v) => !v)}
-          aria-label={enhance ? "Turn off photo enhancement" : "Turn on photo enhancement"}
+          aria-label="Enhance photo"
           aria-pressed={enhance}
           style={{
             width: 52,
@@ -5682,7 +5682,7 @@ function PhotoCropOverlay({ file, onCancel, onConfirm }: {
               background: enhance ? "#233C00" : "transparent",
             }}
           >
-            <IconWand size={18} color={enhance ? "#FAF7F2" : "#233C00"} style={{ opacity: enhance ? 1 : 0.4 }} />
+            <IconLemon size={18} stroke={1.5} color={enhance ? "#FAF7F2" : "#233C00"} style={{ opacity: enhance ? 1 : 0.4 }} />
           </span>
         </button>
       </div>
