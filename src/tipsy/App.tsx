@@ -22,7 +22,7 @@ import {
   IconUser,
   IconRefresh,
   IconMessageCircle,
-  IconLemon,
+  IconContrastFilled,
 } from "@tabler/icons-react";
 import { pickChips } from "./chips";
 
@@ -5682,7 +5682,7 @@ function PhotoCropOverlay({ file, onCancel, onConfirm }: {
               background: enhance ? "#233C00" : "transparent",
             }}
           >
-            <IconLemon size={18} stroke={1.5} color={enhance ? "#FAF7F2" : "#233C00"} style={{ opacity: enhance ? 1 : 0.4 }} />
+            <IconContrastFilled size={18} color={enhance ? "#FAF7F2" : "#233C00"} style={{ opacity: enhance ? 1 : 0.4 }} />
           </span>
         </button>
       </div>
