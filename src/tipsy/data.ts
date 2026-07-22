@@ -570,7 +570,7 @@ export async function getSavedRecipesForCategory(categoryId: string, label: stri
       `)
       .eq('category_id', categoryId)
       .eq('user_id', userId)
-      .order('cooked_on', { ascending: false, foreignTable: 'cook_events' });
+      .order('cooked_on', { ascending: false, foreignTable: 'recipes.cook_events' });
 
     if (error) throw error;
 
@@ -648,7 +648,7 @@ export async function getSavedRecipesAll(): Promise<Recipe[]> {
         )
       `)
       .eq('user_id', userId)
-      .order('cooked_on', { ascending: false, foreignTable: 'cook_events' });
+      .order('cooked_on', { ascending: false, foreignTable: 'recipes.cook_events' });
 
     if (error) throw error;
 
