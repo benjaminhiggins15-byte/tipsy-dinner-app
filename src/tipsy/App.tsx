@@ -1507,22 +1507,6 @@ function Categories({ push, back, isTabRoot, ensureRecipesLoaded }: { push: (s: 
               <path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6" />
             </svg>
           </button>
-          <button
-            onClick={() => push({ name: "newcategory" })}
-            aria-label="New category"
-            style={{
-              width: 32, height: 32, borderRadius: "50%",
-              border: "1px solid rgba(35,60,0,0.25)",
-              background: "transparent",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              cursor: "pointer",
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.7)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
         </div>
       </div>
 
