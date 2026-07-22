@@ -216,6 +216,7 @@ type Screen =
   | { name: "editcategory"; categoryKey: string }
   | { name: "categories" }
   | { name: "recipes"; categoryKey: string; categoryLabel: string }
+  | { name: "allrecipes" }
   | { name: "recipe"; recipe: Recipe; categoryLabel: string; categoryKey: string }
   | { name: "grocerylist" }
   | { name: "occasions" }
@@ -260,6 +261,7 @@ function screenKey(s: Screen): string {
     case "editcategory": return `editcategory:${s.categoryKey}`;
     case "categories": return "categories";
     case "recipes": return `recipes:${s.categoryKey}`;
+    case "allrecipes": return "allrecipes";
     case "recipe": return `recipe:${s.categoryLabel}:${s.recipe.title}`;
     case "grocerylist": return "grocerylist";
     case "occasions": return "occasions";
@@ -361,6 +363,14 @@ function renderScreen(
         back={back}
         recipesByCategory={recipesByCategory ?? {}}
         clearRecipeCache={clearRecipeCache}
+        ensureRecipesLoaded={ensureRecipesLoaded}
+      />
+    );
+    case "allrecipes": return (
+      <AllRecipes
+        push={push}
+        back={back}
+        recipesByCategory={recipesByCategory ?? {}}
         ensureRecipesLoaded={ensureRecipesLoaded}
       />
     );
@@ -1496,6 +1506,30 @@ function Categories({ push, back, isTabRoot, ensureRecipesLoaded }: { push: (s: 
         </div>
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
           <button
+            onClick={async () => {
+              await ensureRecipesLoaded?.("__all__", "All Recipes");
+              push({ name: "allrecipes" });
+            }}
+            aria-label="View all recipes"
+            style={{
+              height: 32,
+              padding: "0 14px",
+              borderRadius: 16,
+              border: "1px solid rgba(35,60,0,0.25)",
+              background: "transparent",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer",
+              fontFamily: "Inter, sans-serif",
+              fontSize: 12,
+              fontWeight: 500,
+              letterSpacing: "0.04em",
+              color: "#233C00",
+              whiteSpace: "nowrap",
+            }}
+          >
+            View all
+          </button>
+          <button
             onClick={() => push({ name: "grocerylist" })}
             aria-label="Grocery list"
             style={{
@@ -1816,6 +1850,257 @@ function Recipes({
             >
               Delete
             </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- All Recipes ---------------- */
+type SortMode = "added" | "cooked" | "alpha";
+
+const SORT_LABELS: Record<SortMode, string> = {
+  added: "Recently added",
+  cooked: "Recently cooked",
+  alpha: "Alphabetical",
+};
+
+function AllRecipes({
+  push,
+  back,
+  recipesByCategory,
+  ensureRecipesLoaded,
+}: {
+  push: (s: Screen) => void;
+  back: () => void;
+  recipesByCategory: Record<string, Recipe[]>;
+  ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void>;
+}) {
+  const recipes = recipesByCategory["__all__"] ?? [];
+  // Resets to "Recently added" on every visit — deliberately not persisted.
+  const [sortMode, setSortMode] = useState<SortMode>("added");
+  const [sortSheetOpen, setSortSheetOpen] = useState(false);
+
+  useEffect(() => {
+    if (!recipesByCategory["__all__"]) {
+      ensureRecipesLoaded?.("__all__", "All Recipes");
+    }
+  }, [recipesByCategory["__all__"], ensureRecipesLoaded]);
+
+  const sortedRecipes = useMemo(() => {
+    const list = [...recipes];
+    if (sortMode === "alpha") {
+      list.sort((a, b) => a.title.localeCompare(b.title));
+    } else if (sortMode === "cooked") {
+      const lastCooked = (r: Recipe) =>
+        (r.cookEvents ?? []).reduce((max, e) => (e.cookedOn > max ? e.cookedOn : max), "");
+      list.sort((a, b) => {
+        const aCooked = lastCooked(a);
+        const bCooked = lastCooked(b);
+        if (aCooked && bCooked) return bCooked.localeCompare(aCooked);
+        if (aCooked) return -1;
+        if (bCooked) return 1;
+        return (b.created_at ?? "").localeCompare(a.created_at ?? "");
+      });
+    } else {
+      list.sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
+    }
+    return list;
+  }, [recipes, sortMode]);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative" }}>
+      {/* Header */}
+      <div style={{ height: 56, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button
+            onClick={back}
+            aria-label="Back"
+            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.6)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
+          <div style={{ fontFamily: "Inter, sans-serif", fontSize: 13, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase", color: "#233C00" }}>
+            All Recipes ({recipes.length})
+          </div>
+        </div>
+        <button
+          onClick={() => setSortSheetOpen(true)}
+          aria-label="Sort recipes"
+          style={{
+            background: "transparent",
+            border: "none",
+            padding: 0,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            fontFamily: "Inter, sans-serif",
+            fontSize: 12,
+            fontWeight: 500,
+            color: "rgba(35,60,0,0.55)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {SORT_LABELS[sortMode]}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.55)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Recipe List — same row rendering as the category view */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "4px 20px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+        {sortedRecipes.map((r) => (
+          <div
+            key={r.savedId}
+            onClick={() => push({ name: "recipe", recipe: r, categoryLabel: r.category, categoryKey: r.categoryKey ?? "" })}
+            style={{
+              height: 80,
+              background: "rgba(35,60,0,0.06)",
+              border: "1px solid rgba(35,60,0,0.1)",
+              borderRadius: 14,
+              display: "flex",
+              alignItems: "center",
+              padding: "0 18px",
+              gap: 14,
+              flexShrink: 0,
+              cursor: "pointer",
+            }}
+          >
+            {/* Thumbnail — photo if the recipe has one, else the existing icon placeholder */}
+            <div style={{
+              width: 40, height: 40, minWidth: 40,
+              borderRadius: 10,
+              background: "rgba(35,60,0,0.06)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              flexShrink: 0,
+              overflow: "hidden",
+            }}>
+              {r.photo_url ? (
+                <img
+                  src={`${r.photo_url}?v=${r.photo_version ?? 0}`}
+                  alt=""
+                  loading="lazy"
+                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                />
+              ) : (
+                <IconBook size={22} stroke={1.5} color="rgba(35,60,0,0.2)" />
+              )}
+            </div>
+
+            {/* Recipe info */}
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
+              <div style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: 14,
+                fontWeight: 700,
+                letterSpacing: "0.06em",
+                textTransform: "capitalize",
+                color: "#233C00",
+                lineHeight: 1.2,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}>
+                {r.title}
+              </div>
+              <div style={{
+                fontFamily: "Fraunces, serif",
+                fontStyle: "italic",
+                fontWeight: 300,
+                fontSize: 12,
+                color: "rgba(35,60,0,0.45)",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}>
+                {r.description}
+              </div>
+              {r.yield && (
+                <div style={{
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 10,
+                  fontWeight: 500,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "rgba(35,60,0,0.25)",
+                }}>
+                  {r.yield}
+                </div>
+              )}
+            </div>
+
+            {/* Chevron */}
+            <div style={{ flexShrink: 0 }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.2)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Sort bottom sheet */}
+      {sortSheetOpen && (
+        <div
+          onClick={() => setSortSheetOpen(false)}
+          style={{
+            position: "fixed",
+            top: 0, left: 0, right: 0, bottom: 64,
+            background: "rgba(35, 60, 0, 0.08)",
+            zIndex: 80,
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: "center",
+            animation: "tipsy-fade 0.22s ease",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#FAF7F2",
+              borderRadius: "24px 24px 0 0",
+              width: "100%",
+              padding: "8px 20px 24px",
+              animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
+            }}
+          >
+            {(["added", "cooked", "alpha"] as SortMode[]).map((mode, idx) => (
+              <button
+                key={mode}
+                onClick={() => {
+                  setSortMode(mode);
+                  setSortSheetOpen(false);
+                }}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "16px 4px",
+                  background: "transparent",
+                  border: "none",
+                  borderBottom: idx < 2 ? "1px dotted rgba(35,60,0,0.1)" : "none",
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 15,
+                  fontWeight: 500,
+                  color: "#233C00",
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                {SORT_LABELS[mode]}
+                {sortMode === mode && (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#233C00" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                )}
+              </button>
+            ))}
           </div>
         </div>
       )}
