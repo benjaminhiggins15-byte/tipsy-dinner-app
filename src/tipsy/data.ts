@@ -63,6 +63,7 @@ export type Recipe = {
   headlineRating?: number | null;
   photo_url?: string | null;
   photo_version?: number;
+  created_at?: string;
 };
 
 // Gradient palette for categories
@@ -568,7 +569,8 @@ export async function getSavedRecipesForCategory(categoryId: string, label: stri
         )
       `)
       .eq('category_id', categoryId)
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .order('cooked_on', { ascending: false, foreignTable: 'cook_events' });
 
     if (error) throw error;
 
@@ -594,10 +596,93 @@ export async function getSavedRecipesForCategory(categoryId: string, label: stri
         headlineRating: headlineRatingFromEvents(cookEvents),
         photo_url: recipe.photo_url ?? null,
         photo_version: recipe.photo_version ?? 0,
+        created_at: recipe.created_at,
       };
     });
   } catch (error) {
     console.error('Error loading recipes for category:', error);
+    return [];
+  }
+}
+
+// Unfiltered sibling of getSavedRecipesForCategory — same shape, no category_id
+// filter. A recipe can belong to multiple categories (recipe_categories is a
+// join table), so recipe_categories rows are de-duped by recipe id; the first
+// row encountered wins for that recipe's displayed category/categoryKey.
+export async function getSavedRecipesAll(): Promise<Recipe[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return [];
+  }
+
+  try {
+    const { data: recipeCategories, error } = await supabase
+      .from('recipe_categories')
+      .select(`
+        category_id,
+        categories (
+          name
+        ),
+        recipes!inner (
+          id,
+          title,
+          description,
+          steps,
+          created_at,
+          source,
+          photo_url,
+          photo_version,
+          ingredients (
+            name,
+            quantity,
+            sort_order
+          ),
+          cook_events (
+            id,
+            recipe_id,
+            cooked_on,
+            score,
+            note,
+            created_at
+          )
+        )
+      `)
+      .eq('user_id', userId)
+      .order('cooked_on', { ascending: false, foreignTable: 'cook_events' });
+
+    if (error) throw error;
+
+    const byRecipeId = new Map<string, Recipe>();
+    for (const rc of recipeCategories || []) {
+      const recipe = (rc as any).recipes;
+      if (byRecipeId.has(recipe.id)) continue;
+      const categoryId = (rc as any).category_id;
+      const categoryName = (rc as any).categories?.name ?? "";
+      const cookEvents = (recipe.cook_events || []).map(mapCookEventRow);
+      byRecipeId.set(recipe.id, {
+        title: recipe.title,
+        description: recipe.description,
+        color: generateGradientFromUUID(categoryId),
+        category: categoryName.toLowerCase(),
+        ingredients: (recipe.ingredients || [])
+          .sort((a: any, b: any) => a.sort_order - b.sort_order)
+          .map((ing: any) => ({
+            name: ing.name,
+            qty: ing.quantity,
+          })),
+        steps: recipe.steps || [],
+        savedId: recipe.id,
+        categoryKey: categoryId,
+        cookEvents,
+        headlineRating: headlineRatingFromEvents(cookEvents),
+        photo_url: recipe.photo_url ?? null,
+        photo_version: recipe.photo_version ?? 0,
+        created_at: recipe.created_at,
+      });
+    }
+    return Array.from(byRecipeId.values());
+  } catch (error) {
+    console.error('Error loading all recipes:', error);
     return [];
   }
 }
