@@ -1552,6 +1552,22 @@ function Categories({ push, back, isTabRoot, ensureRecipesLoaded }: { push: (s: 
       {/* Grid */}
       <div style={{ flex: 1, overflowY: "auto", padding: "8px 20px 16px" }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gridAutoRows: "160px", gap: 12 }}>
+          {/* New category card */}
+          <div
+            onClick={() => push({ name: "newcategory" })}
+            style={{
+              background: "rgba(35,60,0,0.04)",
+              border: "1px dashed rgba(35,60,0,0.2)",
+              borderRadius: 16,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer",
+            }}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.25)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </div>
           {cats.map((c) => {
             const count = recipeCounts[c.key] ?? 0;
             return (
@@ -1585,22 +1601,6 @@ function Categories({ push, back, isTabRoot, ensureRecipesLoaded }: { push: (s: 
               </div>
             );
           })}
-          {/* New category card */}
-          <div
-            onClick={() => push({ name: "newcategory" })}
-            style={{
-              background: "rgba(35,60,0,0.04)",
-              border: "1px dashed rgba(35,60,0,0.2)",
-              borderRadius: 16,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              cursor: "pointer",
-            }}
-          >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.25)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </div>
         </div>
       </div>
     </div>
