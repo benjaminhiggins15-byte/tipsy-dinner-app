@@ -36,10 +36,10 @@ logos) lives in CLAUDE.md; this file is the per-screen application of it.
 - Input bar: send button filled #1E3A42 with cream arrow
 
 ## Recipes — Categories
-- Header: "Recipes" (Inter 500 uppercase cream) left, + button (circle, cream border 25%) right. Cart icon also lives here (grocery list entry).
+- Header: "Recipes" (Inter 500 uppercase cream) left; "View all" pill (rounded rect, cream border 25%, Inter 500 12px cream) + cart icon (grocery list entry) right, in that order. The top-bar + add-category button is gone — the embedded dashed add-category card is now the only add affordance.
 - 2×4 grid, gap 12px, padding 0 20px
 - Cards: bg #2E4E08, radius 16px, padding 16px. Tabler icon top-left (cream 20%, 32px), count bottom (Inter 11px cream 40%), title bottom (Inter 700 uppercase cream, letter-spacing 0.08em, 15px)
-- Empty dashed card bottom-right: cream 4% bg, dashed border cream 15%, centered plus
+- Empty dashed card sits first in the grid (top-left), not last: cream 4% bg, dashed border cream 15%, centered plus — moved forward so it doesn't drift below the fold as the library grows
 
 ## Recipes — Recipe List
 - Header: back arrow left, category name (Inter 500 uppercase cream) + count (Inter cream 35%) stacked, no right action

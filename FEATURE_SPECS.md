@@ -373,3 +373,39 @@ UTC string-parsing.
 **Standing test: `src/tipsy/chips.test.ts`** (`bun run src/tipsy/chips.test.ts`) — 29
 cases across all timing shapes at their tight window edges; imports the real chip
 defs. Re-run whenever timing logic or calendar entries change.
+
+---
+
+## View All Recipes
+
+Unfiltered recipe list reached via a "View all" pill in the Recipes header (next to
+the grocery cart). Reuses the category recipe-row rendering verbatim; rows navigate
+by each recipe's own `categoryKey`, so no category context is needed at the list
+level. Screen title shows a live count: "All Recipes (N)".
+
+**Data.** `getSavedRecipesAll()` in `data.ts`, sibling of
+`getSavedRecipesForCategory`, unfiltered (`user_id` scope only), same nested
+`cook_events` join. Cached as `recipesByCategory['__all__']` via
+`ensureRecipesLoaded`. **`clearRecipeCache` always deletes `'__all__'`** — inside the
+function, not at call sites, so no mutation can leave the all-view stale
+(load-bearing).
+
+**Sort** (quiet header text button → reused slide-up sheet, `bottom:64` /
+`24px 24px 0 0` / `tipsy-slideup`): Recently added (default), Recently cooked,
+Alphabetical. Recently-cooked computes `max(cooked_on)` per recipe client-side from
+the nested events; recipes with no cook events fall to the bottom, ordered by
+recently-added among themselves. Sort does not persist — resets to recently-added
+each visit.
+
+**Not built (logged):** search (the bigger half, its own design question; header
+layout left repeatable for it); a per-row category label (deferred — a
+shared-row-height / list-density decision to be mocked and judged by eye).
+
+**Known ambiguity (logged, not fixed):** a recipe in multiple categories is de-duped
+by id in the all-view, keeping whichever join row returns first, so its displayed
+category label / back-target is non-deterministic. Display-only; `editCategoryLabel`
+has a fallback. Revisit only if it reads oddly in real use.
+
+**Header change:** the duplicate top-bar "add category" button was removed; the
+embedded dashed card is now the only add affordance and was moved to first position
+in the category grid so it doesn't drift below the fold as the library grows.

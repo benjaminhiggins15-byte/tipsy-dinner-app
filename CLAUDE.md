@@ -37,6 +37,7 @@ pointer named — do not duplicate it here.
 - **Tailwind Preflight's `img { max-width: 100% }` clamps rendered width** — fix with inline `maxWidth: "none"` on that element only. Full detail: Recipe Photos in FEATURE_SPECS.md.
 - **Public share route is snapshot-first with a live fallback, and must stay chrome-free.** Full detail: Architecture / SSR below.
 - **Ingredients are free-text strings, not structured `{amount, unit}`** — the AI normalizes on demand where structure is needed. Full detail: Data Layer below.
+- **`clearRecipeCache` always drops `'__all__'`** — the View-all cache entry is invalidated on every mutation alongside the per-category key; never wire all-view invalidation at call sites. Full detail: View All Recipes in FEATURE_SPECS.md.
 
 ---
 
@@ -124,6 +125,13 @@ Menus, Profile. Active = cream icon + label + small cream dot below; inactive = 
 - `recipes.photo_url` (text, nullable) predates the Recipe Photos feature and sat
   unused; `photo_version` (int4, not null, default 0) was added for that feature. See
   "Recipe Photos" in FEATURE_SPECS.md.
+
+**RESOLVED — cook_events initial load had no `.order()`.** The nested `cook_events`
+select in both `getSavedRecipesForCategory` and `getSavedRecipesAll` now orders
+`cooked_on` descending via the dotted foreign-table path `recipes.cook_events`. The
+dotted path is required: `cook_events` is embedded two levels deep
+(`recipe_categories` → `recipes` → `cook_events`), so the bare name `cook_events`
+returns PostgREST error `PGRST108` ("not an embedded resource in this request").
 
 **Schema lives ONLY in the Supabase dashboard** — no in-repo migration files. Known
 logged risk; follow the existing hand-applied-SQL convention when adding tables, but
