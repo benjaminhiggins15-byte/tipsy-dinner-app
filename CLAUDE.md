@@ -54,7 +54,7 @@ Full per-screen detail in DESIGN_SPEC.md. The core:
 --cream:       #FEE7C0   /* all text on green, hero moments */
 --cream-dim:   rgba(254,231,192,0.55)  /* secondary text, placeholders, muted labels */
 ```
-Rules: cream on green for text directly on background; user bubbles cream bg + green text; AI text cream Fraunces italic on green (no bubble); CTAs cream bg + green text; no red/orange/coral/terracotta. Bottom sheets (delete-confirm modals, the Cook History log/edit sheet) are light `#FAF7F2`, not a green — confirmed by grep, zero `#182800` bottom sheets exist anywhere in the codebase.
+Rules: cream on green for text directly on background; user bubbles cream bg + green text; AI text cream Fraunces italic on green (no bubble); CTAs cream bg + green text; no decorative red/orange/coral/terracotta — `#B85C5C` is the sole exception, reserved for error and destructive states (delete/remove actions, inline error text) and used in ~19 locations across 4 files (App.tsx, Occasions.tsx, NewCategory.tsx, Menus.tsx); never repurpose it for anything decorative. Bottom sheets (delete-confirm modals, the Cook History log/edit sheet) are light `#FAF7F2`, not a green — confirmed by grep, zero `#182800` bottom sheets exist anywhere in the codebase.
 
 **Universal gradient** — behind every screen except splash:
 ```css
@@ -65,12 +65,12 @@ z-index: 0; pointer-events: none;
 Content sits above at z-index 1. Gradient fades into base green — no hard edges.
 
 **Logo assets** (`src/Logos/`) — path is case-sensitive on Linux/Vercel:
-- `Full_Logo.png` — full "tipsy DINNER" wordmark. Splash screen only.
+- `Full_logo.png` — full "tipsy DINNER" wordmark. Splash screen only.
 - `watermark_square.png` — square tD monogram. Build top-left + mini player.
 - `watermark_circle.png` — circular tD monogram. Available if needed.
 ```js
 import tDSquare from '../Logos/watermark_square.png'
-import fullLogo from '../Logos/Full_Logo.png'
+import fullLogo from '../Logos/Full_logo.png'
 ```
 
 **Navigation** — four tabs, always visible, bottom of every screen: Build, Recipes,
@@ -91,6 +91,7 @@ Menus, Profile. Active = cream icon + label + small cream dot below; inactive = 
 - `occasions`, `menus`, `menu_recipes` (join, has `section` field)
 - `grocery_items` — grocery list rows (raw + AI-enriched fields), owner-only
 - `grocery_list_shares` — frozen snapshots for public grocery share links; owner-write + anon-read
+- `recipe_shares` — frozen snapshots for public recipe share links; owner-write + anon-read (same pattern as `grocery_list_shares`; see Recipe Sharing)
 
 **Key schema decisions:**
 - Ingredients stored as **free-text strings**, NOT structured `{amount, unit}`. Deliberate and load-bearing: fits the free-text nature of AI cooking ("a good glug of olive oil"); AI normalizes on demand where structure is needed. The AI is the bridge between free-text recipes and any feature that computes over ingredients (grocery, future pantry/nutrition/scaling). Full structured-storage migration is a trigger-gated option — revisit ONLY if a feature must compute across the whole library's quantities in *stored* form.
@@ -98,6 +99,9 @@ Menus, Profile. Active = cream icon + label + small cream dot below; inactive = 
   element is a `RecipeStep` (`string | { title, instruction }`) — see "Recipe Step
   Titles" below.
 - Menu section canonical order (enforced in app code, not DB): apps → mains → sides → desserts → drinks.
+- `recipes.photo_url` (text, nullable) predates the Recipe Photos feature and sat
+  unused; `photo_version` (int4, not null, default 0) was added for that feature. See
+  "Recipe Photos" below.
 
 **Schema lives ONLY in the Supabase dashboard** — no in-repo migration files. Known
 logged risk; follow the existing hand-applied-SQL convention when adding tables, but
@@ -123,6 +127,17 @@ longer used for app data.)
 Cook component — `fireAICall`, `sendMessage`, `handleChipClick` — call this one
 function; future prompt edits happen in one place. User profile (palate,
 inspiration, constraints) is interpolated inside it.
+
+**Recipe parsing is consolidated.** A single module-level
+`parseRecipeFromAIResponse(fullText, sourceId?, sourceTitle?)` (App.tsx, immediately
+after `buildSystemPrompt`) parses the `<recipe>` XML out of the AI's raw response
+(title/description/ingredients/steps) and carries `sourceId`/`sourceTitle` forward
+onto the result. All three call sites — `fireAICall`, `sendMessage`,
+`handleChipClick` — route through it; this was consolidated separately from (and
+later than) the prompt-building consolidation above. There is now exactly one place
+where recipe-parse and anchor carry-forward logic lives — any future change to
+either goes there. See "Update vs Save-as-New" for the carry-forward/severing
+behavior itself.
 
 **Recipe context injection.** When a saved recipe is in scope (`currentRecipe !==
 null`), it is serialized via `recipeToXML` (module-level in App.tsx) and appended to
@@ -191,9 +206,14 @@ hard-coded nav-bar clearance — content-box sizing, so the screen layer's actua
 History's log-cook sheet): a `position: absolute; inset: 0` backdrop inherited the
 oversized containing block and pushed its Save button 64px below the visible screen.
 Fixed there via `position: fixed; bottom: 64` (matching the existing chat-input-bar
-pattern) instead of `absolute + inset: 0`. Any new full-height bottom sheet should use
-the same `fixed` pattern from the start. Someday cleanup: make the nav-bar clearance
-not hard-coded so this class of bug can't recur.
+pattern) instead of `absolute + inset: 0`. `PhotoCropOverlay` (see "Recipe Photos")
+uses this same `fixed; bottom: 64` pattern rather than `ExpandedRecipeOverlay`'s
+`absolute` + explicit-offset approach — `fixed` escapes the padded ScreenStage
+containing block, which is the actual protection against this trap. Nothing in the
+app renders over the nav bar; the crop overlay respects it like everything else. Any
+new full-height bottom sheet or overlay should use the same `fixed` pattern from the
+start. Someday cleanup: make the nav-bar clearance not hard-coded so this class of
+bug can't recur.
 
 **Lovable double-mount.** Built in Lovable → components mount twice in dev
 (StrictMode-equivalent). All async fetches use the ignore-flag pattern:
@@ -211,11 +231,15 @@ useEffect(() => {
 ```
 
 **Public sharing route.** `src/routes/r.$token.tsx` — standalone, outside the auth
-flow and outside the app frame. Server loader + `getPublicRecipeByToken(token)`
-(fetches recipe + ingredients, no `user_id` filter, relies on RLS). Two anon-read
-policies (`recipes_select_public`, `ingredients_select_public`) gated to `is_public =
-true`, OR'd with owner-only policies. Tokens minted via `crypto.randomUUID()`, reused
-for stable links. **Must stay chrome-free** (no in-app UI like the chat icon).
+flow and outside the app frame. Shared recipe links are frozen snapshots, not live
+views — see "Recipe Sharing" for the full model. Loader tries
+`getRecipeSnapshotByToken(token)` (reads `recipe_shares`) first; on null, falls back
+to the legacy `getPublicRecipeByToken(token)` (fetches recipe + ingredients live, no
+`user_id` filter, relies on RLS — two anon-read policies,
+`recipes_select_public`/`ingredients_select_public`, gated to `is_public = true`,
+OR'd with owner-only policies) so tokens minted before the frozen-snapshot model keep
+resolving. Component body is unchanged either way — both paths produce compatible
+field shapes. **Must stay chrome-free** (no in-app UI like the chat icon).
 
 **Vercel quirks.** Nitro generates `.vercel/output` during build (gitignored).
 `config.json` and `.vc-config.json` are written manually via a Nitro compiled hook in
@@ -266,19 +290,53 @@ system-prompt-reference mechanism.
 
 ## Update vs Save-as-New (Recipe Origin Tracking)
 
-`RecipeDraft` carries an optional `sourceId?: string`, set in `transferToRecipeChat`
-from the source recipe's id when a saved recipe is loaded via chat-from-recipe. All
-three AI call sites copy `sourceId` forward onto each newly-parsed recipe so it
-survives repeated AI edits. `sourceId` is internal state only — NOT in `recipeToXML`,
-NOT sent to the AI.
+`RecipeDraft` carries an optional `sourceId?: string` AND an optional
+`sourceTitle?: string`. `sourceId` is set in `transferToRecipeChat` from the source
+recipe's id when a saved recipe is loaded via chat-from-recipe; `sourceTitle` is set
+alongside it, snapshotting the origin recipe's title at chat launch. Both are
+internal state only — NOT in `recipeToXML`, NOT sent to the AI.
+
+**Binding invariant: `sourceId` and `sourceTitle` always move together** — set
+together, carried together, cleared together, re-anchored together. They are written
+in exactly three places: `transferToRecipeChat` (initial set), `parseRecipeFromAIResponse`
+(carry-forward or clear — see below), and `onUpdateRecipe`'s re-anchor step (after a
+successful write). There is no path where one survives without the other; do not
+introduce one.
+
+**Anchor severs on dish drift (data-loss fix).** Every AI turn wholesale-replaces
+`title`/`description`/`ingredients`/`steps` with no field-level merge. Inside
+`parseRecipeFromAIResponse`, the newly-parsed title is compared against `sourceTitle`
+— case-insensitive, trimmed, **exact match only** (deliberately no fuzzy matching, no
+ingredient-overlap heuristic, no AI call). On a match, `sourceId`/`sourceTitle` carry
+forward unchanged. On a mismatch, both are dropped together, so the save sheet falls
+back to the standard save flow instead of offering an overwrite. This is the fix for
+a production bug where building an unrelated dish mid-chat (e.g. asking about a saved
+"Spanish Pork" recipe, having the AI build a "Broccolini" dish instead) let the user
+tap "Overwrite" and destroy the original recipe — the button named one dish, the
+write target was a different row. **Design bias, do not "improve": intentionally
+biased toward severing.** A false "new dish" (anchor lost when it was really the same
+dish) is a harmless inconvenience — the user sees "save as new" instead of "update."
+A false "evolution" (anchor kept for a genuinely different dish) is permanent data
+loss. The exact-match rule is deliberate, not lazy.
 
 At save: if `sourceId` is present, the save sheet shows a two-button choice (Update
-[name] / Save as new) instead of the category picker; absent → normal flow. **Update**
-overwrites in place via `updateSavedRecipe`, keeps categories, re-anchors `sourceId`
-to the same recipe. **Save-as-new** inserts via `saveRecipe` and deliberately leaves
-`sourceId` on the original base, so multiple siblings can be spun off one base in a
-single chat (swappable F&F bet). Edge case: origin deleted mid-chat → silent fallback
-to save-as-new.
+[name] / Save as new) instead of the category picker; absent → normal flow. The
+**Update** button label reads `sourceTitle` (the recipe that would be destroyed), not
+`currentRecipe.title` (the recipe being written) — label and write target now always
+name the same row. Tapping Update opens a confirmation modal (built on the existing
+centered-card confirm pattern used by delete/refresh) before anything is written:
+different names → "Replace X with Y? X will be permanently overwritten. This can't be
+undone."; same name → "Overwrite X? Your saved X will be permanently replaced with
+this version. This can't be undone." Confirm proceeds with the existing
+`onUpdateRecipe` write; Cancel/backdrop returns to the choice sheet, writing nothing.
+`onUpdateRecipe` overwrites in place via `updateSavedRecipe`, keeps categories, and
+re-anchors `sourceId`/`sourceTitle` to the recipe as just written. `sourceTitle` is
+kept strict DB-truth — it is intentionally NOT synced when a save-as-new sibling is
+renamed, so the confirm modal can never claim a false title match. **Save-as-new**
+inserts via `saveRecipe` and deliberately leaves `sourceId`/`sourceTitle` on the
+original base, untouched by this fix, so multiple siblings can be spun off one base in
+a single chat (swappable F&F bet). Edge case: origin deleted mid-chat → silent
+fallback to save-as-new.
 
 **`updateSavedRecipe` is a KNOWN TROUBLE FUNCTION — shared by BOTH the chat-edit
 Update path AND AddYourOwn (Write Your Own) edit. Any change to it touches both flows
@@ -292,6 +350,188 @@ control); empty-array gate (`&& length > 0`) so a delete never fires without an
 insert; post-update fetch reads category via the `recipe_categories` join (there is
 no `recipes.category` column). `onUpdateRecipe` lives inside Cook — use only Cook
 props there, never App-level setters (that scope error caused a duplicate-on-save).
+
+---
+
+## Recipe Photos
+
+Live in production. Each recipe carries a single user-uploaded hero image.
+Schema: `recipes.photo_url` (text, nullable — pre-existing column, previously unused)
+and `recipes.photo_version` (int4, not null, default 0, added for this feature).
+
+**Storage path conventions (`recipe-photos` bucket) — load-bearing:**
+- Live recipe photo: `{userId}/{recipeId}.jpg` — overwritten in place on replace
+  (`upsert: true`).
+- Frozen share copy: `{userId}/share-{token}.jpg` — an immutable byte-copy made at
+  share time, one per share. See "Recipe Sharing" below for how it's produced.
+
+**BINDING INVARIANT: the share copy's immutability rests entirely on path
+separation.** `uploadRecipePhoto` and `removeRecipePhoto` may ONLY ever construct
+`{userId}/{recipeId}.jpg` (bare UUID filename); `deleteSavedRecipe` touches no
+storage at all. No mutating function may ever construct a `share-`-prefixed
+filename. Violating this breaks the guarantee that a shared recipe's photo never
+changes or disappears.
+
+**`photo_version` exists solely for cache-busting** and is appended to displayed
+image `src`s as `?v={photo_version}`. It is incremented on every upload and every
+remove, from a freshly-read DB value (not a client-held one, to avoid racing a
+concurrent tab). **Never replace this with a render-time value like `Date.now()`**
+— that would change the URL on every render, defeat browser caching, and burn
+egress for no benefit.
+
+**Public bucket ≠ SDK access permitted (general Supabase Storage truth, not just
+photos).** A bucket's "public" flag only affects anonymous `GET` requests to the
+`/object/public/...` CDN URL, which bypass RLS entirely. It does **not** exempt the
+storage SDK's `.download()` / `.upload()` / `.remove()` / `.list()` calls, which
+always enforce `storage.objects` RLS regardless of the bucket's public flag. Proving
+a public URL loads anonymously does not prove an authenticated SDK call will
+succeed. The `recipe-photos` bucket's write policies are owner-scoped (the object
+path must start with the caller's own user-id folder) — this is why the share copy
+lives at `{userId}/share-{token}.jpg` rather than a bucket-root `shares/` prefix; a
+top-level prefix silently violates the INSERT policy and fails with no visible
+error unless the caller checks for one.
+
+**Crop step precedes compression.** Every photo upload — first upload AND
+replace — routes through a full-screen crop step before compression/upload; this is
+unconditional, not a picker-time option. Flow: `handlePhotoFileInputChange` holds
+the chosen `File` and opens `PhotoCropOverlay` → user repositions/zooms → Confirm
+calls `handlePhotoSelected(file, cropRect)` → `uploadRecipePhoto` →
+`compressImageFile(file, cropRect)`. Cancel discards everything and leaves the
+recipe completely unchanged. The crop is baked in — applied client-side inside the
+existing single-pass canvas draw in `compressImageFile`; no originals are retained,
+no crop coordinates are persisted, no schema change. Re-cropping means
+re-uploading (replace already supports this). `PhotoCropOverlay` renders a fixed
+4:3 frame at the same corner radius the hero renders at (see below) — the frame IS
+the preview: what the user confirms is exactly what renders on the card and the
+share. Because the stored image is already 4:3, `object-fit: cover` on the render
+surfaces is effectively a no-op. Zoom is a slider, not pinch. Pan/zoom clamping
+guarantees the frame is never under-covered: minimum zoom is the "image fully
+covers frame" floor (`max(frameW/naturalW, frameH/naturalH)`), and pan bounds are
+re-clamped on every pan AND zoom change. Pinch could be added later without
+touching the pan/zoom → `cropRect` plumbing.
+
+**`CropRect` is fractional, not absolute pixels.** `{ fx, fy, fWidth, fHeight }` are
+fractions (0–1) of the image they're applied to, not absolute source pixels. This is
+load-bearing: the crop overlay computes the fraction against a downscaled preview,
+while `compressImageFile` applies it against the original full-resolution bitmap.
+Because each axis's fraction is multiplied by that same axis's real dimension, the
+mapping is correct at any resolution and requires no scale factor. **Do not convert
+`CropRect` back to absolute pixel coordinates** — that would reintroduce a
+preview-vs-original dependency. Only three files touch it: `image.ts`
+(defines/consumes), `App.tsx` (produces), `data.ts` (opaque passthrough).
+
+**Crop preview decodes a downscaled bitmap, not the raw file.** The crop overlay's
+`<img>` does not point at the raw `File` object-URL — it decodes a resized preview
+via `createImageBitmap(file, { resizeWidth: CROP_PREVIEW_MAX_EDGE })` (1200,
+matching `image.ts`'s `MAX_EDGE`) and displays that instead. Pointing the `<img>` at
+a raw multi-megapixel file caused a ~4.9 second decode before the crop screen
+appeared; the downscaled decode cut this to ~168ms (measured on-device, same
+3.41MB file). `compressImageFile` at Confirm still decodes the original at full
+resolution, so crop fidelity and output quality are unaffected. Do not "simplify"
+the preview back to the raw file — the decode cost is the reason this exists.
+
+**Gotcha: Tailwind Preflight clamps `<img>` width.** Tailwind v4's Preflight
+(pulled in via `@import "tailwindcss"` in `src/styles.css`) includes a global
+`img, video { max-width: 100%; height: auto; }`. Per the CSS spec, `max-width`
+clamps the used width regardless of an inline `width` declaration — inline styles
+only win property-vs-property, they cannot unset a stylesheet's `max-width`. Every
+other `<img>` in the app is sized `width: 100%` inside a fixed container and never
+requests more than its box, so this rule had never had anything to clip. The crop
+preview is the first image in the app that intentionally renders wider than its
+container (that's what zooming in means), and the cap silently limited its rendered
+width while the JS offset math positioned it as though uncapped — producing a
+growing gap on the right as zoom increased. Fixed with `maxWidth: "none"` inline on
+that element only. Note the asymmetry: Preflight has no `max-height` rule, so the
+bug was width-only — which is what identified it. Any future UI that needs an
+element to exceed its container (pan/zoom viewers, feed image work) must account
+for this.
+
+**Client-side compression (`src/tipsy/image.ts`).** `compressImageFile()` caps the
+longest edge at 1200px (never upscales smaller images), re-encodes as JPEG at 0.8
+quality, single-pass with no iterative size targeting. Uses the native
+`createImageBitmap` — no external compression dependency. Takes an optional
+`cropRect` (see above), applied in the same single-pass canvas draw as the resize.
+Throws a typed `UnsupportedImageError` when the browser can't decode the file,
+naming HEIC specifically when the failure looks HEIC-shaped (by MIME type or
+`.heic`/`.heif` extension).
+
+**Hero corner radius is 30** (was 16) in exactly two places: the RecipeCard hero
+and the public share route (`r.$token.tsx`). The recipe-list row thumbnail remains
+`borderRadius: 10` — a deliberately distinct, icon-sized treatment, intentionally
+out of scope. There is no shared radius constant; all three are independent inline
+values.
+
+**RecipeCard header row is share / edit / camera / cart** (in that order; cart only
+when the recipe has ingredients). The trash icon was removed from this row — delete
+is reachable only via card → Edit (pencil) → "Delete recipe" → confirm, inside
+`AddYourOwn.tsx`. `RecipeCard`'s own `confirmDelete` state and modal were removed as
+dead code, and `App.tsx` no longer imports `deleteSavedRecipe`; `deleteSavedRecipe`
+itself is unchanged in `data.ts`, with its one remaining caller in
+`AddYourOwn.tsx`. The camera control is context-aware: no photo → tapping it opens
+the file picker directly; photo present → tapping it opens a small dropdown
+(Replace / Remove), with Remove behind a confirm. Either path (direct pick or
+Replace) opens the crop overlay next, before anything uploads — see "Crop step
+precedes compression" above.
+
+---
+
+## Recipe Sharing
+
+Live in production. Shared recipe links are frozen snapshots — captured at share
+time, unaffected by later edits or deletion of the live recipe — following the
+`grocery_list_shares` model (see Grocery List) rather than the old live-pointer
+model. Rationale: shared artifacts are gifts, not growth mechanics; a gift that can
+be silently swapped or retracted isn't a gift.
+
+**`recipe_shares`** (dashboard-only, no in-repo migration, per existing convention):
+`id`, `user_id`, `share_token` (unique), `recipe` (JSONB snapshot), `created_at`. RLS:
+owner select/insert + a permissive anon select — mirrors `grocery_list_shares`
+exactly.
+
+**Key functions (`src/tipsy/data.ts`):** `shareRecipeSnapshot(recipeId)` reads the
+live recipe + ingredients, runs every step through `normalizeStep()` **at capture
+time** (so the frozen blob always holds `{title, instruction}` objects, never a mix
+of legacy plain-string and object steps), mints a fresh `crypto.randomUUID()` token
+per call — no reuse, unlike the legacy `shareRecipe` — and writes one `recipe_shares`
+row. `getRecipeSnapshotByToken(token)` is the anon read for the public route, gated
+entirely by RLS (no `user_id` filter).
+
+**Snapshot shape:** `title`, `description`, `ingredients: {name, qty}[]`,
+`steps: {title, instruction}[]` (normalized), `cookTime`, `serves`,
+`photoUrl: string | null`. No cook history / `cook_events` — deliberate; cook data is
+owner-only and was never shown on the public route, and stays that way.
+
+**Photo is a byte-copy, not a URL reference (Recipe Photos build).**
+`shareRecipeSnapshot` mints the token first, then — only if the recipe has a photo —
+downloads the live photo bytes via the storage SDK and re-uploads them to
+`{userId}/share-{token}.jpg` (see "Recipe Photos" above for why this path shape,
+not a bucket-root prefix), storing that path's public URL as `photoUrl` in the
+snapshot. Each share gets its own independent copy — sharing the same recipe twice
+produces two separate photo files, not two references to one. This is what makes
+the guarantee hold: the owner can later delete the recipe, remove the photo, or
+replace it with a different one, and every previously-shared link keeps showing the
+exact photo that existed at the moment it was shared. The public route
+(`r.$token.tsx`) renders the hero photo before the title, gated on
+`photoUrl && !photoFailed`, with an `onError` handler that sets `photoFailed` and
+collapses the hero block entirely — no broken-image icon — on load failure. The
+legacy live-share path (`shareRecipe` / `getPublicRecipeByToken`) does not carry
+photos and was deliberately left untouched.
+
+**Two token namespaces, one resolution order.** `shareRecipeSnapshot` never reads or
+reuses a `recipes.share_token` — it only ever mints a fresh UUID into `recipe_shares`.
+This means a given token can only ever resolve in one table in practice (independent
+UUID v4 draws), which is what makes the public route's try-snapshot-then-fall-back
+ordering (see Architecture / SSR) safe: it can't accidentally serve the wrong table's
+row for a given token.
+
+**Migration path is a fallback, not a backfill.** No existing share links were
+migrated into `recipe_shares`. `RecipeCard`'s share button (`handleShare`) now calls
+`shareRecipeSnapshot` instead of the legacy `shareRecipe`, so every *new* share from
+this point on is a frozen snapshot. Pre-existing tokens (e.g. founder/wife/brother
+links minted before this change) keep resolving via the untouched legacy
+`shareRecipe`/`getPublicRecipeByToken` path — those live-pointer links still mutate
+if the underlying recipe is edited or deleted; only shares minted after this change
+are frozen. There is no plan to backfill old tokens into snapshots.
 
 ---
 
@@ -452,9 +692,9 @@ step has no title (not `title=""`). Title escapes `&` → `&amp;` then `"` →
 `&quot;`, in that order; the parser reverses both (`&quot;` → `"` then `&amp;` →
 `&`). Parser regex: `/<step(?:\s+title="([^"]*)")?>(.*?)<\/step>/g` — matches both
 titled and untitled steps, always producing `{ title, instruction }` (title `''`
-when absent). This parsing logic is duplicated across the three former
-system-prompt call sites (see AI Layer) — parsing was not part of that
-consolidation, only the prompt-building was.
+when absent). This step-parsing regex lives inside `parseRecipeFromAIResponse` (see
+AI Layer) — the single consolidated recipe-parse function used by all three former
+per-call-site parse blocks.
 
 **Step-title backfill.** `backfillStepTitles()` (data.ts) is a one-time, idempotent
 backfill that titles existing plain-string steps via an isolated JSON-in/JSON-out
@@ -500,5 +740,6 @@ code defects).
 
 - **`updateSavedRecipe` shared by two flows** — test both the chat Update path and AddYourOwn whenever it changes (see Update vs Save-as-New).
 - **Schema is dashboard-only** — no in-repo migrations. Cheap to fix now (export to a migration file), expensive to reconstruct later.
-- ~31 pre-existing TypeScript errors across app files (unrelated to recent work) — batch into one cleanup pass someday.
+- A standing baseline of pre-existing TypeScript errors unrelated to feature work. Re-count with `bunx tsc --noEmit` before ever claiming a change introduced zero new errors — do not trust a documented figure; this count has drifted (31 → 40) and will again.
 - Reusable loading-spinner / "Updating…" pattern from the grocery work is a good candidate to reuse wherever async waits show poor feedback (e.g. Occasions/Menus load flash).
+- **`deleteSavedRecipe` swallows errors.** On failure it logs to `console.error` and returns — it never throws or returns a status. Its one caller (`AddYourOwn.tsx`) doesn't check a return value either, so a failed delete still closes the confirm modal and navigates away as if it had succeeded. Known, deliberately not fixed; out of scope if encountered incidentally — only fix it as its own deliberate task.
