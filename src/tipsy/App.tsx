@@ -1607,6 +1607,31 @@ function Categories({ push, back, isTabRoot, ensureRecipesLoaded }: { push: (s: 
   );
 }
 
+/* ---------------- Recipe List Search ---------------- */
+// Shared by Recipes and AllRecipes. matchedFields is computed but not yet
+// surfaced in the UI — it exists so ranking/highlighting can be added later
+// without redoing the matching logic.
+type RecipeSearchField = "title" | "description" | "ingredients" | "steps" | "notes";
+
+function searchRecipes(recipes: Recipe[], query: string): { recipe: Recipe; matchedFields: Set<RecipeSearchField> }[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const results: { recipe: Recipe; matchedFields: Set<RecipeSearchField> }[] = [];
+  for (const recipe of recipes) {
+    const matchedFields = new Set<RecipeSearchField>();
+    if (recipe.title?.toLowerCase().includes(q)) matchedFields.add("title");
+    if (recipe.description?.toLowerCase().includes(q)) matchedFields.add("description");
+    if ((recipe.ingredients ?? []).some((ing) => ing.name.toLowerCase().includes(q))) matchedFields.add("ingredients");
+    if ((recipe.steps ?? []).some((step) => {
+      const { title, instruction } = normalizeStep(step);
+      return title.toLowerCase().includes(q) || instruction.toLowerCase().includes(q);
+    })) matchedFields.add("steps");
+    if ((recipe.cookEvents ?? []).some((e) => (e.note ?? "").toLowerCase().includes(q))) matchedFields.add("notes");
+    if (matchedFields.size > 0) results.push({ recipe, matchedFields });
+  }
+  return results;
+}
+
 /* ---------------- Recipes List ---------------- */
 function Recipes({
   categoryKey,
@@ -1627,12 +1652,21 @@ function Recipes({
 }) {
   const recipes = recipesByCategory[categoryKey] ?? [];
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!recipesByCategory[categoryKey]) {
       ensureRecipesLoaded?.(categoryKey, categoryLabel);
     }
   }, [categoryKey, recipesByCategory[categoryKey], categoryLabel, ensureRecipesLoaded]);
+
+  const trimmedQuery = searchQuery.trim();
+  const filteredRecipes = useMemo(() => {
+    if (!trimmedQuery) return recipes;
+    return searchRecipes(recipes, trimmedQuery).map((m) => m.recipe);
+  }, [recipes, trimmedQuery]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -1657,22 +1691,90 @@ function Recipes({
             </div>
           </div>
         </div>
-        <button
-          onClick={() => setConfirmDelete(true)}
-          aria-label="Delete category"
-          style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="3 6 5 6 21 6" />
-            <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-            <path d="M10 11v6M14 11v6" />
-          </svg>
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <button
+            onClick={() => setSearchOpen((v) => !v)}
+            aria-label="Search recipes"
+            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="7" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+          </button>
+          <button
+            onClick={() => setConfirmDelete(true)}
+            aria-label="Delete category"
+            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+              <path d="M10 11v6M14 11v6" />
+            </svg>
+          </button>
+        </div>
       </div>
+
+      {/* Search bar */}
+      {searchOpen && (
+        <div style={{ padding: "0 20px 10px", flexShrink: 0 }}>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8,
+            background: "rgba(35,60,0,0.06)",
+            border: "1px solid rgba(35,60,0,0.12)",
+            borderRadius: 10,
+            padding: "10px 14px",
+          }}>
+            <input
+              ref={searchInputRef}
+              autoFocus
+              className="recipe-search-input"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="search this category"
+              style={{
+                flex: 1, background: "transparent", border: "none", outline: "none",
+                fontFamily: "Inter, sans-serif", fontSize: 16, fontWeight: 400, color: "#233C00",
+              }}
+            />
+            <button
+              onClick={() => {
+                if (searchQuery) {
+                  setSearchQuery("");
+                  searchInputRef.current?.focus();
+                } else {
+                  setSearchOpen(false);
+                }
+              }}
+              aria-label={searchQuery ? "Clear search" : "Close search"}
+              style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", flexShrink: 0 }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+          <style>{`.recipe-search-input::placeholder { color: rgba(35,60,0,0.3); }`}</style>
+        </div>
+      )}
 
       {/* Recipe List */}
       <div style={{ flex: 1, overflowY: "auto", padding: "4px 20px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-        {recipes.map((r, i) => (
+        {trimmedQuery && filteredRecipes.length === 0 && (
+          <div style={{
+            fontFamily: "Fraunces, serif",
+            fontStyle: "italic",
+            fontSize: 14,
+            color: "rgba(35,60,0,0.4)",
+            textAlign: "center",
+            padding: "40px 0",
+          }}>
+            nothing matches "{trimmedQuery}" — try another word.
+          </div>
+        )}
+        {filteredRecipes.map((r, i) => (
           <div
             key={i}
             onClick={() => push({ name: "recipe", recipe: r, categoryLabel, categoryKey })}
@@ -1881,6 +1983,9 @@ function AllRecipes({
   // Resets to "Recently added" on every visit — deliberately not persisted.
   const [sortMode, setSortMode] = useState<SortMode>("added");
   const [sortSheetOpen, setSortSheetOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!recipesByCategory["__all__"]) {
@@ -1888,8 +1993,14 @@ function AllRecipes({
     }
   }, [recipesByCategory["__all__"], ensureRecipesLoaded]);
 
+  const trimmedQuery = searchQuery.trim();
+  const filteredRecipes = useMemo(() => {
+    if (!trimmedQuery) return recipes;
+    return searchRecipes(recipes, trimmedQuery).map((m) => m.recipe);
+  }, [recipes, trimmedQuery]);
+
   const sortedRecipes = useMemo(() => {
-    const list = [...recipes];
+    const list = [...filteredRecipes];
     if (sortMode === "alpha") {
       list.sort((a, b) => a.title.localeCompare(b.title));
     } else if (sortMode === "cooked") {
@@ -1907,7 +2018,7 @@ function AllRecipes({
       list.sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
     }
     return list;
-  }, [recipes, sortMode]);
+  }, [filteredRecipes, sortMode]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative" }}>
@@ -1927,33 +2038,101 @@ function AllRecipes({
             All Recipes ({recipes.length})
           </div>
         </div>
-        <button
-          onClick={() => setSortSheetOpen(true)}
-          aria-label="Sort recipes"
-          style={{
-            background: "transparent",
-            border: "none",
-            padding: 0,
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            fontFamily: "Inter, sans-serif",
-            fontSize: 12,
-            fontWeight: 500,
-            color: "rgba(35,60,0,0.55)",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {SORT_LABELS[sortMode]}
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.55)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <button
+            onClick={() => setSearchOpen((v) => !v)}
+            aria-label="Search recipes"
+            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="7" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+          </button>
+          <button
+            onClick={() => setSortSheetOpen(true)}
+            aria-label="Sort recipes"
+            style={{
+              background: "transparent",
+              border: "none",
+              padding: 0,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              fontFamily: "Inter, sans-serif",
+              fontSize: 12,
+              fontWeight: 500,
+              color: "rgba(35,60,0,0.55)",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {SORT_LABELS[sortMode]}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.55)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+        </div>
       </div>
+
+      {/* Search bar */}
+      {searchOpen && (
+        <div style={{ padding: "0 20px 10px", flexShrink: 0 }}>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8,
+            background: "rgba(35,60,0,0.06)",
+            border: "1px solid rgba(35,60,0,0.12)",
+            borderRadius: 10,
+            padding: "10px 14px",
+          }}>
+            <input
+              ref={searchInputRef}
+              autoFocus
+              className="recipe-search-input"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="search your recipes"
+              style={{
+                flex: 1, background: "transparent", border: "none", outline: "none",
+                fontFamily: "Inter, sans-serif", fontSize: 16, fontWeight: 400, color: "#233C00",
+              }}
+            />
+            <button
+              onClick={() => {
+                if (searchQuery) {
+                  setSearchQuery("");
+                  searchInputRef.current?.focus();
+                } else {
+                  setSearchOpen(false);
+                }
+              }}
+              aria-label={searchQuery ? "Clear search" : "Close search"}
+              style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", flexShrink: 0 }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+          <style>{`.recipe-search-input::placeholder { color: rgba(35,60,0,0.3); }`}</style>
+        </div>
+      )}
 
       {/* Recipe List — same row rendering as the category view */}
       <div style={{ flex: 1, overflowY: "auto", padding: "4px 20px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+        {trimmedQuery && sortedRecipes.length === 0 && (
+          <div style={{
+            fontFamily: "Fraunces, serif",
+            fontStyle: "italic",
+            fontSize: 14,
+            color: "rgba(35,60,0,0.4)",
+            textAlign: "center",
+            padding: "40px 0",
+          }}>
+            nothing matches "{trimmedQuery}" — try another word.
+          </div>
+        )}
         {sortedRecipes.map((r) => (
           <div
             key={r.savedId}
