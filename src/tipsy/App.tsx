@@ -1654,6 +1654,7 @@ function Recipes({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -1721,10 +1722,9 @@ function Recipes({
         <div style={{ padding: "0 20px 10px", flexShrink: 0 }}>
           <div style={{
             display: "flex", alignItems: "center", gap: 8,
-            background: "rgba(35,60,0,0.06)",
-            border: "1px solid rgba(35,60,0,0.12)",
-            borderRadius: 10,
-            padding: "10px 14px",
+            background: "transparent",
+            borderBottom: `1px solid ${searchFocused ? "rgba(35,60,0,0.3)" : "rgba(35,60,0,0.12)"}`,
+            padding: "8px 0 10px",
           }}>
             <input
               ref={searchInputRef}
@@ -1732,7 +1732,9 @@ function Recipes({
               className="recipe-search-input"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="search this category"
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
+              placeholder="search recipes"
               style={{
                 flex: 1, background: "transparent", border: "none", outline: "none",
                 fontFamily: "Inter, sans-serif", fontSize: 16, fontWeight: 400, color: "#233C00",
@@ -1985,6 +1987,7 @@ function AllRecipes({
   const [sortSheetOpen, setSortSheetOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -2080,10 +2083,9 @@ function AllRecipes({
         <div style={{ padding: "0 20px 10px", flexShrink: 0 }}>
           <div style={{
             display: "flex", alignItems: "center", gap: 8,
-            background: "rgba(35,60,0,0.06)",
-            border: "1px solid rgba(35,60,0,0.12)",
-            borderRadius: 10,
-            padding: "10px 14px",
+            background: "transparent",
+            borderBottom: `1px solid ${searchFocused ? "rgba(35,60,0,0.3)" : "rgba(35,60,0,0.12)"}`,
+            padding: "8px 0 10px",
           }}>
             <input
               ref={searchInputRef}
@@ -2091,7 +2093,9 @@ function AllRecipes({
               className="recipe-search-input"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="search your recipes"
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
+              placeholder="search recipes"
               style={{
                 flex: 1, background: "transparent", border: "none", outline: "none",
                 fontFamily: "Inter, sans-serif", fontSize: 16, fontWeight: 400, color: "#233C00",
