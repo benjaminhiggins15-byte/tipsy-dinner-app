@@ -301,11 +301,22 @@ both valid — string support must never be removed.
 **`normalizeStep()` (data.ts) is a load-bearing contract.** Takes a `RecipeStep`,
 returns `{ title, instruction }`, coercing a plain string to `{ title: '',
 instruction: step }`. Every step reader MUST route through it — a new reader that
-skips it will render `[object Object]`. Five readers exist today, all compliant:
-Recipe Card STEPS tab (App.tsx — collapsible accordion rows); `ExpandedRecipeOverlay`
-(App.tsx — the Recipe Preview sheet from the Build mini-player, flat, title
-prepended); `AddYourOwn.tsx` and its `PreviewCard` (Write Your Own editor); `src/routes/r.$token.tsx` (public shared route — flat, title prepended, deliberately
-not collapsible); `recipeToXML` (App.tsx — serializes steps for the AI).
+skips it will render `[object Object]`. The docs previously said "five readers";
+that count was wrong even at the time (it collapsed two components into one
+bullet) and had drifted further since. As of Recipe Search, there are seven
+call-site functions/components, all compliant: Recipe Card STEPS tab (App.tsx —
+collapsible accordion rows); `ExpandedRecipeOverlay` (App.tsx — the Recipe
+Preview sheet from the Build mini-player, flat, title prepended); `AddYourOwn.tsx`'s
+`startEditStep` and its inline step-list render, plus its separate `PreviewCard`
+component (Write Your Own editor — two components); `src/routes/r.$token.tsx`
+(public shared route — flat, title prepended, deliberately not collapsible);
+`recipeToXML` (App.tsx — serializes steps for the AI); `shareRecipe` (data.ts —
+the legacy recipe-share snapshot builder; present since Recipe Sharing shipped
+but never previously listed here); and now `searchRecipes` (App.tsx — the Recipe
+Search matcher, see below), which makes this contract more load-bearing than
+before, not less. **Do not trust this count as fixed — re-grep for
+`normalizeStep(` if a change needs precision**, the same discipline CLAUDE.md
+now applies to the TypeScript error count.
 
 **Two surfaces diverge deliberately.** In-app STEPS tab: collapsible, collapsed by
 default, with a Fraunces-italic hint line ("Tap each step for details") shown only
@@ -397,8 +408,11 @@ the nested events; recipes with no cook events fall to the bottom, ordered by
 recently-added among themselves. Sort does not persist — resets to recently-added
 each visit.
 
-**Not built (logged):** search (the bigger half, its own design question; header
-layout left repeatable for it); a per-row category label (deferred — a
+**Search is built** — see "Recipe Search" below (it landed after this section was
+first written; the header layout this section left repeatable for it is what
+search's header icon now occupies).
+
+**Not built (logged):** a per-row category label (deferred — a
 shared-row-height / list-density decision to be mocked and judged by eye).
 
 **Known ambiguity (logged, not fixed):** a recipe in multiple categories is de-duped
@@ -409,3 +423,168 @@ has a fallback. Revisit only if it reads oddly in real use.
 **Header change:** the duplicate top-bar "add category" button was removed; the
 embedded dashed card is now the only add affordance and was moved to first position
 in the category grid so it doesn't drift below the fold as the library grows.
+
+---
+
+## Recipe Search
+
+Live in production (merged to main 2026-07-23). Client-side, type-as-you-go
+search on the two screens that list recipes — `Recipes` (inside a category) and
+`AllRecipes` (View All). Both components live in `App.tsx`; there is no shared
+list component between them, so search was hand-added to each.
+
+**Scope follows the page (closed decision).** Inside a category, search is
+scoped to that category's recipes only. On View All, it covers the whole
+library. There is no mode switch and no scope toggle. To search everything, the
+user searches from View All.
+
+**Deliberately NOT on the categories screen (closed decision).** ~10 category
+cards is nothing to sift through, and the use case imagined there ("mexican,"
+"chinese") is browse-by-attribute, not search — a tags problem, not a search
+one. Do not add search there.
+
+**Searchable fields are deliberately broad:** title, description, ingredient
+names, steps (both the step title and the instruction, via `normalizeStep()`),
+and cook-event notes. Titles-only was rejected as too narrow — e.g. searching
+"grill" should surface a recipe that involves grilling even if no recipe is
+titled "grill." Cook notes are included so a user can find "that time I noted
+it was too salty."
+
+**Steps must route through `normalizeStep()`.** Steps are cached raw as the
+`RecipeStep` union — the one array field not pre-normalized at cache-build time
+(unlike ingredients and cook events, which are already flattened/camelCased in
+the cache). The matcher iterates `recipe.steps ?? []` and calls
+`normalizeStep()` per element, checking both the returned `title` and
+`instruction`. **Never `JSON.stringify` the steps array to search it** — that
+matches on JSON punctuation and key names, not recipe content.
+
+**No new queries, no data-layer changes.** All data comes from the existing
+`recipesByCategory` cache, populated by `getSavedRecipesForCategory` /
+`getSavedRecipesAll` (unchanged). That cache already holds `title`,
+`description`, flattened `ingredients`, raw `steps`, and `cookEvents` including
+`note` text — everything search needs was already there.
+
+**Matching.** Case-insensitive substring match on the whole query as typed
+against each field above. No token splitting, no fuzzy matching, no ranking.
+
+**`matchedFields` — computed but not surfaced.** The shared matcher,
+`searchRecipes(recipes, query)` (App.tsx, module-level, directly above the
+`Recipes` component), returns `{ recipe, matchedFields: Set<RecipeSearchField>
+}[]`, where `RecipeSearchField` is `"title" | "description" | "ingredients" |
+"steps" | "notes"`. Both screens currently discard `matchedFields` and use only
+`.recipe`. This exists so that ranking (e.g. a title match outranking a
+passing mention buried in step 7) is a later addition rather than a rebuild.
+**Do not remove `matchedFields` as dead code** — it is deliberately unused
+today, not unused forever.
+
+**Ordering.** On View All, filter first, then sort: search is folded into the
+input of the existing `sortedRecipes` `useMemo` (a new `filteredRecipes`
+`useMemo` sits upstream of it), so the sort control operates on the filtered
+set and the user's sort choice persists through typing and through clearing —
+search and sort are independent state. `Recipes` has no sort control and
+previously had no memoization at all (`recipesByCategory[categoryKey] ?? []`
+was used directly); a `filteredRecipes` `useMemo` was introduced there for
+search, net-new for that component.
+
+**Interaction.** A search icon sits in the header, top right — alongside the
+existing delete-category trash icon on `Recipes`, alongside the existing sort
+control on `AllRecipes`. Tapping it expands an inline bar as a new sibling
+between the header and the scrolling list div, autofocusing on open. The bar's
+X button does double duty: with text present, it clears the text and keeps
+focus in the input; when the bar is already empty, it closes the bar entirely.
+Query text and the open/closed state do not persist across screen visits —
+same as `AllRecipes`'s sort mode, which already resets to "Recently added" on
+every visit for the same reason (both are local `useState`, reset on remount).
+
+**Empty state.** Renders only when a search query is active and yields zero
+results — not for a genuinely empty category or an empty library (neither
+screen has an empty-state render for that today, and none was added as part of
+this feature).
+
+**Accepted v1 weak spot — do not pre-solve.** Broad substring matching means
+common words match widely: "oil" will hit nearly every recipe, "chicken" will
+match anything that merely lists chicken stock as an ingredient. Recipe text is
+expected to be signal-dense enough that this is tolerable in practice.
+Refinement — ranking (using the already-computed `matchedFields`), tags, or
+filters — is deliberately later work, contingent on how this reads in real use.
+Do not add ranking, highlighting, token splitting, or fuzzy matching
+preemptively.
+
+---
+
+## Conversational System Prompt — Elevation & Discovery (buildSystemPrompt)
+
+Merged to main 2026-07-25. Three additions to `buildSystemPrompt()`, all edits to
+the single non-triplicated definition, verified on-device before merge.
+
+**Culinary posture block.** Placed immediately after the persona framing so it
+colors both brainstorm and recipe output. Instruction: default to the best version
+of the dish actually asked for — elevate within the request, never substitute
+something fancier (a grilled cheese stays a grilled cheese, lifted by a small smart
+touch). Always on, calibrated to a user who takes cooking seriously. Keep it
+achievable — a couple of high-leverage moves over one fussy step; method
+demystified like a friend showing you, not a chef performing. Felt goal: the cook
+is proud of what they made, especially cooking for others. Why it's about the food,
+not the voice: the elevation axis was deliberately kept off tone/formatting
+(protected, separately-owned territory — see the formatting house style in AI
+Layer in CLAUDE.md); if it ever reads sappy, the emotional closing line is the
+first cut.
+
+**Cuisine-direction discovery.** Replaces the brainstorm question rule. When the
+ask is broad, establish the cuisine / culinary world first — it narrows
+ingredients, technique, the whole idea space. A named protein does NOT settle this
+("something with chicken" spans every cuisine → ask which world). Exceptions: the
+ask already implies a direction, or the palate profile clearly points one way →
+don't ask, just go. Once there's a direction, it anchors the whole set — five ideas
+that cohere within one world, not five unrelated cuisines stapled to one protein
+(this anchoring rule is what fixed the "random-feeling options" symptom; the
+question-aim alone didn't). Question budget: usually one, a soft second when
+genuinely warranted, never an interview; specific asks skip straight to ideas.
+
+**Design decisions worth not re-litigating:**
+- Cuisine-first is soft-priority calibrated to the founder's estimate that cuisine
+  comes first roughly 80% of the time — a firm default, with a real out for the
+  occasion/effort-led minority.
+- The earlier "lead with cuisine unless effort/occasion" wording was removed
+  because the model hid behind the effort-led out; firmness came from deleting the
+  hatch, not adding force.
+- Named-cuisine examples were removed from the prompt text — they're attractors
+  that bias which cuisines get suggested, the same reason the grilled-cheese
+  example was cut from the posture block.
+- Protein examples were kept because a protein can't bias the cuisine reached for —
+  it only clarifies which input pattern triggers the rule.
+- Rule of thumb recorded for future edits: an example that points at the answer is
+  an attractor (cut); one that points at the trigger is a definition (keep).
+- The model still sometimes offers its own example cuisines in the question it asks
+  the user ("Italian, Mexican, Mediterranean, Asian?") — this is fine and helpful,
+  it's the model being a good friend in the moment, not the prompt attractor. Watch
+  only for the *suggestions* clustering toward named cuisines, which nothing
+  currently does.
+
+**No-superlatives voice rule.** Lives in General rules, its own line after the
+formatting run-on and before the anti-pestering rule — touching neither. Don't name
+or describe its own recipes in absolutes ("perfect," "best," "ultimate") — in title
+or handoff; let the food speak for itself. Has a deliberate anti-hedge clause ("a
+solid attempt at" is as wrong as "the perfect") — the failure mode of a
+no-superlative rule is over-correcting into false modesty, which damages the
+confident voice more than the superlative did. Target is neutral-confident. This is
+voice-adjacent (flagged during the session as the one edit touching
+formatting-house-style-protected territory) and was scoped as tightly as possible
+for that reason.
+
+**Verification method.** A fixed set of representative openers (vague → specific),
+run on the live preview under the real account, judged by eye — elevation by
+building out dishes (including a deliberately humble one), discovery by watching
+whether it asks the world on broad/protein-only asks and coheres the set, plus
+confirming already-implied-cuisine asks skip the question. Discovery is the
+behavior that needs conversation volume to trust, not a couple of screenshots.
+Founder's close: this class of tuning is discovered through real use, never
+"done" — good and improvable is the right state for a prompt surface.
+
+**Guardrails held.** Recipe XML schema / `recipeToXML`, the `normalizeStep`
+contract, `sourceId`/`sourceTitle`, photo paths/`photo_version`, Cook History local
+state, the grocery normalization call, and the chips system — all untouched.
+Recipe-context-injection architecture (system-prompt reference material, not a
+fake assistant message) untouched. Temperature left at default 1.0 deliberately.
+The AI naming call for save-as-new remains a separate logged item, not folded into
+this work.

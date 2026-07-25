@@ -23,7 +23,7 @@ cook, cooking for two and for crowds.
 One line per invariant. Full detail is stated in full exactly once, at the
 pointer named — do not duplicate it here.
 
-- **`normalizeStep()`** — every step reader routes through it (five readers); legacy plain-string steps stay supported forever. Full detail: Recipe Step Titles in FEATURE_SPECS.md.
+- **`normalizeStep()`** — every step reader routes through it (re-count callers if precision matters; do not trust a documented number — it has drifted before); legacy plain-string steps stay supported forever. Full detail: Recipe Step Titles in FEATURE_SPECS.md.
 - **`sourceId`/`sourceTitle` always move together** — set, carried, cleared, and re-anchored together; never independently. Full detail: Update vs Save-as-New below.
 - **Anchor severs on title mismatch** — case-insensitive, trimmed, exact-match only; deliberately biased toward severing, not fuzzy matching. Full detail: Update vs Save-as-New below.
 - **`CropRect` is fractional (0–1), not absolute pixels** — never convert it to absolute pixel coordinates. Full detail: Recipe Photos in FEATURE_SPECS.md.
@@ -38,6 +38,7 @@ pointer named — do not duplicate it here.
 - **Public share route is snapshot-first with a live fallback, and must stay chrome-free.** Full detail: Architecture / SSR below.
 - **Ingredients are free-text strings, not structured `{amount, unit}`** — the AI normalizes on demand where structure is needed. Full detail: Data Layer below.
 - **`clearRecipeCache` always drops `'__all__'`** — the View-all cache entry is invalidated on every mutation alongside the per-category key; never wire all-view invalidation at call sites. Full detail: View All Recipes in FEATURE_SPECS.md.
+- **`buildSystemPrompt()`** conversational-prompt behaviors are settled and hard-won — culinary posture (elevate within the ask, always on), cuisine-direction discovery (ask the "world" when broad; a named protein doesn't settle it; anchor the suggestion set to one direction), and no-superlatives voice. Reword only deliberately; treat like the Session-3 formatting house style. Full detail in FEATURE_SPECS.md.
 
 ---
 
@@ -125,6 +126,10 @@ Menus, Profile. Active = cream icon + label + small cream dot below; inactive = 
 - `recipes.photo_url` (text, nullable) predates the Recipe Photos feature and sat
   unused; `photo_version` (int4, not null, default 0) was added for that feature. See
   "Recipe Photos" in FEATURE_SPECS.md.
+- **Cache trap: `source` (`'ai' | 'manual'`) is selected from the DB in both
+  `getSavedRecipesForCategory` and `getSavedRecipesAll`, but silently dropped in
+  the `.map()` that builds the cached `Recipe` object — it never reaches
+  `recipesByCategory`. Do not assume `recipe.source` is available from the cache.
 
 **RESOLVED — cook_events initial load had no `.order()`.** The nested `cook_events`
 select in both `getSavedRecipesForCategory` and `getSavedRecipesAll` now orders
@@ -185,6 +190,24 @@ options → short framing line + bold theme labels, specifics in prose; single
 thought/judgment/yes-no → flowing prose. No headers, no bullets; asterisks only for
 bolding names/labels. Guard against both over-structuring (invented groupings) and
 under-structuring (dense paragraphs).
+
+**Conversational prompt behavior additions (elevation & discovery).**
+`buildSystemPrompt()` carries three settled behavior blocks added in a dedicated
+session — culinary posture (elevate within the ask, always on), cuisine-direction
+discovery (ask the "world" when broad; a named protein doesn't settle it; anchor the
+suggestion set to one direction), and a no-superlatives voice rule. Full detail,
+including the design reasoning behind what was cut vs. kept, lives in "Conversational
+System Prompt — Elevation & Discovery" in FEATURE_SPECS.md — reword only
+deliberately, same as the formatting house style above.
+
+The conversational call runs at temperature default 1.0 (unset in the edge
+function) — left there deliberately, not tuned; revisit only as an isolated
+one-variable dial if elevation needs more.
+
+The palate/constraints profile is injected every call but is freeform and often
+sparse; discovery is designed to lean on the asked question rather than the profile
+for that reason. A richer/structured onboarding is a latent lever — logged, not
+built; its own future session.
 
 **Grocery enrichment is a SEPARATE AI island.** `enrichGroceryItems` (data.ts) is a
 structured JSON-in/JSON-out utility with its own prompt
