@@ -42,9 +42,16 @@ logos) lives in CLAUDE.md; this file is the per-screen application of it.
 - Empty dashed card sits first in the grid (top-left), not last: cream 4% bg, dashed border cream 15%, centered plus — moved forward so it doesn't drift below the fold as the library grows
 
 ## Recipes — Recipe List
-- Header: back arrow left, category name (Inter 500 uppercase cream) + count (Inter cream 35%) stacked, no right action
+- Header: back arrow left, category name (Inter 500 uppercase cream) + count (Inter cream 35%) stacked, no right action; search icon top right (alongside the delete-category trash icon)
 - 80px rows, gap 10px, padding 0 20px, bg #2E4E08, radius 14px, padding 0 18px
 - Row: placeholder icon (44×44 rounded, cream 7% bg, cream 25% stroke) left; title (Inter 700 uppercase cream 14px) + Fraunces italic description (cream 50% 12px) + meta (Inter 500 uppercase cream 25% 10px) center; chevron right (cream 20%)
+- Search icon: inline stroked SVG, transparent bg, no border, ~20px — matches the existing header icon convention (back arrow, trash)
+- Search bar (open state): inline, a new sibling between the header and the scrolling list, aligned to the same 20px inset as the row cards below it. Underline only, not a box: transparent background, no border-radius, single bottom border — `rgba(35,60,0,0.12)` resting, `rgba(35,60,0,0.3)` on focus. Padding `8px 0 10px`. Input `fontSize: 16` (iOS zoom prevention — do not change). Placeholder "search recipes" at `rgba(35,60,0,0.3)`. Rationale: a filled, bordered input competed visually with the recipe rows, which are themselves filled rounded cards — the underline lets the rows own the card language and lets the search bar read as a threshold into the list. Changed to this after seeing the boxed version on a real phone.
+
+## Recipes — View All
+- Header: back arrow + "All Recipes (N)" (Inter 500 uppercase cream) left; search icon and sort control (label + chevron) right, in that order
+- Rows: same rendering as Recipes — Recipe List above (independently duplicated JSX, not a shared component)
+- Search icon + search bar: same treatment as Recipes — Recipe List above, positioned alongside the sort control instead of the trash icon
 
 ## Recipes — Recipe Card
 - Background: light `#FAF7F2` (not the green gradient) — text and icon strokes are dark `#233C00` / `rgba(35,60,0,…)` throughout the screen.
