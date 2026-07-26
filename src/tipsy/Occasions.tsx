@@ -181,15 +181,26 @@ export default function Occasions({ back, push, isTabRoot = false }: Props) {
         position: "relative",
         zIndex: 1,
       }}>
-        <div style={{
-          fontFamily: fontSans,
-          fontSize: 13,
-          fontWeight: 500,
-          letterSpacing: "0.1em",
-          textTransform: "uppercase",
-          color: C.text,
-        }}>
-          Menus
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button
+            onClick={back}
+            aria-label="Back"
+            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.6)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
+          <div style={{
+            fontFamily: fontSans,
+            fontSize: 13,
+            fontWeight: 500,
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+            color: C.text,
+          }}>
+            Menus
+          </div>
         </div>
         <button
           onClick={() => setShowCreate(true)}

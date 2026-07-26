@@ -19,6 +19,7 @@ import {
   IconChefHat,
   IconBook,
   IconLayoutList,
+  IconShoppingCart,
   IconUser,
   IconRefresh,
   IconMessageCircle,
@@ -235,7 +236,7 @@ type Screen =
   | { name: "profileedit"; fieldKey: "name" | "email" | "palate" | "inspiration" | "table" | "constraints" }
   | { name: "placeholder"; title: string };
 
-type TabId = "build" | "recipes" | "menus" | "profile";
+type TabId = "build" | "recipes" | "grocery" | "profile";
 
 const S: Record<string, CSSProperties> = {
   page: {
@@ -429,7 +430,7 @@ function renderScreen(
   }
 }
 
-const TAB_ORDER: TabId[] = ["build", "recipes", "menus", "profile"];
+const TAB_ORDER: TabId[] = ["build", "recipes", "grocery", "profile"];
 
 function getTabIndex(tab: TabId): number {
   return TAB_ORDER.indexOf(tab);
@@ -440,7 +441,7 @@ export default function App() {
   const [tabStacks, setTabStacks] = useState<Record<TabId, Screen[]>>({
     build: [{ name: "cook" }],
     recipes: [{ name: "categories" }],
-    menus: [{ name: "occasions" }],
+    grocery: [{ name: "grocerylist" }],
     profile: [{ name: "profile" }],
   });
 
@@ -1203,7 +1204,7 @@ export default function App() {
             setTabStacks({
               build: [{ name: "cook" }],
               recipes: [{ name: "categories" }],
-              menus: [{ name: "occasions" }],
+              grocery: [{ name: "grocerylist" }],
               profile: [{ name: "profile" }],
             });
             setActiveTab("build");
@@ -1403,7 +1404,7 @@ function BottomTabBar({ activeTab, onTabClick }: { activeTab: TabId; onTabClick:
   const tabs: { id: TabId; icon: React.ReactNode; label: string }[] = [
     { id: "build", icon: <IconChefHat size={22} stroke={1.5} />, label: "Build" },
     { id: "recipes", icon: <IconBook size={22} stroke={1.5} />, label: "Recipes" },
-    { id: "menus", icon: <IconLayoutList size={22} stroke={1.5} />, label: "Menus" },
+    { id: "grocery", icon: <IconShoppingCart size={22} stroke={1.5} />, label: "Grocery" },
     { id: "profile", icon: <IconUser size={22} stroke={1.5} />, label: "Profile" },
   ];
 
@@ -1538,8 +1539,8 @@ function Categories({ push, back, isTabRoot, ensureRecipesLoaded }: { push: (s: 
             View all
           </button>
           <button
-            onClick={() => push({ name: "grocerylist" })}
-            aria-label="Grocery list"
+            onClick={() => push({ name: "occasions" })}
+            aria-label="Menus"
             style={{
               width: 32, height: 32, borderRadius: "50%",
               border: "1px solid rgba(35,60,0,0.25)",
@@ -1548,11 +1549,7 @@ function Categories({ push, back, isTabRoot, ensureRecipesLoaded }: { push: (s: 
               cursor: "pointer",
             }}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.7)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="9" cy="21" r="1" />
-              <circle cx="20" cy="21" r="1" />
-              <path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6" />
-            </svg>
+            <IconLayoutList size={16} stroke={1.5} color="rgba(35,60,0,0.7)" />
           </button>
         </div>
       </div>
@@ -4111,19 +4108,8 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* Header */}
       <div style={{ height: 56, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button
-            onClick={back}
-            aria-label="Back"
-            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.6)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
-          </button>
-          <div style={{ fontFamily: "Inter, sans-serif", fontSize: 13, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase", color: "#233C00" }}>
-            Grocery List
-          </div>
+        <div style={{ fontFamily: "Inter, sans-serif", fontSize: 13, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase", color: "#233C00" }}>
+          Grocery List
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <button
