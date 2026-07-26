@@ -198,9 +198,29 @@ are frozen. There is no plan to backfill old tokens into snapshots.
 ## Grocery List
 
 Live in production (three phases: surface + data + dumb combining; AI enrichment;
-snapshot sharing). No 5th nav tab — entry is a cart icon on the Recipes/Categories
-header plus an "add to grocery list" button on RecipeCard. All schema hand-applied
-via the Supabase dashboard (no migration files).
+snapshot sharing). Entry point: as of 2026-07-26, Grocery is a bottom-nav tab
+(`TAB_ORDER`, App.tsx ~433 — see Navigation in CLAUDE.md), swapped in from its
+previous spot as a cart icon on the Recipes/Categories header (commit `254e0b5`);
+that header icon slot now belongs to Menus (see below). The RecipeCard "add to
+grocery list" button is unrelated to this navigation swap and untouched by it — it's
+a data-write action (adds items to the list), not a navigation entry point. All
+schema hand-applied via the Supabase dashboard (no migration files).
+
+**Menus entry point**: reached via an `IconLayoutList` icon in the same
+Recipes/Categories header slot Grocery's cart icon used to occupy (App.tsx
+~1541–1553), pushing to the Occasions screen.
+
+**Back-arrow mechanism finding (surfaced while auditing the nav swap above)**: there
+is no shared, stack-depth- or `isTabRoot`-driven back-arrow system anywhere in the
+app — every screen hardcodes its own back arrow independently. This is *why* the
+2026-07-26 swap needed a same-day follow-up fix (commit `20dfee5`): moving Occasions
+off a header-icon-only entry point onto a full screen push meant it needed its own
+back arrow added, and Grocery losing its old header-adjacent position meant its
+now-unused `back` prop/arrow had to be removed to avoid a dead affordance. Two latent
+items logged, not fixed: (1) `Occasions.tsx` defines a `BackArrow()` helper component
+that is never referenced — the file renders an inline SVG instead; (2) `isTabRoot` is
+threaded as a prop to several screens (`Categories`, `Occasions`, `Cook`) that never
+branch on it — `Profile.tsx` is the only screen that actually uses the value.
 
 **`grocery_items`** (owner-only RLS on all ops): base cols `id`, `user_id`,
 `display_name`, `quantity` (free-text), `checked`, `source_recipe_id` (provenance

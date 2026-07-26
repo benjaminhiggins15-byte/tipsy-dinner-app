@@ -36,7 +36,7 @@ logos) lives in CLAUDE.md; this file is the per-screen application of it.
 - Input bar: send button filled #1E3A42 with cream arrow
 
 ## Recipes — Categories
-- Header: "Recipes" (Inter 500 uppercase cream) left; "View all" pill (rounded rect, cream border 25%, Inter 500 12px cream) + cart icon (grocery list entry) right, in that order. The top-bar + add-category button is gone — the embedded dashed add-category card is now the only add affordance.
+- Header: "Recipes" (Inter 500 uppercase cream) left; "View all" pill (rounded rect, cream border 25%, Inter 500 12px cream) + `IconLayoutList` icon (Menus entry, pushes to Occasions — this slot previously held the grocery-list cart icon before Grocery moved onto the bottom nav) right, in that order. The top-bar + add-category button is gone — the embedded dashed add-category card is now the only add affordance.
 - 2×4 grid, gap 12px, padding 0 20px
 - Cards: bg #2E4E08, radius 16px, padding 16px. Tabler icon top-left (cream 20%, 32px), count bottom (Inter 11px cream 40%), title bottom (Inter 700 uppercase cream, letter-spacing 0.08em, 15px)
 - Empty dashed card sits first in the grid (top-left), not last: cream 4% bg, dashed border cream 15%, centered plus — moved forward so it doesn't drift below the fold as the library grows
@@ -97,7 +97,7 @@ logos) lives in CLAUDE.md; this file is the per-screen application of it.
 - NOTE: when a recipe was loaded via chat-from-recipe (has `sourceId`), this sheet instead shows the two-button Update / Save-as-new choice (see CLAUDE.md Update vs Save-as-New).
 
 ## Menus — Occasions
-- Header: "Menus" left, + right. Full-width rows separated by cream 6% dividers
+- Header: back arrow (added when Menus moved off a header-icon-only entry point onto a full screen push) + "Menus" left, + right. Full-width rows separated by cream 6% dividers
 - Row: Tabler icon (22px cream 45%) left, name (Inter 500 cream 16px) + menu count (Inter cream 35% 12px) center, edit + delete (cream 20%) right, chevron
 
 ## Menus — Menu List

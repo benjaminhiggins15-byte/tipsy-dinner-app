@@ -78,7 +78,7 @@ Full per-screen detail in DESIGN_SPEC.md. The core:
 --cream:       #FEE7C0   /* all text on green, hero moments */
 --cream-dim:   rgba(254,231,192,0.55)  /* secondary text, placeholders, muted labels */
 ```
-Rules: cream on green for text directly on background; user bubbles cream bg + green text; AI text cream Fraunces italic on green (no bubble); CTAs cream bg + green text; no decorative red/orange/coral/terracotta — `#B85C5C` is the sole exception, reserved for error and destructive states (delete/remove actions, inline error text) and used in ~19 locations across 4 files (App.tsx, Occasions.tsx, NewCategory.tsx, Menus.tsx); never repurpose it for anything decorative. Bottom sheets (delete-confirm modals, the Cook History log/edit sheet) are light `#FAF7F2`, not a green — confirmed by grep, zero `#182800` bottom sheets exist anywhere in the codebase.
+Rules: cream on green for text directly on background; user bubbles cream bg + green text; AI text cream Fraunces italic on green (no bubble); CTAs cream bg + green text; no decorative red/orange/coral/terracotta — `#B85C5C` is the sole exception, reserved for error and destructive states (delete/remove actions, inline error text) and used in ~19 locations across 4 files (App.tsx, Occasions.tsx, NewCategory.tsx, Menus.tsx); never repurpose it for anything decorative. Bottom sheets (delete-confirm modals, the Cook History log/edit sheet) are light `#FAF7F2`, not a green — confirmed by grep, zero `#182800` bottom sheets exist anywhere in the codebase. Same doc-hygiene family, re-confirmed 2026-07-26: `#182800` doesn't appear anywhere in `src/` at all, not just in bottom sheets, and the "Universal gradient" block immediately below is likewise absent from every file — zero grep matches for its `#3a6010`/`180deg` string. Large parts of the app (`BottomTabBar`, `Occasions.tsx`, and others) now render on a light `#FAF7F2` background instead of the green gradient this doc describes. Treat color/background claims in this doc as unverified until grepped, not just the two flagged here.
 
 **Universal gradient** — behind every screen except splash:
 ```css
@@ -87,6 +87,9 @@ height: 420–480px; position: absolute; top:0; left:0; right:0;
 z-index: 0; pointer-events: none;
 ```
 Content sits above at z-index 1. Gradient fades into base green — no hard edges.
+**STALE, confirmed by grep 2026-07-26: this exact CSS string does not appear anywhere
+in `src/`.** Treat as historical intent, not current fact, until a screen-by-screen
+re-audit replaces it — see the doc-hygiene note in the Color palette section above.
 
 **Logo assets** (`src/Logos/`) — path is case-sensitive on Linux/Vercel:
 - `Full_logo.png` — full "tipsy DINNER" wordmark. Splash screen only.
@@ -98,10 +101,24 @@ import fullLogo from '../Logos/Full_logo.png'
 ```
 
 **Navigation** — four tabs, always visible, bottom of every screen: Build, Recipes,
-Menus, Profile. Active = cream icon + label + small cream dot below; inactive = cream
-25%. Nav bg #182800. Back arrows icon-only. All transitions slide left/right.
-(Grocery list is NOT a nav tab — reached via a cart icon on the Recipes header. The
-5th nav slot is deliberately reserved for a future social feature.)
+Grocery, Profile (`TAB_ORDER`, App.tsx ~line 433; icons `IconChefHat`/`IconBook`/
+`IconShoppingCart`/`IconUser` in `BottomTabBar`, App.tsx ~1404–1409). Nav bg
+`#FAF7F2` (this doc previously and incorrectly said `#182800`). Active = dark green
+`#233C00` icon + label + small `#233C00` dot below; inactive = `#233C00` at 25%
+opacity (previously and incorrectly documented here as cream/cream-25% — the nav bar
+sits on a light background, not green). All transitions slide left/right. Back
+arrows are icon-only but there is no systematic/stack-depth-driven mechanism behind
+them — every screen hardcodes its own; `Profile.tsx` is the sole screen that actually
+branches on the `isTabRoot` prop to decide whether to render one, even though
+`isTabRoot` is threaded to several other screens unused.
+
+Menus is NOT a nav tab — reached via an `IconLayoutList` icon on the
+Recipes/Categories header (App.tsx ~1541–1553) that pushes to Occasions. Grocery
+*was* reached via a cart icon in that same header slot; as of 2026-07-26 the two were
+swapped — Grocery moved onto the bottom nav (replacing Menus' old tab slot) and Menus
+took over the header icon slot (commit `254e0b5`). There is no reserved 5th slot in
+the current tab bar layout; a fifth tab remains a product idea for a future social
+feature, not a structural placeholder.
 
 ---
 
