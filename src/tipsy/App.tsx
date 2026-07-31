@@ -612,8 +612,25 @@ export default function App() {
         profileInitialized.current = true;
         // Load profile, run migration, reload profile, check onboarding
         try {
-          await loadProfile(session.user.id);
+          const initialProfile = await loadProfile(session.user.id);
           await migrateFromLocalStorage(session.user.id);
+
+          // Backfill display_name from auth metadata the first time we see it
+          // empty. Google OAuth populates user_metadata.full_name/name
+          // automatically; the email/password form passes `name` explicitly
+          // (see SignUp.tsx) — either way it was landing in auth metadata but
+          // never being copied into profiles until now.
+          if (!initialProfile.display_name) {
+            const metadataName = (
+              session.user.user_metadata?.full_name ||
+              session.user.user_metadata?.name ||
+              ''
+            ).trim();
+            if (metadataName) {
+              await updateProfile({ display_name: metadataName }, session.user.id);
+            }
+          }
+
           const finalProfile = await loadProfile(session.user.id);
           setShowOnboarding(!finalProfile.onboarding_complete);
         } catch (err) {
