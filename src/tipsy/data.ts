@@ -81,6 +81,16 @@ function cleanHandleBase(name: string): string {
   return base;
 }
 
+// Validates an already-lowercased handle string against the same format
+// rules the deriver enforces. Callers (e.g. the handle edit field) must
+// lowercase user input before calling this — it does not normalize.
+export function isValidHandleFormat(handle: string): boolean {
+  if (handle.length < HANDLE_MIN_LENGTH || handle.length > HANDLE_MAX_LENGTH) return false;
+  if (!/^[a-z0-9_]+$/.test(handle)) return false;
+  if (handle.startsWith('_') || handle.endsWith('_')) return false;
+  return true;
+}
+
 // Derives a unique, valid handle from a display name. `isHandleTaken` is
 // injected (rather than querying Supabase directly) because who can check
 // whose handle depends on caller context (service-role migration script vs.

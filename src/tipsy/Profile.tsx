@@ -1,5 +1,6 @@
 import { useState, type CSSProperties } from "react";
 import { supabase } from "../lib/supabase";
+import { isValidHandleFormat } from "./data";
 
 type ProfileType = {
   id: string;
@@ -7,6 +8,7 @@ type ProfileType = {
   inspiration: string;
   constraints: string;
   display_name: string;
+  handle: string;
   onboarding_complete: boolean;
 };
 
@@ -17,6 +19,7 @@ const KEYS = {
   inspiration: "tipsyDinnerInspiration",
   table: "tipsyDinnerTable",
   constraints: "tipsyDinnerConstraints",
+  handle: "tipsyDinnerHandle",
 } as const;
 
 type FieldKey = keyof typeof KEYS;
@@ -32,8 +35,8 @@ export function getInitials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-export function Avatar({ size = 28, onClick }: { size?: number; onClick?: () => void }) {
-  const initials = getInitials(read(KEYS.name));
+export function Avatar({ size = 28, onClick, name }: { size?: number; onClick?: () => void; name?: string }) {
+  const initials = getInitials(name || read(KEYS.name));
   return (
     <button
       onClick={onClick}
@@ -84,11 +87,19 @@ function trim30(s: string) {
   return s.length > 30 ? s.slice(0, 30) + "…" : s;
 }
 
-function Row({ title, subtitle, onClick }: { title: string; subtitle?: string; onClick?: () => void }) {
+function Row({ title, subtitle, onClick, muted = false, noBorder = false, attached = false }: { title: string; subtitle?: string; onClick?: () => void; muted?: boolean; noBorder?: boolean; attached?: boolean }) {
   return (
-    <button style={rowStyle} onClick={onClick}>
+    <button
+      style={{
+        ...rowStyle,
+        paddingTop: attached ? 2 : 14,
+        paddingBottom: noBorder ? 8 : 14,
+        borderBottom: noBorder ? "none" : rowStyle.borderBottom,
+      }}
+      onClick={onClick}
+    >
       <div>
-        <div style={titleStyle}>{title}</div>
+        <div style={muted ? subStyle : titleStyle}>{title}</div>
         {subtitle !== undefined && <div style={subStyle}>{subtitle}</div>}
       </div>
       <div style={chevStyle}>›</div>
@@ -103,6 +114,7 @@ const FIELD_META: Record<FieldKey, { label: string; multiline: boolean }> = {
   inspiration: { label: "Inspiration", multiline: true },
   table: { label: "Your table", multiline: true },
   constraints: { label: "Constraints", multiline: true },
+  handle: { label: "Handle", multiline: false },
 };
 
 export default function Profile({ back, openEdit, isTabRoot = false, onSignOut, profile, onUpdate }: { back: () => void; openEdit: (k: FieldKey) => void; isTabRoot?: boolean; onSignOut: () => void; profile: ProfileType | null; onUpdate: (updates: Partial<ProfileType>) => Promise<void> }) {
@@ -136,12 +148,13 @@ export default function Profile({ back, openEdit, isTabRoot = false, onSignOut, 
           Profile
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <Avatar />
+          <Avatar name={profile?.display_name} />
         </div>
       </div>
       <div style={{ flex: 1, overflowY: "auto" }}>
         <div style={sectionLabel}>Account</div>
-        <Row title="Name" subtitle={profile?.display_name || read(KEYS.name) || "—"} onClick={() => openEdit("name")} />
+        <Row title="Name" subtitle={profile?.display_name || "—"} noBorder onClick={() => openEdit("name")} />
+        <Row title={profile?.handle ? `@${profile.handle}` : "Add a handle"} muted attached onClick={() => openEdit("handle")} />
         <Row title="Email" subtitle={read(KEYS.email) || "—"} onClick={() => openEdit("email")} />
 
         <div style={sectionLabel}>Your Kitchen</div>
@@ -163,14 +176,17 @@ export function ProfileEdit({ fieldKey, back, profile, onUpdate }: { fieldKey: F
 
   // Get initial value from profile if it's one of the migrated fields, otherwise from localStorage
   const getInitialValue = () => {
-    if (fieldKey === "name") return profile?.display_name || read(storageKey);
+    if (fieldKey === "name") return profile?.display_name || "";
     if (fieldKey === "palate") return profile?.palate || "";
     if (fieldKey === "inspiration") return profile?.inspiration || "";
     if (fieldKey === "constraints") return profile?.constraints || "";
+    if (fieldKey === "handle") return profile?.handle || "";
     return read(storageKey);
   };
 
   const [val, setVal] = useState(getInitialValue());
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
   const inputBase: CSSProperties = {
     width: "100%",
     background: "rgba(35,60,0,0.05)",
@@ -206,14 +222,42 @@ export function ProfileEdit({ fieldKey, back, profile, onUpdate }: { fieldKey: F
         ) : (
           <input
             value={val}
-            onChange={(e) => setVal(e.target.value)}
+            onChange={(e) => { setVal(e.target.value); if (error) setError(""); }}
             type={fieldKey === "email" ? "email" : "text"}
             style={inputBase}
           />
         )}
+        {fieldKey === "handle" && (
+          <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: error ? "#B85C5C" : "rgba(35,60,0,0.35)", marginTop: 8 }}>
+            {error || "3-20 characters: lowercase letters, numbers, underscores."}
+          </div>
+        )}
         <div style={{ flex: 1 }} />
         <button
+          disabled={saving}
           onClick={async () => {
+            if (fieldKey === "handle") {
+              const normalized = val.trim().toLowerCase();
+              if (!isValidHandleFormat(normalized)) {
+                setError("That handle isn't a valid format.");
+                return;
+              }
+              setSaving(true);
+              try {
+                await onUpdate({ handle: normalized });
+                back();
+              } catch (err) {
+                const code = (err as { code?: string })?.code;
+                if (code === "23505") {
+                  setError("That handle is already taken.");
+                } else {
+                  setError("Couldn't save your handle. Try again.");
+                }
+              } finally {
+                setSaving(false);
+              }
+              return;
+            }
             // Use Supabase for migrated fields, localStorage for legacy fields
             if (fieldKey === "name") {
               await onUpdate({ display_name: val });
@@ -227,7 +271,7 @@ export function ProfileEdit({ fieldKey, back, profile, onUpdate }: { fieldKey: F
           }}
           style={{
             background: "#233C00", color: "#FAF7F2", border: "none",
-            borderRadius: 100, padding: "14px 0",
+            borderRadius: 100, padding: "14px 0", opacity: saving ? 0.6 : 1,
             fontFamily: "'Inter', sans-serif", fontSize: 12, fontWeight: 500,
             letterSpacing: "0.12em", textTransform: "uppercase",
             width: "100%", cursor: "pointer",

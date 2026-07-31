@@ -6,6 +6,7 @@ type ProfileType = {
   inspiration: string;
   constraints: string;
   display_name: string;
+  handle: string;
   onboarding_complete: boolean;
 };
 
