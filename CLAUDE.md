@@ -39,6 +39,9 @@ pointer named — do not duplicate it here.
 - **Ingredients are free-text strings, not structured `{amount, unit}`** — the AI normalizes on demand where structure is needed. Full detail: Data Layer below.
 - **`clearRecipeCache` always drops `'__all__'`** — the View-all cache entry is invalidated on every mutation alongside the per-category key; never wire all-view invalidation at call sites. Full detail: View All Recipes in FEATURE_SPECS.md.
 - **`buildSystemPrompt()`** conversational-prompt behaviors are settled and hard-won — culinary posture (elevate within the ask, always on), cuisine-direction discovery (ask the "world" when broad; a named protein doesn't settle it; anchor the suggestion set to one direction), and no-superlatives voice. Reword only deliberately; treat like the Session-3 formatting house style. Full detail in FEATURE_SPECS.md.
+- **Handle uniqueness is a hard DB-level guarantee, not app-enforced** — case-insensitive via the `profiles_handle_lower_idx` unique index on `lower(handle)`. Full detail: Account Identity in FEATURE_SPECS.md.
+- **`display_name` is the single source of truth for a user's name; handles are derived silently, never prompted** — there is no handle-capture screen anywhere in the app. Full detail: Account Identity in FEATURE_SPECS.md.
+- **The `profileInitialized` gate is shared infrastructure** — identity/signup logic (display_name backfill, silent handle derivation) is wired inside this existing gated block, not a second listener; do not disturb it when touching either. Full detail: Authentication below.
 
 ---
 
@@ -125,7 +128,7 @@ feature, not a structural placeholder.
 ## Data Layer
 
 **Supabase tables** (RLS enabled on all; owner-only unless noted):
-- `profiles` — display_name, palate, inspiration, constraints, onboarding_complete
+- `profiles` — display_name, handle, palate, inspiration, constraints, onboarding_complete
 - `recipes` — saved recipes; `is_public` bool + `share_token` for public links
 - `ingredients` — one row per ingredient, with `sort_order` (separate table to enable ingredient search later)
 - `categories`, `recipe_categories` (join — a recipe can be in many categories)
@@ -157,11 +160,16 @@ returns PostgREST error `PGRST108` ("not an embedded resource in this request").
 
 **Schema lives ONLY in the Supabase dashboard** — no in-repo migration files. Known
 logged risk; follow the existing hand-applied-SQL convention when adding tables, but
-flag it. (Grocery tables were added dashboard-only this way.)
+flag it. (Grocery tables were added dashboard-only this way; `profiles.handle` plus
+its `profiles_handle_lower_idx` unique index is the seventh dashboard-only schema
+item added this way — see "Account Identity" in FEATURE_SPECS.md.)
 
-**Legacy localStorage keys still in use:** `tipsyDinnerName`, `tipsyDinnerEmail`,
-`tipsyDinnerTable`. (All recipe/menu/profile data is on Supabase — localStorage is no
-longer used for app data.)
+**Legacy localStorage keys still in use:** `tipsyDinnerEmail`, `tipsyDinnerTable`.
+`tipsyDinnerName` is no longer a name source — `display_name` is authoritative (see
+"Account Identity" in FEATURE_SPECS.md) — but the `KEYS.name` constant pointing at it
+still exists in `Profile.tsx`, read only inside `Avatar`'s fallback branch. No current
+call site omits the `name` prop, so that branch is dead in practice; flagged as a
+loose end, not removed.
 
 ---
 
@@ -246,11 +254,19 @@ menu?" (Build hero).
 - Email/password + Google OAuth, both working. Email confirmation disabled (intentional). Profile auto-created on signup via Postgres trigger.
 - Routing: no session → SignUp; session + `onboarding_complete` false → Onboarding; session + true → Build.
 - Onboarding: three questions (palate, inspiration, constraints), each writes to `profiles`; loader sets `onboarding_complete` true.
+- Signup persists `display_name` into `profiles` for both email/password and Google
+  OAuth, and silently derives a unique `handle` alongside it for genuinely new
+  profiles — no handle-capture screen. Full detail: "Account Identity" in
+  FEATURE_SPECS.md.
 
 **Duplicate SIGNED_IN event.** `onAuthStateChange` fires a duplicate SIGNED_IN when
 the browser tab regains focus. A `profileInitialized` ref prevents re-running
 profile/migration logic on subsequent events; it resets to false on logout so
-re-auth works. (This was the root cause of the old tab-refocus state-reset bug.)
+re-auth works. (This was the root cause of the old tab-refocus state-reset bug.) The
+`display_name` backfill and silent handle derivation (Account Identity,
+FEATURE_SPECS.md) are wired inside this same gated block, not a second listener —
+they inherit the tab-refocus guard for free. Any future identity/signup logic
+belongs here too, not in a parallel listener.
 
 ---
 

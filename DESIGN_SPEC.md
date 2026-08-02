@@ -112,3 +112,12 @@ logos) lives in CLAUDE.md; this file is the per-screen application of it.
 - Section header: #2E4E08 5% bg, cream 8% border, radius 14px (14px 14px 0 0 when open); name Inter 500 uppercase cream 70% 12px, count cream 30% 11px, chevron
 - Expanded body: cream 3% bg, cream 8% border, border-top none, radius 0 0 14px 14px
 - Recipe rows: name (Inter 500 cream 14px) + meta (Inter cream 30% 11px), X remove right (cream 15%). "add a recipe" row at bottom. Tapping a recipe opens the card; back returns here
+
+## Profile
+- Background: light `#FAF7F2` (not the green gradient) — same treatment as the Recipe Card, dark text/icon strokes throughout.
+- Header: back arrow left (only when not the tab root — see CLAUDE.md Navigation), avatar right (initials on `#233C00` circle, sourced from `display_name`). Center is a single tappable name-forward block, not a page-title label: `display_name` prominent (Inter 700, ~22px, `#233C00`) with `@handle` directly beneath, small/muted/italic (Fraunces italic, ~12px, `rgba(35,60,0,0.45)`), and a trailing chevron (`rgba(35,60,0,0.25)`) indicating it opens an editor. Empty-state fallbacks: "Add your name" for the title, "add a handle" for the handle line — both still tappable.
+- Tapping the header opens one edit sheet (same chrome as the Account/Kitchen field-edit sheets below) with two labeled inputs, Name and Username, and a single Save button — see "Account Identity" in FEATURE_SPECS.md for the save/validation behavior.
+- Account section: starts at Email (the old separate Name and handle rows live in the header now, not here).
+- Your Kitchen section: Your palate / Inspiration / Constraints rows, each row's subtitle truncated to 30 chars with an ellipsis.
+- Support section: Sign Out, Contact us.
+- Field-edit sheets (opened by tapping a row): back arrow + field label (Inter 700 uppercase) centered header, single input or textarea (cream-on-light input treatment: `rgba(35,60,0,0.05)` bg, `rgba(35,60,0,0.12)` border, radius 12px), full-width dark-green Save pill at the bottom.

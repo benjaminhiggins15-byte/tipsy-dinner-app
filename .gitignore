@@ -32,3 +32,6 @@ dist-ssr
 *.sw?
 .env
 .vercel
+
+# Supabase CLI local cache (version pins, project link, transient state)
+supabase/.temp/

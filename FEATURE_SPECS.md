@@ -592,6 +592,89 @@ voice-adjacent (flagged during the session as the one edit touching
 formatting-house-style-protected territory) and was scoped as tightly as possible
 for that reason.
 
+---
+
+## Account Identity (Build 1 of account-to-account sharing)
+
+Merged to main 2026-08-02. This is **Build 1** of a multi-build
+account-to-account sharing sequence — it establishes user identity (a display
+name + a unique handle) with no sharing surface yet. See the current-state
+doc's ACCOUNT-TO-ACCOUNT SHARING section for the full phase design and what
+later builds add on top of this foundation.
+
+**Schema.** `profiles.handle` (text, nullable). Uniqueness is enforced
+case-insensitively at the DB layer via `profiles_handle_lower_idx`, a unique
+index on `lower(handle)` — this is a hard Postgres guarantee, not something the
+app layer checks proactively. Dashboard-only, like every other table in this
+project — no in-repo migration file (see Data Layer in CLAUDE.md).
+
+**The deriver and its rules.** `deriveHandleFromName(name, isHandleTaken)` and
+`isValidHandleFormat(handle)` (both in `data.ts`) own the format contract:
+lowercase, `a`–`z`/`0`–`9`/`_` only, 3–20 characters, no leading or trailing
+underscore. A name that reduces to fewer than 3 usable characters (empty,
+all-emoji, all-symbols) falls back to a human-legible `user`-prefixed base
+rather than padding with digits. On a collision, a numeric suffix is appended
+(truncating the base if needed to stay within the 20-character cap) and tried
+again. Treat this paragraph as a summary, not a spec — re-derive the exact
+rules from `deriveHandleFromName`/`isValidHandleFormat` before relying on
+specifics, the same caution as `normalizeStep`'s caller count in CLAUDE.md.
+
+**Signup persistence (both paths).** Previously a user's name landed only in
+`auth.users.raw_user_meta_data` (`full_name` for Google OAuth, `name` for
+email/password — set explicitly in `SignUp.tsx`) and was never copied
+anywhere the app actually read from. Signup now backfills `profiles.display_name`
+from that metadata the first time a session sees it empty. `display_name` is
+now the single source of truth for a user's name — handles are derived
+silently from it, never prompted; there is no handle-capture screen anywhere
+in signup or onboarding.
+
+**Silent handle derivation.** For a genuinely new profile (`handle` still
+null), a handle is derived from `display_name` (or the raw metadata name, if
+display_name backfill hasn't landed yet) and claimed via write-then-catch: the
+client attempts a real `UPDATE ... SET handle = candidate`, and a Postgres
+`23505` on that write means the candidate is taken (uniqueness constraints
+apply regardless of RLS, even though the `profiles` SELECT policy is
+owner-only and would otherwise block checking what handles other users hold).
+A successful write both confirms availability and persists the value in one
+step — no separate save call follows. Existing accounts skip this path
+entirely; they already have a handle from the one-time migration below.
+
+**Signup persistence and derivation are both wired inside the existing
+`profileInitialized`-gated block in `onAuthStateChange`** (`App.tsx`) — not a
+second listener. This means they inherit the tab-refocus duplicate-SIGNED_IN
+guard for free (see Authentication in CLAUDE.md); any future identity/signup
+logic belongs in this same block.
+
+**Migration (already applied, not a code artifact).** The 6 pre-existing
+accounts were backfilled by a one-time script run directly against the DB —
+names copied from `auth.users` metadata into `profiles.display_name`, handles
+derived the same way new signups get one. Consistent with this project's
+existing hand-applied-SQL convention (no in-repo migration files); nothing in
+the shipped code re-runs or depends on this script.
+
+**Profile screen: name-forward header, single edit sheet.** The old "PROFILE"
+page-title label was replaced with a tappable header: `display_name` renders
+prominent and large, `@handle` sits beneath it small/muted/italic, with a
+chevron indicating it opens an editor. The separate Name and handle rows that
+used to live in the Account section are gone — Account now starts at Email.
+Tapping the header opens one sheet, `ProfileEditIdentity`, that edits both
+fields together and writes them in a **single upsert** — a handle collision
+fails that whole write, so a display-name change can never silently persist
+while the handle half of the save is rejected. The handle field in that sheet
+reuses the exact same format check and `lower(handle)`-collision handling
+described above (inline "That handle is already taken" on a `23505`); it is
+not a second implementation of the uniqueness logic. Re-saving your own
+unchanged handle does not false-trip the check — a row updating itself to a
+value it already holds never conflicts with itself under Postgres's
+constraint semantics.
+
+Loose end, deliberately not resolved here: `Profile.tsx` still has a
+`KEYS.name` constant pointing at the legacy `tipsyDinnerName` localStorage
+key, read only inside `Avatar`'s fallback branch (used when `Avatar` is
+called without a `name` prop). No current call site omits that prop, so the
+branch is dead in practice, but the constant and the fallback read were not
+deleted.
+
 **Verification method.** A fixed set of representative openers (vague → specific),
 run on the live preview under the real account, judged by eye — elevation by
 building out dishes (including a deliberately humble one), discovery by watching
