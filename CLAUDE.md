@@ -42,6 +42,8 @@ pointer named — do not duplicate it here.
 - **Handle uniqueness is a hard DB-level guarantee, not app-enforced** — case-insensitive via the `profiles_handle_lower_idx` unique index on `lower(handle)`. Full detail: Account Identity in FEATURE_SPECS.md.
 - **`display_name` is the single source of truth for a user's name; handles are derived silently, never prompted** — there is no handle-capture screen anywhere in the app. Full detail: Account Identity in FEATURE_SPECS.md.
 - **The `profileInitialized` gate is shared infrastructure** — identity/signup logic (display_name backfill, silent handle derivation) is wired inside this existing gated block, not a second listener; do not disturb it when touching either. Full detail: Authentication below.
+- **`recipe_sends` is two-party with a status-only-update trigger** — sender gets INSERT+SELECT, recipient gets SELECT + status-only UPDATE; a `BEFORE UPDATE` trigger (not RLS — Postgres RLS can't restrict which columns change) rejects any recipient write that touches the snapshot, `sender_id`, `recipient_id`, `photo_url`, or `note`; verified by violation testing. Full detail: Account-to-Account Sharing — Build 2 in FEATURE_SPECS.md.
+- **`connections`/`notifications` have no client INSERT policy — deny-all by design** — rows must be created through a trusted server-side path (Edge Function or `security definer` function) at send/save time, never a direct client insert. Full detail: Account-to-Account Sharing — Build 2 in FEATURE_SPECS.md.
 
 ---
 
@@ -162,7 +164,13 @@ returns PostgREST error `PGRST108` ("not an embedded resource in this request").
 logged risk; follow the existing hand-applied-SQL convention when adding tables, but
 flag it. (Grocery tables were added dashboard-only this way; `profiles.handle` plus
 its `profiles_handle_lower_idx` unique index is the seventh dashboard-only schema
-item added this way — see "Account Identity" in FEATURE_SPECS.md.)
+item added this way — see "Account Identity" in FEATURE_SPECS.md.) Build 2 of
+account-to-account sharing added three more tables (`connections`, `recipe_sends`,
+`notifications`) and two more columns (`recipes.inspired_by_name`/`inspired_by_id`)
+the same way — see the Supabase section of "Account-to-Account Sharing — Build 2" in
+FEATURE_SPECS.md for the full inventory. This list keeps growing; treat any specific
+count as stale on sight rather than trusting a documented number, same caution as the
+TypeScript error count below.
 
 **Legacy localStorage keys still in use:** `tipsyDinnerEmail`, `tipsyDinnerTable`.
 `tipsyDinnerName` is no longer a name source — `display_name` is authoritative (see

@@ -691,3 +691,108 @@ Recipe-context-injection architecture (system-prompt reference material, not a
 fake assistant message) untouched. Temperature left at default 1.0 deliberately.
 The AI naming call for save-as-new remains a separate logged item, not folded into
 this work.
+
+---
+
+## Account-to-Account Sharing — Build 2 (Data Model Foundation)
+
+Applied 2026-08-02, on branch `account-sharing-schema-build2`, directly against the
+linked Supabase project. **This build is schema only — no app code reads or writes
+any of it yet.** It exists to prove the data model and the RLS design in isolation,
+verified by direct row manipulation and violation testing, before any client code is
+written against it. See the current-state doc's ACCOUNT-TO-ACCOUNT SHARING section
+for the full phase design and where this sits relative to Build 1 (identity) and
+later sending/save builds.
+
+**Supabase (dashboard-only, no in-repo migration, per existing convention — three new
+tables, two new columns):**
+
+- **`connections`** — `id`, `user_a`/`user_b` (both FK→`profiles.id`), `created_at`,
+  `created_via` (FK→`recipe_sends.id`, `ON DELETE SET NULL`). `UNIQUE (user_a,
+  user_b)`. Canonical ordering — `user_a` always holds the lexicographically smaller
+  of the two profile ids — is an **app-code invariant, not DB-enforced**; no trigger
+  builds or checks it, it's recorded only as a column comment in the schema itself.
+  One row per pair; a pair can only ever connect once.
+- **`recipe_sends`** — `id`, `sender_id`/`recipient_id` (both FK→`profiles.id`),
+  `recipe` (jsonb, not null), `photo_url`, `note`, `status` (`text`, default
+  `'pending'`, `CHECK` restricts it to `pending`/`saved`/`dismissed`), `created_at`.
+  The `recipe` column is a **complete-recipe snapshot** — title, description,
+  ingredients as `{name, quantity, sort_order}`, steps as `{title, instruction}`,
+  cook_time, serves — deliberately a different, richer shape than the
+  `recipe_shares` snapshot documented above. `recipe_shares` only captures what a
+  read-only public page renders; `recipe_sends.recipe` is designed to be
+  reconstituted into a full, editable, re-shareable library recipe once a later
+  build adds the save step. Photo travels via the same download→re-upload
+  byte-copy pattern `recipe_shares` uses, into a new path segment under the
+  *sender's* own storage folder (the bucket's INSERT policy is owner-folder-scoped,
+  so the copy can only happen from the sender's authenticated client, at send time —
+  a recipient's client has no write access to the sender's folder to perform this
+  copy itself).
+- **`notifications`** — `id`, `recipient_id` (FK→`profiles.id`), `type` (`text`,
+  `'recipe_received'` for now), `ref_id` (FK→`recipe_sends.id`, `ON DELETE CASCADE`),
+  `read` (boolean, default `false`), `created_at`.
+- **`recipes.inspired_by_name`** (text, nullable) and **`recipes.inspired_by_id`**
+  (uuid, FK→`profiles.id`, `ON DELETE SET NULL`, nullable) — both unused until the
+  save-from-share build. These carry the permanent "inspired by [name]"
+  attribution as a **stored value captured at save time**, not a live join to the
+  sender's profile — so it survives the sender later renaming themselves, deleting
+  their account, or the recipe being edited/re-shared, and never breaks or goes
+  blank because of a join failing. All 28 pre-existing `recipes` rows have both
+  columns null, confirmed after the `ALTER TABLE`.
+
+**RLS — the app's first two-party data.** Every existing owner-scoped table (see
+Data Layer in CLAUDE.md) grants access to exactly one `user_id`/`id`. These three
+tables are the first case where a row must be legible to two specific, different,
+authenticated users with different rights — a genuinely new RLS shape, not an
+extension of the existing owner-only or owner-write-plus-anon-read (`recipe_shares`,
+`grocery_list_shares`) patterns, since neither of those distinguishes between two
+named parties.
+
+- **`recipe_sends`**: sender gets INSERT (`WITH CHECK (sender_id = auth.uid())`,
+  blocking a sender from inserting a row claiming to be sent by someone else) +
+  SELECT of their own sends. Recipient gets SELECT of sends addressed to them, plus
+  UPDATE — but Postgres RLS `USING`/`WITH CHECK` can only gate *which rows* a policy
+  applies to, not *which columns* change within an allowed row. **The status-only
+  restriction is therefore enforced by a separate `BEFORE UPDATE` trigger**
+  (`enforce_recipe_sends_status_only_update`, attached as
+  `recipe_sends_lock_immutable_fields`), which raises if the incoming row differs
+  from the stored row in `sender_id`, `recipient_id`, `recipe`, `photo_url`, `note`,
+  or `created_at` — leaving `status` as the only column a recipient's update can
+  ever actually change. No anon access, no third-party access, no policy at all for
+  either.
+- **`connections`**: `connections_select_party` lets either `user_a` or `user_b`
+  read a row they're part of. **No INSERT policy exists — inserts are deny-all for
+  every role, by design.** A row can only be created by a trusted server-side path
+  later (Edge Function or a `security definer` function), never a raw client insert
+  — a naive `WITH CHECK (user_a = auth.uid() OR user_b = auth.uid())` would let any
+  authenticated user unilaterally fabricate a "connection" naming themselves and an
+  arbitrary other user with no consent from that other party, which is why this was
+  deferred rather than shipped alongside the SELECT policy.
+- **`notifications`**: recipient-only SELECT + UPDATE (`recipient_id = auth.uid()`
+  on both). No client INSERT policy either, for the same reason as `connections` —
+  notifications get created server-side as part of the send flow, not by the
+  recipient or sender's own client.
+
+**Load-bearing note for the next build.** Because `connections` and `notifications`
+are both insert-deny-all from the client, the eventual send flow cannot be built as
+a sequence of ordinary client-side `.insert()` calls the way virtually everything
+else in `data.ts` is. It needs one elevated, trusted execution path (Edge Function or
+`security definer` Postgres function) that atomically creates the `recipe_sends` row
+and its `notifications` row together at send time, and — on save — the `connections`
+row as well. Designing that path, and whatever narrow surface the client is allowed
+to call to trigger it, is explicitly out of scope for this build and belongs to
+whichever build implements the send flow itself.
+
+**Verified by violation testing, not just the happy path.** Every RLS/trigger
+boundary above was proven by seeding real rows (via a bypass-RLS connection, since no
+client insert path exists yet) and then querying/mutating as each simulated
+authenticated party — sender, recipient, an unrelated third user, and anon — rather
+than only confirming the intended-success cases. Confirmed: sender sees their own
+send and cannot forge a different `sender_id` on insert; recipient sees the send
+addressed to them and can flip `status`, but every attempt to alter the snapshot,
+`sender_id`, `recipient_id`, `photo_url`, or `note` was rejected by the trigger with
+the row provably unchanged afterward; a third party and anon both get zero rows;
+either connection party can read a shared `connections` row and a third party
+cannot; no authenticated client can insert a `connections` row at all. All seeded
+test rows were deleted afterward — the three new tables hold zero rows in production
+as of this write-up.
