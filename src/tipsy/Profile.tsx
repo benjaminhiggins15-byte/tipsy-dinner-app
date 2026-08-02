@@ -19,10 +19,9 @@ const KEYS = {
   inspiration: "tipsyDinnerInspiration",
   table: "tipsyDinnerTable",
   constraints: "tipsyDinnerConstraints",
-  handle: "tipsyDinnerHandle",
 } as const;
 
-type FieldKey = keyof typeof KEYS;
+type FieldKey = "email" | "palate" | "inspiration" | "table" | "constraints" | "identity";
 
 function read(k: string): string {
   try { return localStorage.getItem(k) ?? ""; } catch { return ""; }
@@ -108,13 +107,22 @@ function Row({ title, subtitle, onClick, muted = false, noBorder = false, attach
 }
 
 const FIELD_META: Record<FieldKey, { label: string; multiline: boolean }> = {
-  name: { label: "Name", multiline: false },
   email: { label: "Email", multiline: false },
   palate: { label: "Your palate", multiline: true },
   inspiration: { label: "Inspiration", multiline: true },
   table: { label: "Your table", multiline: true },
   constraints: { label: "Constraints", multiline: true },
-  handle: { label: "Handle", multiline: false },
+  identity: { label: "Edit Profile", multiline: false },
+};
+
+const fieldLabelStyle: CSSProperties = {
+  fontFamily: "'Inter', sans-serif",
+  fontSize: 10,
+  fontWeight: 500,
+  letterSpacing: "0.1em",
+  textTransform: "uppercase",
+  color: "rgba(35,60,0,0.35)",
+  marginBottom: 6,
 };
 
 export default function Profile({ back, openEdit, isTabRoot = false, onSignOut, profile, onUpdate }: { back: () => void; openEdit: (k: FieldKey) => void; isTabRoot?: boolean; onSignOut: () => void; profile: ProfileType | null; onUpdate: (updates: Partial<ProfileType>) => Promise<void> }) {
@@ -144,17 +152,26 @@ export default function Profile({ back, openEdit, isTabRoot = false, onSignOut, 
         ) : (
           <div />
         )}
-        <div style={{ textAlign: "center", fontFamily: "'Inter', sans-serif", fontSize: 20, fontWeight: 700, textTransform: "uppercase", color: "#233C00" }}>
-          Profile
-        </div>
+        <button
+          onClick={() => openEdit("identity")}
+          style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+        >
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 22, fontWeight: 700, color: "#233C00", lineHeight: 1.2 }}>
+              {profile?.display_name || "Add your name"}
+            </div>
+            <div style={{ fontFamily: "'Fraunces', serif", fontStyle: "italic", fontWeight: 300, fontSize: 12, color: "rgba(35,60,0,0.45)", marginTop: 2 }}>
+              {profile?.handle ? `@${profile.handle}` : "add a handle"}
+            </div>
+          </div>
+          <div style={{ color: "rgba(35,60,0,0.25)", fontSize: 16 }}>›</div>
+        </button>
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <Avatar name={profile?.display_name} />
         </div>
       </div>
       <div style={{ flex: 1, overflowY: "auto" }}>
         <div style={sectionLabel}>Account</div>
-        <Row title="Name" subtitle={profile?.display_name || "—"} noBorder onClick={() => openEdit("name")} />
-        <Row title={profile?.handle ? `@${profile.handle}` : "Add a handle"} muted attached onClick={() => openEdit("handle")} />
         <Row title="Email" subtitle={read(KEYS.email) || "—"} onClick={() => openEdit("email")} />
 
         <div style={sectionLabel}>Your Kitchen</div>
@@ -170,23 +187,117 @@ export default function Profile({ back, openEdit, isTabRoot = false, onSignOut, 
   );
 }
 
+function ProfileEditIdentity({ back, profile, onUpdate }: { back: () => void; profile: ProfileType | null; onUpdate: (updates: Partial<ProfileType>) => Promise<void> }) {
+  const [nameVal, setNameVal] = useState(profile?.display_name || "");
+  const [handleVal, setHandleVal] = useState(profile?.handle || "");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const inputBase: CSSProperties = {
+    width: "100%",
+    background: "rgba(35,60,0,0.05)",
+    border: "1px solid rgba(35,60,0,0.12)",
+    borderRadius: 12,
+    padding: "12px 14px",
+    fontFamily: "'Inter', sans-serif",
+    fontSize: 16,
+    color: "#233C00",
+    outline: "none",
+    lineHeight: 1.6,
+    boxSizing: "border-box",
+  };
+
+  const handleSave = async () => {
+    const normalizedHandle = handleVal.trim().toLowerCase();
+    if (!isValidHandleFormat(normalizedHandle)) {
+      setError("That handle isn't a valid format.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await onUpdate({ display_name: nameVal, handle: normalizedHandle });
+      back();
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      if (code === "23505") {
+        setError("That handle is already taken.");
+      } else {
+        setError("Couldn't save your profile. Try again.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#FAF7F2" }}>
+      <div style={{
+        display: "grid", gridTemplateColumns: "44px 1fr 44px", alignItems: "center",
+        padding: "20px 16px 14px",
+      }}>
+        <button onClick={back} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(35,60,0,0.6)", fontSize: 22, padding: 0, textAlign: "left" }}>‹</button>
+        <div style={{ textAlign: "center", fontFamily: "'Inter', sans-serif", fontSize: 20, fontWeight: 700, textTransform: "uppercase", color: "#233C00" }}>
+          Edit Profile
+        </div>
+        <div />
+      </div>
+      <div style={{ flex: 1, padding: "12px 24px 24px", display: "flex", flexDirection: "column", gap: 20 }}>
+        <div>
+          <div style={fieldLabelStyle}>Name</div>
+          <input
+            value={nameVal}
+            onChange={(e) => setNameVal(e.target.value)}
+            type="text"
+            style={inputBase}
+          />
+        </div>
+        <div>
+          <div style={fieldLabelStyle}>Username</div>
+          <input
+            value={handleVal}
+            onChange={(e) => { setHandleVal(e.target.value); if (error) setError(""); }}
+            type="text"
+            style={inputBase}
+          />
+          <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: error ? "#B85C5C" : "rgba(35,60,0,0.35)", marginTop: 8 }}>
+            {error || "3-20 characters: lowercase letters, numbers, underscores."}
+          </div>
+        </div>
+        <div style={{ flex: 1 }} />
+        <button
+          disabled={saving}
+          onClick={handleSave}
+          style={{
+            background: "#233C00", color: "#FAF7F2", border: "none",
+            borderRadius: 100, padding: "14px 0", opacity: saving ? 0.6 : 1,
+            fontFamily: "'Inter', sans-serif", fontSize: 12, fontWeight: 500,
+            letterSpacing: "0.12em", textTransform: "uppercase",
+            width: "100%", cursor: "pointer",
+          }}
+        >
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function ProfileEdit({ fieldKey, back, profile, onUpdate }: { fieldKey: FieldKey; back: () => void; profile: ProfileType | null; onUpdate: (updates: Partial<ProfileType>) => Promise<void> }) {
+  if (fieldKey === "identity") {
+    return <ProfileEditIdentity back={back} profile={profile} onUpdate={onUpdate} />;
+  }
   const meta = FIELD_META[fieldKey];
   const storageKey = KEYS[fieldKey];
 
   // Get initial value from profile if it's one of the migrated fields, otherwise from localStorage
   const getInitialValue = () => {
-    if (fieldKey === "name") return profile?.display_name || "";
     if (fieldKey === "palate") return profile?.palate || "";
     if (fieldKey === "inspiration") return profile?.inspiration || "";
     if (fieldKey === "constraints") return profile?.constraints || "";
-    if (fieldKey === "handle") return profile?.handle || "";
     return read(storageKey);
   };
 
   const [val, setVal] = useState(getInitialValue());
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
   const inputBase: CSSProperties = {
     width: "100%",
     background: "rgba(35,60,0,0.05)",
@@ -222,46 +333,16 @@ export function ProfileEdit({ fieldKey, back, profile, onUpdate }: { fieldKey: F
         ) : (
           <input
             value={val}
-            onChange={(e) => { setVal(e.target.value); if (error) setError(""); }}
+            onChange={(e) => setVal(e.target.value)}
             type={fieldKey === "email" ? "email" : "text"}
             style={inputBase}
           />
         )}
-        {fieldKey === "handle" && (
-          <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: error ? "#B85C5C" : "rgba(35,60,0,0.35)", marginTop: 8 }}>
-            {error || "3-20 characters: lowercase letters, numbers, underscores."}
-          </div>
-        )}
         <div style={{ flex: 1 }} />
         <button
-          disabled={saving}
           onClick={async () => {
-            if (fieldKey === "handle") {
-              const normalized = val.trim().toLowerCase();
-              if (!isValidHandleFormat(normalized)) {
-                setError("That handle isn't a valid format.");
-                return;
-              }
-              setSaving(true);
-              try {
-                await onUpdate({ handle: normalized });
-                back();
-              } catch (err) {
-                const code = (err as { code?: string })?.code;
-                if (code === "23505") {
-                  setError("That handle is already taken.");
-                } else {
-                  setError("Couldn't save your handle. Try again.");
-                }
-              } finally {
-                setSaving(false);
-              }
-              return;
-            }
             // Use Supabase for migrated fields, localStorage for legacy fields
-            if (fieldKey === "name") {
-              await onUpdate({ display_name: val });
-            } else if (fieldKey === "palate" || fieldKey === "inspiration" || fieldKey === "constraints") {
+            if (fieldKey === "palate" || fieldKey === "inspiration" || fieldKey === "constraints") {
               await onUpdate({ [fieldKey]: val });
             } else {
               // Legacy fields (email, table) still use localStorage
@@ -271,7 +352,7 @@ export function ProfileEdit({ fieldKey, back, profile, onUpdate }: { fieldKey: F
           }}
           style={{
             background: "#233C00", color: "#FAF7F2", border: "none",
-            borderRadius: 100, padding: "14px 0", opacity: saving ? 0.6 : 1,
+            borderRadius: 100, padding: "14px 0",
             fontFamily: "'Inter', sans-serif", fontSize: 12, fontWeight: 500,
             letterSpacing: "0.12em", textTransform: "uppercase",
             width: "100%", cursor: "pointer",

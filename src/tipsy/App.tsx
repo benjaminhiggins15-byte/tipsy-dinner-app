@@ -234,7 +234,7 @@ type Screen =
   | { name: "menuinterior"; menuId: string }
   | { name: "recipepicker"; menuId: string; section: MenuSection }
   | { name: "profile" }
-  | { name: "profileedit"; fieldKey: "name" | "email" | "palate" | "inspiration" | "table" | "constraints" | "handle" }
+  | { name: "profileedit"; fieldKey: "email" | "palate" | "inspiration" | "table" | "constraints" | "identity" }
   | { name: "placeholder"; title: string };
 
 type TabId = "build" | "recipes" | "grocery" | "profile";
