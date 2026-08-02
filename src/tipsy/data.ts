@@ -49,6 +49,74 @@ export function normalizeStep(step: RecipeStep): { title: string; instruction: s
   return { title: step.title ?? '', instruction: step.instruction ?? '' };
 }
 
+// Handle format: lowercase a-z/0-9/_, length 3-20, no leading/trailing underscore.
+// Uniqueness is enforced case-insensitively at the DB layer (unique index on
+// lower(handle)); this deriver produces already-lowercase candidates so no
+// caller needs to lowercase again before comparing.
+const HANDLE_MIN_LENGTH = 3;
+const HANDLE_MAX_LENGTH = 20;
+// A name that reduces to nothing usable (e.g. all-emoji, or empty) still needs
+// a valid handle. "user" is prefixed rather than padding with digits/repeated
+// characters so the base stays human-legible instead of looking arbitrary.
+const HANDLE_FALLBACK_PREFIX = 'user';
+
+function cleanHandleBase(name: string): string {
+  let base = name
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '')
+    .replace(/^_+|_+$/g, '');
+
+  if (base.length < HANDLE_MIN_LENGTH) {
+    base = (HANDLE_FALLBACK_PREFIX + base).replace(/^_+|_+$/g, '');
+  }
+
+  if (base.length > HANDLE_MAX_LENGTH) {
+    base = base.slice(0, HANDLE_MAX_LENGTH).replace(/_+$/g, '');
+  }
+
+  if (base.length < HANDLE_MIN_LENGTH) {
+    base = HANDLE_FALLBACK_PREFIX;
+  }
+
+  return base;
+}
+
+// Validates an already-lowercased handle string against the same format
+// rules the deriver enforces. Callers (e.g. the handle edit field) must
+// lowercase user input before calling this — it does not normalize.
+export function isValidHandleFormat(handle: string): boolean {
+  if (handle.length < HANDLE_MIN_LENGTH || handle.length > HANDLE_MAX_LENGTH) return false;
+  if (!/^[a-z0-9_]+$/.test(handle)) return false;
+  if (handle.startsWith('_') || handle.endsWith('_')) return false;
+  return true;
+}
+
+// Derives a unique, valid handle from a display name. `isHandleTaken` is
+// injected (rather than querying Supabase directly) because who can check
+// whose handle depends on caller context (service-role migration script vs.
+// an authenticated client) — this function only owns the format/collision
+// logic, not how "taken" is determined.
+export async function deriveHandleFromName(
+  name: string,
+  isHandleTaken: (handle: string) => Promise<boolean>
+): Promise<string> {
+  const base = cleanHandleBase(name);
+
+  let candidate = base;
+  let suffix = 2;
+
+  while (await isHandleTaken(candidate)) {
+    const suffixStr = String(suffix);
+    const maxBaseLength = HANDLE_MAX_LENGTH - suffixStr.length;
+    const truncatedBase =
+      base.length > maxBaseLength ? base.slice(0, maxBaseLength).replace(/_+$/g, '') : base;
+    candidate = `${truncatedBase}${suffixStr}`;
+    suffix += 1;
+  }
+
+  return candidate;
+}
+
 export type Recipe = {
   title: string;
   description: string;

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto } from "./data";
+import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName } from "./data";
 import { type CropRect } from "./image";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
@@ -52,6 +52,7 @@ type ProfileType = {
   inspiration: string;
   constraints: string;
   display_name: string;
+  handle: string;
   onboarding_complete: boolean;
 };
 
@@ -233,7 +234,7 @@ type Screen =
   | { name: "menuinterior"; menuId: string }
   | { name: "recipepicker"; menuId: string; section: MenuSection }
   | { name: "profile" }
-  | { name: "profileedit"; fieldKey: "name" | "email" | "palate" | "inspiration" | "table" | "constraints" }
+  | { name: "profileedit"; fieldKey: "email" | "palate" | "inspiration" | "table" | "constraints" | "identity" }
   | { name: "placeholder"; title: string };
 
 type TabId = "build" | "recipes" | "grocery" | "profile";
@@ -612,8 +613,48 @@ export default function App() {
         profileInitialized.current = true;
         // Load profile, run migration, reload profile, check onboarding
         try {
-          await loadProfile(session.user.id);
+          const initialProfile = await loadProfile(session.user.id);
           await migrateFromLocalStorage(session.user.id);
+
+          // Backfill display_name from auth metadata the first time we see it
+          // empty. Google OAuth populates user_metadata.full_name/name
+          // automatically; the email/password form passes `name` explicitly
+          // (see SignUp.tsx) — either way it was landing in auth metadata but
+          // never being copied into profiles until now.
+          const metadataName = (
+            session.user.user_metadata?.full_name ||
+            session.user.user_metadata?.name ||
+            ''
+          ).trim();
+          if (!initialProfile.display_name && metadataName) {
+            await updateProfile({ display_name: metadataName }, session.user.id);
+          }
+
+          // Silently derive a handle for genuinely new profiles. Existing
+          // users already have one from the one-time migration, so this is
+          // skipped for them. profiles.handle is unique via a
+          // case-insensitive index (lower(handle)), and the profiles SELECT
+          // policy is owner-only (id = auth.uid()) — this client can't
+          // proactively query which handles other users already hold. So
+          // "is it taken" is answered by attempting the real write: a
+          // conflicting handle fails the unique index with Postgres error
+          // 23505 regardless of RLS (uniqueness constraints aren't
+          // RLS-scoped), and a non-conflicting write succeeds and IS the
+          // persist step — no separate save call is needed afterward.
+          if (!initialProfile.handle) {
+            const nameForHandle = (initialProfile.display_name || metadataName).trim();
+            const tryClaimHandle = async (candidate: string): Promise<boolean> => {
+              const { error } = await supabase
+                .from('profiles')
+                .update({ handle: candidate })
+                .eq('id', session.user.id);
+              if (!error) return false;
+              if (error.code === '23505') return true;
+              throw error;
+            };
+            await deriveHandleFromName(nameForHandle, tryClaimHandle);
+          }
+
           const finalProfile = await loadProfile(session.user.id);
           setShowOnboarding(!finalProfile.onboarding_complete);
         } catch (err) {
