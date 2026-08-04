@@ -44,6 +44,8 @@ pointer named — do not duplicate it here.
 - **The `profileInitialized` gate is shared infrastructure** — identity/signup logic (display_name backfill, silent handle derivation) is wired inside this existing gated block, not a second listener; do not disturb it when touching either. Full detail: Authentication below.
 - **`recipe_sends` is two-party with a status-only-update trigger** — sender gets INSERT+SELECT, recipient gets SELECT + status-only UPDATE; a `BEFORE UPDATE` trigger (not RLS — Postgres RLS can't restrict which columns change) rejects any recipient write that touches the snapshot, `sender_id`, `recipient_id`, `photo_url`, or `note`; verified by violation testing. Full detail: Account-to-Account Sharing — Build 2 in FEATURE_SPECS.md.
 - **`connections`/`notifications` have no client INSERT policy — deny-all by design** — rows must be created through a trusted server-side path (Edge Function or `security definer` function) at send/save time, never a direct client insert. Full detail: Account-to-Account Sharing — Build 2 in FEATURE_SPECS.md.
+- **`send_recipe_to_friend` is the trusted write path for sends** — a `SECURITY DEFINER` Postgres function is the ONLY way `recipe_sends`/`notifications` rows get created for a send. It bypasses RLS on write, so its own internal guards ARE the security boundary: rejects unauthenticated callers, rejects sending a recipe the caller doesn't own, rejects self-send, validates every recipient exists, and is all-or-nothing atomic. Called via `supabase.rpc(...)`, which carries the real caller's JWT so `auth.uid()` is the true sender. Do NOT add a client-side insert path to these tables; do NOT weaken the in-function guards. Full detail: Account-to-Account Sharing — Build 3 in FEATURE_SPECS.md.
+- **`send-{token}.jpg` is a THIRD immutable photo path case**, alongside live `{recipeId}.jpg` and share `share-{token}.jpg` above — byte-copied via SDK, sender's own client, owner-folder, keyed on a client-minted token resolved BEFORE the RPC call (the sender has no UPDATE policy on `recipe_sends` and the row's `photo_url` is trigger-immutable, so post-insert photo attachment is impossible by design). One copy per send, fanned out to all recipients. No existing function may construct a `send-` prefix. Full detail: Account-to-Account Sharing — Build 3 in FEATURE_SPECS.md.
 
 ---
 
@@ -172,6 +174,14 @@ FEATURE_SPECS.md for the full inventory. This list keeps growing; treat any spec
 count as stale on sight rather than trusting a documented number, same caution as the
 TypeScript error count below.
 
+**Deliberately lopsided exception, as of Build 3:** `supabase/migrations/` now
+exists in-repo, containing ONLY `20260804000001_send_recipe_to_friend.sql` (the
+`send_recipe_to_friend` function from Account-to-Account Sharing — Build 3 in
+FEATURE_SPECS.md). Builds 1 & 2's schema remains entirely dashboard-only, per the
+paragraph above — this one function is the sole tracked exception, pending the
+still-deferred full schema export. Do not treat this as "schema is now tracked" —
+re-check `supabase/migrations/` directly rather than assuming its contents.
+
 **Legacy localStorage keys still in use:** `tipsyDinnerEmail`, `tipsyDinnerTable`.
 `tipsyDinnerName` is no longer a name source — `display_name` is authoritative (see
 "Account Identity" in FEATURE_SPECS.md) — but the `KEYS.name` constant pointing at it
@@ -188,6 +198,14 @@ loose end, not removed.
 - Streaming implemented (SSE, word-by-word) via `parseSSEStream` in App.tsx
 - `max_tokens` = 4096 (raised from 2048 to give the grocery enrichment call headroom; Anthropic bills only generated tokens, so no cost/behavior change for normal turns)
 - Two modes: Brainstorm and Recipe. Never enter Recipe mode except on explicit user choice. Recipe card is never updated for technique/wine/tangent questions.
+
+**`ai-chat` is not a template for authenticated writes.** It's an anonymous proxy —
+`verify_jwt = false`, called with the anon key as bearer, no caller-identity
+mechanism at all. `send_recipe_to_friend` (Account-to-Account Sharing — Build 3 in
+FEATURE_SPECS.md) is the app's FIRST `security definer` function and FIRST trusted
+server-side write to protected tables; it deliberately does NOT follow `ai-chat`'s
+pattern — it's called via `supabase.rpc(...)`, which carries the real caller's JWT,
+so `auth.uid()` inside the function is the true authenticated sender.
 
 **System prompt is consolidated.** A single module-level
 `buildSystemPrompt(profile, currentRecipe)` (App.tsx, immediately after

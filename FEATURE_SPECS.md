@@ -796,3 +796,128 @@ either connection party can read a shared `connections` row and a third party
 cannot; no authenticated client can insert a `connections` row at all. All seeded
 test rows were deleted afterward — the three new tables hold zero rows in production
 as of this write-up.
+
+---
+
+## Account-to-Account Sharing — Build 3: Sending (invisible half shipped; UI deferred)
+
+Two pieces shipped this build, both proven end-to-end at the DB layer: the trusted
+server-side write path (a Postgres function) and the client-side snapshot-builder
+that calls it. **The send UI was explicitly NOT built this session** — there is no
+screen or control anywhere in the app yet that lets a user pick recipients and
+trigger a send. That's a future session's work; this build is the plumbing beneath
+where that UI will eventually sit.
+
+**Piece 1 — `send_recipe_to_friend` (the trusted write path).**
+
+`public.send_recipe_to_friend(p_recipe_id uuid, p_snapshot jsonb, p_note text,
+p_photo_url text, p_recipient_ids uuid[])`, `returns table (recipient_id uuid,
+send_id uuid)` — one row per recipient, not a bare count, so the client can pair
+each recipient with the specific `recipe_sends.id` created for them. `language
+plpgsql`, `security definer`, `set search_path = public`, `grant execute ... to
+authenticated`.
+
+Five guards, in this order, every one violation-tested live with real authenticated
+client sessions (not just seeded rows) — all six cases passed: (1) unauthenticated
+caller (`auth.uid()` null) rejected; (2) sending a recipe the caller doesn't own
+rejected; (3) self-send (any recipient id equal to the sender) rejected; (4) every
+recipient id must resolve to an existing `profiles` row, checked all-or-nothing
+*before* any writes — a mixed batch of one valid and one invalid recipient writes
+nothing at all, proven by row-count; (5) happy path — multiple valid recipients each
+get their own `recipe_sends` + `notifications` row, and the sixth test independently
+confirmed the two-party read visibility from Build 2 (sender sees their sends,
+recipient sees sends addressed to them) still holds for rows created through this
+function.
+
+Atomicity: the entire function body is Postgres's implicit per-call transaction:
+any uncaught `raise exception` — from a guard or from an insert itself — rolls back
+every write already made in that call. There is no partial send; a batch of N
+recipients either produces N complete `recipe_sends`+`notifications` pairs or zero
+rows.
+
+Identity: called via `supabase.rpc(...)`, which forwards the calling client's real
+JWT — `security definer` changes the function's *execution* privileges (letting it
+write past RLS), not `auth.uid()`, which still reads the real caller's session. This
+is what makes guard (1) meaningful rather than trivially satisfiable.
+
+**Closed decisions — do not re-litigate:**
+- **Security-definer function chosen over an Edge Function.** Reasons: `auth.uid()`
+  is correct by construction via the RPC's forwarded JWT (no manual token-forwarding
+  needed); native Postgres transaction atomicity for the multi-table, multi-recipient
+  write, instead of hand-rolled compensation logic; fits the existing dashboard-SQL
+  convention Builds 1 & 2 already established; and `ai-chat` (see AI Layer in
+  CLAUDE.md) was confirmed unusable as an auth template — it's an anonymous proxy
+  with no caller-identity mechanism at all.
+- **Self-send is blocked**, checked before ownership/recipient validation.
+- **Duplicate sends are explicitly ALLOWED** — no dedup check anywhere in the
+  function. Re-sending the same recipe to the same person is a legitimate case (the
+  recipe was edited since the last send, not merely re-sent unchanged), so no
+  uniqueness constraint or lookup guards against it.
+- **The photo does NOT live inside the `recipe` jsonb.** It travels only as its own
+  value — the RPC's `p_photo_url` parameter, landing in `recipe_sends.photo_url`, a
+  column separate from `recipe_sends.recipe`. The `recipe` jsonb has no photo key at
+  all, by design (see Piece 2 below for why).
+- **Return shape is per-send `{recipient_id, send_id}` rows, not a bare success
+  count** — deliberate, so a multi-recipient call can be matched back up
+  one-to-one on the client if needed later (e.g. per-recipient error surfacing, see
+  the forward-looking note below).
+
+**Piece 2 — `sendRecipeToFriends(recipeId, recipientIds, note)` (the
+snapshot-builder, in `data.ts`, alongside `shareRecipeSnapshot`).**
+
+Re-queries the recipe fresh from the DB, scoped to the current user — the in-memory
+`SavedRecipe`/`Recipe` shape already in scope on a recipe card is NOT reused,
+because it lacks `cook_time`/`serves`, which the snapshot needs and which only a
+fresh `recipes` select carries.
+
+Builds a **reconstitution** snapshot, not a display snapshot — this is the
+load-bearing shape difference from `shareRecipeSnapshot`'s `RecipeShareSnapshot`:
+- Ingredients as `{name, quantity, sort_order}` — the same shape `saveRecipe`/
+  `updateSavedRecipe` write to the `ingredients` table, NOT the share flow's
+  display-oriented `{name, qty}`. This is what makes the jsonb something a future
+  save step can insert directly into `recipes`+`ingredients` rather than needing a
+  translation step.
+- Steps routed through `normalizeStep()` (untouched, per its standing contract in
+  CLAUDE.md) — always `{title, instruction}` objects in the frozen snapshot, never a
+  raw legacy string, even if the source recipe still has legacy plain-string steps.
+- `title`, `description`, `cook_time`, `serves` carried at the top level.
+- **No photo key, no category/categoryId, no cook-history/ratings data** — the
+  snapshot is deliberately minimal to exactly what a recipe row + its ingredients +
+  its steps need to be reconstituted; nothing display-only or owner-only rides
+  along.
+
+Photo copy is **Option A**: a single `crypto.randomUUID()` token is minted
+client-side once per call, before the photo block — mirroring
+`shareRecipeSnapshot`'s sequencing exactly. If the recipe has a photo, one
+download→upload→`getPublicUrl` byte-copy runs (sender's own authenticated client,
+owner-folder path, SDK — never the public CDN), landing at
+`{userId}/send-{token}.jpg`. This single copy is then reused as `p_photo_url` for
+every recipient in the call — one physical file serves an entire multi-recipient
+send, not one copy per recipient. If the recipe has no photo, the copy is skipped
+entirely and `photoUrl` stays `null` — no placeholder, no error.
+
+Calls `supabase.rpc('send_recipe_to_friend', { p_recipe_id, p_snapshot, p_note,
+p_photo_url, p_recipient_ids })` and returns whatever the RPC returns.
+
+Verified live end-to-end (not just unit-level): authenticated as a real test
+account, sent an existing photographed recipe to two real recipient accounts through
+the actual function. Confirmed by direct inspection: both `recipe_sends` rows
+correct (sender, recipient, note, status, photo_url); the photo genuinely
+byte-copied to the `send-{token}.jpg` path (confirmed via storage SDK list, not a
+CDN guess) and byte-size-identical to the live photo, with the live photo
+untouched; both `notifications` rows correct and paired to the right send; both
+send rows share the identical `photo_url` (proving the one-copy-fans-out-to-all-
+recipients mechanic); the `recipe` jsonb's shape matched the reconstitution spec
+exactly (ingredients in order, steps all normalized objects, no photo/category
+keys). All test rows, the storage copy, and the throwaway test account used for the
+multi-recipient case were deleted afterward; the two tables and the storage folder
+were confirmed back to their exact pre-test state.
+
+**Forward-looking note for whoever builds the send UI (piece 3):** today, the RPC
+returns `null` on *any* failure — `sendRecipeToFriends` doesn't distinguish "not
+authenticated" from "invalid recipient" from "recipe not owned by caller" once it
+catches the RPC's error; that's fine with no UI consuming it. The distinction
+exists internally (five separately-worded `raise exception` messages inside
+`send_recipe_to_friend`) and must not be flattened once a UI needs to show the user
+something more specific than a generic failure toast — piece 3 should surface the
+RPC's distinct named errors rather than re-collapsing them.
