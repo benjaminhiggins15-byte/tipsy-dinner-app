@@ -1126,6 +1126,122 @@ export async function getRecipeSnapshotByToken(token: string): Promise<RecipeSha
   }
 }
 
+// Reconstitution shape, not display shape — feeds send_recipe_to_friend's
+// p_snapshot, which a recipient's own client later rebuilds into a full
+// recipe row from. Ingredients keep the DB column names
+// {name, quantity, sort_order} rather than RecipeShareSnapshot's
+// display-oriented {name, qty}. No photo key here: the photo travels as
+// its own RPC param (p_photo_url), never nested inside this jsonb.
+export type RecipeSendSnapshot = {
+  title: string;
+  description: string;
+  ingredients: { name: string; quantity: string; sort_order: number }[];
+  steps: { title: string; instruction: string }[];
+  cook_time: string | null;
+  serves: string | null;
+};
+
+// Builds the snapshot and hands it, plus a fanned-out photo copy, to the
+// send_recipe_to_friend security-definer function (see
+// supabase/migrations/20260804000001_send_recipe_to_friend.sql), which does
+// the actual recipe_sends/notifications writes atomically. This function
+// owns only snapshot construction and the photo byte-copy — every guard
+// (ownership, self-send, recipient validity) lives in the RPC.
+export async function sendRecipeToFriends(
+  recipeId: number | string,
+  recipientIds: string[],
+  note: string
+): Promise<{ recipient_id: string; send_id: string }[] | null> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot send recipe: no user session');
+    return null;
+  }
+
+  try {
+    const { data: recipe, error } = await supabase
+      .from('recipes')
+      .select(`
+        title,
+        description,
+        steps,
+        cook_time,
+        serves,
+        photo_url,
+        photo_version,
+        ingredients (
+          name,
+          quantity,
+          sort_order
+        )
+      `)
+      .eq('id', recipeId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!recipe) return null;
+
+    // Minted once per call, before the photo copy, exactly as
+    // shareRecipeSnapshot does — reused for every recipient in
+    // p_recipient_ids, since one call can fan out to N recipients but the
+    // photo only needs one byte-copy.
+    const token = crypto.randomUUID();
+
+    // Mirrors shareRecipeSnapshot's photo mechanic, but under a
+    // send-{token} path — never share-{token}, which is reserved for the
+    // public share flow — so the recipients' copy is immune to the owner
+    // later editing/deleting the live photo or recipe.
+    let photoUrl: string | null = null;
+    if (recipe.photo_url) {
+      const sourcePath = `${userId}/${recipeId}.jpg`;
+      const { data: photoBlob, error: downloadError } = await supabase.storage
+        .from('recipe-photos')
+        .download(sourcePath);
+
+      if (downloadError) throw downloadError;
+
+      const sendPath = `${userId}/send-${token}.jpg`;
+      const { error: sendUploadError } = await supabase.storage
+        .from('recipe-photos')
+        .upload(sendPath, photoBlob, { contentType: 'image/jpeg', upsert: true });
+
+      if (sendUploadError) throw sendUploadError;
+
+      const { data: sendPublicUrlData } = supabase.storage
+        .from('recipe-photos')
+        .getPublicUrl(sendPath);
+      photoUrl = sendPublicUrlData.publicUrl;
+    }
+
+    const snapshot: RecipeSendSnapshot = {
+      title: recipe.title,
+      description: recipe.description,
+      ingredients: (recipe.ingredients || [])
+        .sort((a: any, b: any) => a.sort_order - b.sort_order)
+        .map((ing: any) => ({ name: ing.name, quantity: ing.quantity, sort_order: ing.sort_order })),
+      steps: (recipe.steps || []).map((step: RecipeStep) => normalizeStep(step)),
+      cook_time: recipe.cook_time ?? null,
+      serves: recipe.serves ?? null,
+    };
+
+    const { data: sendResults, error: rpcError } = await supabase.rpc('send_recipe_to_friend', {
+      p_recipe_id: recipeId,
+      p_snapshot: snapshot,
+      p_note: note,
+      p_photo_url: photoUrl,
+      p_recipient_ids: recipientIds,
+    });
+
+    if (rpcError) throw rpcError;
+
+    return sendResults;
+  } catch (error) {
+    console.error('Error sending recipe to friends:', error);
+    return null;
+  }
+}
+
 // One-time migration from localStorage to Supabase
 export async function migrateRecipesFromLocalStorage(): Promise<boolean> {
   try {
