@@ -1242,6 +1242,136 @@ export async function sendRecipeToFriends(
   }
 }
 
+export type SaveReceivedRecipeResult = {
+  recipeId: string;
+  photoCopied: boolean; // false for both "no photo owed" and "copy failed" — check via findReceivedRecipesWithPhotoOwed if you need to distinguish
+};
+
+// Thrown only for Step 1/2 failures (real failures). recipeId is set once
+// Step 1 has succeeded, so a retry can pass it as `existingRecipeId` and skip
+// straight to Step 2 instead of inserting a duplicate recipe.
+export class ReceivedRecipeSaveError extends Error {
+  recipeId?: string;
+  constructor(message: string, recipeId?: string) {
+    super(message);
+    this.name = 'ReceivedRecipeSaveError';
+    this.recipeId = recipeId;
+  }
+}
+
+// Runs the three-actor sequence for a received recipe: reconstitute+save,
+// finish (attribution/connection/status), then the best-effort photo copy.
+// Never calls clearRecipeCache — that's the caller's job, same as every
+// other save/update/delete function in this file.
+export async function saveReceivedRecipe(
+  sendId: string,
+  snapshot: RecipeSendSnapshot,
+  existingRecipeId?: string,
+): Promise<SaveReceivedRecipeResult> {
+  // Step 1 — RECONSTITUTE + saveRecipe. Skipped on retry (existingRecipeId
+  // means a prior call already created the recipe; only Step 2 failed).
+  let recipeId = existingRecipeId;
+  if (!recipeId) {
+    try {
+      recipeId = await saveRecipe(
+        {
+          id: Date.now(), // unused by saveRecipe — matches the dummy-id convention at other call sites
+          title: snapshot.title,
+          description: snapshot.description,
+          category: '',
+          ingredients: snapshot.ingredients.map((ing) => ({ name: ing.name, qty: ing.quantity })),
+          steps: snapshot.steps, // already normalized {title, instruction} from send time — no normalizeStep()
+          createdAt: new Date().toISOString(),
+        },
+        'manual',
+      );
+    } catch (error) {
+      // Nothing durable was created; send stays 'pending'; safe to retry from scratch.
+      throw new ReceivedRecipeSaveError(error instanceof Error ? error.message : 'failed to save recipe');
+    }
+  }
+
+  // Step 2 — FINISH. Atomically stamps inspired_by, forms the connection,
+  // sets saved_recipe_id, flips status to 'saved'.
+  const { error: finishError } = await supabase.rpc('finish_received_recipe_save', {
+    p_send_id: sendId,
+    p_recipe_id: recipeId,
+  });
+
+  if (finishError) {
+    // Worst partial state: a real, photoless, unattributed recipe now exists
+    // and the send still shows 'pending'. recipeId travels with the error so
+    // a retry can resume exactly here.
+    throw new ReceivedRecipeSaveError(finishError.message, recipeId);
+  }
+
+  // Step 3 — PHOTO. Designed soft failure: never throws, never rolls back.
+  // A no-photo send and a failed copy both leave a complete, saved recipe —
+  // just with photo_url left null, retryable later via retryReceivedRecipePhoto.
+  let photoCopied = false;
+  try {
+    const { data, error: photoError } = await supabase.functions.invoke('copy-received-recipe-photo', {
+      body: { send_id: sendId, recipe_id: recipeId },
+    });
+    if (photoError) {
+      console.error('Received-recipe photo copy failed (recipe saved; photo pending):', photoError);
+    } else {
+      photoCopied = data?.copied === true;
+    }
+  } catch (error) {
+    console.error('Received-recipe photo copy failed (recipe saved; photo pending):', error);
+  }
+
+  return { recipeId, photoCopied };
+}
+
+// Retry path for Step 3 only. Never re-runs saveRecipe or finish_received_recipe_save —
+// finish rejects a non-pending send, and the Edge Function's copy+patch is idempotent,
+// so calling just this step again is always safe.
+export async function retryReceivedRecipePhoto(sendId: string, recipeId: string): Promise<boolean> {
+  try {
+    const { data, error } = await supabase.functions.invoke('copy-received-recipe-photo', {
+      body: { send_id: sendId, recipe_id: recipeId },
+    });
+    if (error) {
+      console.error('Error retrying received-recipe photo copy:', error);
+      return false;
+    }
+    return data?.copied === true;
+  } catch (error) {
+    console.error('Error retrying received-recipe photo copy:', error);
+    return false;
+  }
+}
+
+// Finds saved recipes whose send legitimately had a photo but never got it
+// copied (Step 3 soft-failed). A no-photo send owes nothing.
+export type ReceivedRecipePhotoOwed = { sendId: string; recipeId: string };
+
+export async function findReceivedRecipesWithPhotoOwed(): Promise<ReceivedRecipePhotoOwed[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from('recipe_sends')
+      .select('id, saved_recipe_id, recipes(photo_url)')
+      .eq('recipient_id', userId)
+      .eq('status', 'saved')
+      .not('saved_recipe_id', 'is', null)
+      .not('photo_url', 'is', null);
+
+    if (error) throw error;
+
+    return (data || [])
+      .filter((row: any) => row.recipes && row.recipes.photo_url === null)
+      .map((row: any) => ({ sendId: row.id, recipeId: row.saved_recipe_id }));
+  } catch (error) {
+    console.error('Error finding received recipes with photo owed:', error);
+    return [];
+  }
+}
+
 // One-time migration from localStorage to Supabase
 export async function migrateRecipesFromLocalStorage(): Promise<boolean> {
   try {

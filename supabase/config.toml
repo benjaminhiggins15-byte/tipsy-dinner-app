@@ -9,3 +9,8 @@ entrypoint = "./functions/ai-chat/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/ai-chat/*.html" ]
+
+[functions.copy-received-recipe-photo]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/copy-received-recipe-photo/index.ts"

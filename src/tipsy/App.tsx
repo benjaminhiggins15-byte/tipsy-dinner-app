@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName } from "./data";
+import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName, saveReceivedRecipe, retryReceivedRecipePhoto, findReceivedRecipesWithPhotoOwed, type RecipeSendSnapshot } from "./data";
 import { type CropRect } from "./image";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
@@ -25,6 +25,23 @@ import {
   IconMessageCircle,
 } from "@tabler/icons-react";
 import { pickChips } from "./chips";
+
+// ==================== TEMPORARY — Session (a) test scaffolding ====================
+// Console-only hooks for exercising the receive/save engine before any receive UI
+// exists (that's Session (b)). Same throwaway pattern as the one-time step-title
+// backfill hook: attach to window, invoke from the browser console, remove before
+// Session (b) starts building the real receive UI. Never wired into a render path.
+if (typeof window !== "undefined") {
+  (window as any).__tdSaveReceived = (
+    sendId: string,
+    snapshot: RecipeSendSnapshot,
+    existingRecipeId?: string,
+  ) => saveReceivedRecipe(sendId, snapshot, existingRecipeId);
+  (window as any).__tdRetryReceivedPhoto = (sendId: string, recipeId: string) =>
+    retryReceivedRecipePhoto(sendId, recipeId);
+  (window as any).__tdFindPhotoOwed = () => findReceivedRecipesWithPhotoOwed();
+}
+// ==================== END TEMPORARY scaffolding ====================
 
 type RecipeDraft = {
   title: string;

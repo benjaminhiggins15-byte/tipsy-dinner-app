@@ -46,6 +46,10 @@ pointer named — do not duplicate it here.
 - **`connections`/`notifications` have no client INSERT policy — deny-all by design** — rows must be created through a trusted server-side path (Edge Function or `security definer` function) at send/save time, never a direct client insert. Full detail: Account-to-Account Sharing — Build 2 in FEATURE_SPECS.md.
 - **`send_recipe_to_friend` is the trusted write path for sends** — a `SECURITY DEFINER` Postgres function is the ONLY way `recipe_sends`/`notifications` rows get created for a send. It bypasses RLS on write, so its own internal guards ARE the security boundary: rejects unauthenticated callers, rejects sending a recipe the caller doesn't own, rejects self-send, validates every recipient exists, and is all-or-nothing atomic. Called via `supabase.rpc(...)`, which carries the real caller's JWT so `auth.uid()` is the true sender. Do NOT add a client-side insert path to these tables; do NOT weaken the in-function guards. Full detail: Account-to-Account Sharing — Build 3 in FEATURE_SPECS.md.
 - **`send-{token}.jpg` is a THIRD immutable photo path case**, alongside live `{recipeId}.jpg` and share `share-{token}.jpg` above — byte-copied via SDK, sender's own client, owner-folder, keyed on a client-minted token resolved BEFORE the RPC call (the sender has no UPDATE policy on `recipe_sends` and the row's `photo_url` is trigger-immutable, so post-insert photo attachment is impossible by design). One copy per send, fanned out to all recipients. No existing function may construct a `send-` prefix. Full detail: Account-to-Account Sharing — Build 3 in FEATURE_SPECS.md.
+- **Saving a received recipe is a THREE-ACTOR sequence — client `saveRecipe` → SQL `finish_received_recipe_save` → service-role `copy-received-recipe-photo` Edge Function, in that fixed order** — deliberately NOT atomic across DB+storage; the photo step is last on purpose, designed to be the one seam allowed to fail softly and be retried. Full detail: Account-to-Account Sharing — Build 4 (Session a) in FEATURE_SPECS.md.
+- **`copy-received-recipe-photo` is the app's FIRST service-role Edge Function** — it authorizes every decision with a CALLER-scoped client (forwarded JWT) and uses the service-role client ONLY to act (storage `.copy` + `photo_url` patch), never to decide; `verify_jwt = true`, unlike `ai-chat`'s anonymous-proxy `verify_jwt = false`. Full detail: Account-to-Account Sharing — Build 4 (Session a) in FEATURE_SPECS.md.
+- **`recipe_sends.saved_recipe_id` is settable exactly once** (null → a recipient-owned recipe id, never reassignable) — enforced by extending the existing `enforce_recipe_sends_status_only_update` trigger; service role bypasses RLS but NOT triggers, so this holds even for the elevated photo-copy actor. Full detail: Account-to-Account Sharing — Build 4 (Session a) in FEATURE_SPECS.md.
+- **`finish_received_recipe_save` (`SECURITY DEFINER`) is the only path that stamps `inspired_by`, forms the connection, sets `saved_recipe_id`, and flips status** — atomically, guarded on caller-is-recipient and status-is-pending, row-locked against a concurrent double-finish. Connection ordering uses canonical `LEAST`/`GREATEST` of the two profile ids — the table's UNIQUE constraint alone would NOT catch a reversed-pair duplicate without this ordering discipline. Full detail: Account-to-Account Sharing — Build 4 (Session a) in FEATURE_SPECS.md.
 
 ---
 
@@ -172,7 +176,16 @@ account-to-account sharing added three more tables (`connections`, `recipe_sends
 the same way — see the Supabase section of "Account-to-Account Sharing — Build 2" in
 FEATURE_SPECS.md for the full inventory. This list keeps growing; treat any specific
 count as stale on sight rather than trusting a documented number, same caution as the
-TypeScript error count below.
+TypeScript error count below. Build 4 (Session a) of account-to-account sharing added
+one more column (`recipe_sends.saved_recipe_id`), extended the existing
+`enforce_recipe_sends_status_only_update` trigger to also guard that column, added
+the `finish_received_recipe_save` `SECURITY DEFINER` function, and added the
+`copy-received-recipe-photo` Edge Function — all applied directly (dashboard/CLI),
+same convention as everything else in this section. See "Account-to-Account Sharing —
+Build 4 (Session a)" in FEATURE_SPECS.md for the full detail, including the
+connection-forming (`finish_received_recipe_save`) and photo-copy
+(`copy-received-recipe-photo`) paths this build added on top of Build 2/3's data
+model.
 
 **Deliberately lopsided exception, as of Build 3:** `supabase/migrations/` now
 exists in-repo, containing ONLY `20260804000001_send_recipe_to_friend.sql` (the

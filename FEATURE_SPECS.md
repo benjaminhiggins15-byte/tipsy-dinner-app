@@ -921,3 +921,151 @@ exists internally (five separately-worded `raise exception` messages inside
 `send_recipe_to_friend`) and must not be flattened once a UI needs to show the user
 something more specific than a generic failure toast — piece 3 should surface the
 RPC's distinct named errors rather than re-collapsing them.
+
+## Account-to-Account Sharing — Build 4 (Session a): Receiving — the save engine
+
+This session shipped the receive-side counterpart to Build 3's send-side plumbing:
+turning a `recipe_sends` row into a real, owned, attributed recipe. Like Build 3,
+**this is plumbing only — there is still no receive UI anywhere in the app.** The
+three console-only test hooks described below exist purely to exercise this engine
+before Session (b) builds the screen that will call it for real.
+
+**Three-actor sequence, deliberately non-atomic.** Saving a received recipe runs as
+three separate actors, in this fixed order, each with a different privilege level:
+
+1. **Client** — `saveRecipe()` (existing function, unchanged) reconstitutes the
+   frozen `RecipeSendSnapshot` into a normal owned recipe row + ingredients, exactly
+   as if the user had typed it in themselves.
+2. **SQL** — `finish_received_recipe_save` (`security definer`) stamps attribution,
+   forms the connection, sets `saved_recipe_id`, and flips the send's status to
+   `saved` — all in one atomic statement-group.
+3. **Service role** — the `copy-received-recipe-photo` Edge Function byte-copies the
+   sender's send-photo into the recipient's own photo path and patches the new
+   recipe's `photo_url`/`photo_version`.
+
+This is intentionally NOT one atomic transaction across DB + storage — Supabase
+gives no cross-system transaction, and object storage has no rollback semantics
+worth relying on. Instead, the photo step is placed last and designed as the one
+seam that's allowed to fail softly and be retried, while steps 1–2 are the ones
+that must succeed for the recipe to "count" as saved.
+
+**`saveReceivedRecipe(sendId, snapshot, existingRecipeId?)`** (`data.ts`, immediately
+after `sendRecipeToFriends`) is the single client entry point that runs the sequence
+and returns `{ recipeId, photoCopied }`. `photoCopied` collapses two cases that look
+identical from the caller's side ("send had no photo" and "copy failed") — call
+`findReceivedRecipesWithPhotoOwed()` if the distinction matters.
+
+**Failure choreography, seam by seam:**
+- **Step 1 fails** (recipe insert/ingredient insert throws) — nothing durable was
+  created; the send is still `pending`. Thrown as `ReceivedRecipeSaveError` with no
+  `recipeId` attached. Safe to retry from scratch by calling
+  `saveReceivedRecipe` again with no `existingRecipeId`.
+- **Step 2 fails** (`finish_received_recipe_save` RPC returns an error — e.g. a
+  concurrent double-finish loses the row lock, or the send isn't actually `pending`
+  anymore) — by this point a real, owned, photoless, unattributed recipe already
+  exists and the send is still `pending`. This is the worst partial state the
+  sequence can leave behind, and it's accepted deliberately: `ReceivedRecipeSaveError`
+  is thrown carrying that `recipeId`, so a retry can pass it back in as
+  `existingRecipeId` and skip straight to Step 2 instead of creating a duplicate
+  recipe. **No compensating delete of the Step-1 recipe is performed on this path —
+  confirmed deliberate, not an oversight.** Rationale: a compensating delete adds its
+  own failure mode (what if the delete itself fails?) for a case that's already
+  resumable without one; leaving an orphaned-but-real recipe behind is a strictly
+  better failure mode than risking a doubly-broken state.
+- **Step 3 fails or is skipped** (copy error, or the send legitimately had no photo)
+  — never thrown, never rolled back. The recipe is already fully saved and attributed
+  by this point; only `photo_url` is left `null`. `photoCopied` comes back `false`
+  either way. This is the by-design soft-failure seam — see retry path below.
+- **No-photo send** — Step 3 is attempted, the Edge Function's own no-op branch
+  returns `{ copied: false, reason: 'send has no photo' }`, and `saveReceivedRecipe`
+  reports `photoCopied: false`. Indistinguishable from a real copy failure from this
+  function's return value alone — this is intentional; see `findReceivedRecipesWithPhotoOwed`
+  below for how to tell them apart when it matters.
+
+**Retry path (Step 3 only).** `retryReceivedRecipePhoto(sendId, recipeId)` re-invokes
+just the Edge Function. It never re-runs `saveRecipe` or `finish_received_recipe_save`
+— `finish_received_recipe_save` would reject a non-`pending` send outright (the send
+is already `saved` by this point), and the Edge Function's copy+patch is naturally
+idempotent (retry-on-conflict already built into its own copy logic), so calling only
+this last step again is always safe.
+
+`findReceivedRecipesWithPhotoOwed()` is the detection query behind that retry path —
+it finds every `saved` send belonging to the caller where `saved_recipe_id` is set,
+the *send's own* `photo_url` is non-null (the send genuinely had a photo attached),
+but the resulting recipe's `photo_url` is still null (the copy never landed). A
+no-photo send never appears in this list, because its own `photo_url` is null to
+begin with — only a send that legitimately owes a photo shows up.
+
+**Source-path-parsed-from-immutable-`photo_url` finding.** `copy-received-recipe-photo`
+has no independent record of the original send-photo's storage path — it recovers it
+by parsing `recipe_sends.photo_url` (the public URL) back into an object path. This
+only works because that column is trigger-immutable once set (the Build 2 recipient-
+write-restriction trigger, extended in this session — see below): the recipient can
+never have overwritten it with something unparseable, so parsing the exact
+`send-{token}.jpg` path the sender's own client uploaded is reliable, not a guess.
+
+**`saved_recipe_id` column + trigger extension (Gate 1 of this session).**
+`recipe_sends.saved_recipe_id` (uuid, nullable, FK → `recipes.id` `on delete set
+null`) is settable exactly once: null → a recipient-owned recipe id, never
+reassignable afterward. Enforced by extending the existing
+`enforce_recipe_sends_status_only_update` trigger (Build 2) rather than adding a
+second trigger — the same function now also rejects any UPDATE that would change
+`saved_recipe_id` once it is non-null. This matters because the Edge Function acts
+through the service-role client: **service role bypasses RLS but does NOT bypass
+triggers**, so this guarantee holds even for the elevated actor in step 3.
+
+**`finish_received_recipe_save(p_send_id, p_recipe_id)`** (`security definer`,
+mirrors `send_recipe_to_friend`'s privilege pattern) is the only path that performs
+this step. Guards, checked in order: caller authenticated; send exists and is
+row-locked (`for update`, closing a concurrent-double-finish race — a deliberate
+addition beyond the send-side function's skeleton, not a copy-paste); caller is the
+send's recipient; send status is `pending`; the target recipe exists and is owned by
+the caller. On success, in effectively one statement-group: stamps
+`recipes.inspired_by_id`/`inspired_by_name` from the send's sender; forms a
+`connections` row using canonical `least`/`greatest` ordering of the two profile ids
+— **the table's UNIQUE constraint alone would NOT catch a reversed-pair duplicate;
+the ordering discipline is what makes the constraint effective**, `on conflict do
+nothing` so an already-existing connection is a silent no-op; and sets
+`saved_recipe_id` + flips `status` to `saved` in the same UPDATE, so the two can never
+drift apart mid-failure.
+
+**`copy-received-recipe-photo`** is the app's first Edge Function to use the service
+role at all — see the new CLAUDE.md Load-Bearing Contracts bullet for the
+authorize-with-caller/act-with-admin pattern it establishes. Config: `verify_jwt =
+true` (unlike `ai-chat`'s `verify_jwt = false` anonymous-proxy pattern).
+
+**Session (b) decision, carried forward and now settled — categoryless-recipe
+invisibility.** During this session's verification it was confirmed that
+`getSavedRecipesAll`/`getSavedRecipesForCategory` both select through
+`recipes!inner` joined to `recipe_categories`, so a recipe with zero category rows —
+which is exactly what `saveReceivedRecipe` currently produces, since it calls
+`saveRecipe(..., category: '')` — is invisible to the Recipes tab even though it
+fully exists and is fully owned. This was deliberately NOT fixed in this session
+(Session (a) is save-engine plumbing only, no UI). **Settled resolution for Session
+(b):** the receive UI will reuse the EXISTING save sheet + its standard category
+picker (the same one used when saving a self-built AI/manual recipe), and the
+category the user picks there will flow into `saveReceivedRecipe`'s call to
+`saveRecipe` as a real `categoryId` — not a new/different category mechanism. This
+also means Session (b)'s call site will look more like `saveRecipe`'s other callers
+than the current `category: ''` placeholder above.
+
+**TEMPORARY test scaffolding — remove before Session (b).** `App.tsx` currently
+attaches three console-only hooks to `window` —
+`window.__tdSaveReceived`, `window.__tdRetryReceivedPhoto`, and
+`window.__tdFindPhotoOwed` — wrapping `saveReceivedRecipe`, `retryReceivedRecipePhoto`,
+and `findReceivedRecipesWithPhotoOwed` respectively, so the save engine could be
+exercised from a browser console before any receive UI exists. Same throwaway
+pattern as the one-time step-title backfill hook. Never wired into a render path.
+**Must be deleted at the start of Session (b)**, once the real receive UI calls
+these functions directly.
+
+**Verification.** All three SQL/Edge-Function gates were violation-tested
+individually as they were built; the full client-wired engine was then verified
+end-to-end against the live Supabase project using a real seeded send (created
+through the actual `sendRecipeToFriends`, not a reimplementation) across five
+scenarios: happy path; forced Step 1 failure; forced Step 2 failure with successful
+retry-resume via `existingRecipeId`; forced Step 3 failure with successful retry via
+`retryReceivedRecipePhoto`/detected via `findReceivedRecipesWithPhotoOwed`; and a
+no-photo send. All scenarios behaved as specified above. Teardown was verified
+exact-object-count with zero residue; `test2@test2.com` and all real accounts were
+confirmed untouched throughout.
