@@ -4013,6 +4013,7 @@ function RecipeCard({
           <style>{`
             @keyframes tipsy-fade { from { opacity: 0; } to { opacity: 1; } }
             @keyframes tipsy-slideup { from { transform: translateY(100%); } to { transform: translateY(0); } }
+            @keyframes tipsy-chip-in { from { opacity: 0; transform: scale(0.85); } to { opacity: 1; transform: scale(1); } }
           `}</style>
           <div
             onClick={closeSendSheet}
@@ -4080,7 +4081,6 @@ function RecipeCard({
                   marginBottom: 16,
                 }}>
                   <input
-                    autoFocus
                     value={sendQuery}
                     onChange={(e) => setSendQuery(e.target.value)}
                     placeholder="search by name or @handle"
@@ -4103,7 +4103,22 @@ function RecipeCard({
                   )}
                 </div>
 
-                {/* Results / connections list */}
+                {/* Selected-recipients chip row — persists across search state so
+                    the selection is never invisible; removal happens only here. */}
+                {selectedRecipients.size > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+                    {Array.from(selectedRecipients.values()).map((profile) => (
+                      <SendRecipientChip
+                        key={profile.id}
+                        profile={profile}
+                        onRemove={() => toggleRecipient(profile)}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {/* Results / connections list — selected people are filtered out here;
+                    they only appear as chips above until removed. */}
                 <div style={{ marginBottom: 16 }}>
                   {sendQuery.trim() ? (
                     sendSearching ? null : sendResults.length === 0 ? (
@@ -4118,24 +4133,43 @@ function RecipeCard({
                         No one found. Check the handle and try again.
                       </div>
                     ) : (
-                      sendResults.map((profile) => (
-                        <SendRecipientRow
-                          key={profile.id}
-                          profile={profile}
-                          selected={selectedRecipients.has(profile.id)}
-                          onToggle={() => toggleRecipient(profile)}
-                        />
-                      ))
+                      sendResults
+                        .filter((profile) => !selectedRecipients.has(profile.id))
+                        .map((profile) => (
+                          <SendRecipientRow
+                            key={profile.id}
+                            profile={profile}
+                            selected={false}
+                            onToggle={() => toggleRecipient(profile)}
+                          />
+                        ))
                     )
                   ) : (
-                    sendConnections.map((profile) => (
-                      <SendRecipientRow
-                        key={profile.id}
-                        profile={profile}
-                        selected={selectedRecipients.has(profile.id)}
-                        onToggle={() => toggleRecipient(profile)}
-                      />
-                    ))
+                    sendConnections.length > 0 && (
+                      <>
+                        <div style={{
+                          fontFamily: "Inter, sans-serif",
+                          fontSize: 10,
+                          fontWeight: 500,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.1em",
+                          color: "rgba(35,60,0,0.35)",
+                          marginBottom: 8,
+                        }}>
+                          Your connections
+                        </div>
+                        {sendConnections
+                          .filter((profile) => !selectedRecipients.has(profile.id))
+                          .map((profile) => (
+                            <SendRecipientRow
+                              key={profile.id}
+                              profile={profile}
+                              selected={false}
+                              onToggle={() => toggleRecipient(profile)}
+                            />
+                          ))}
+                      </>
+                    )
                   )}
                 </div>
 
@@ -4381,6 +4415,56 @@ function SendRecipientRow({ profile, selected, onToggle }: {
         {selected && <IconCheck size={13} stroke={2.5} color="#FAF7F2" />}
       </div>
     </button>
+  );
+}
+
+// A selected recipient's chip in the Send Recipe sheet's persistent chip row —
+// the only way to deselect once someone is chosen is this chip's x.
+function SendRecipientChip({ profile, onRemove }: {
+  profile: ProfileSearchResult;
+  onRemove: () => void;
+}) {
+  const firstName = profile.display_name?.split(" ")[0] || profile.display_name;
+  return (
+    <div style={{
+      display: "flex",
+      alignItems: "center",
+      gap: 6,
+      background: "#233C00",
+      borderRadius: 999,
+      padding: "5px 6px 5px 5px",
+      animation: "tipsy-chip-in 0.18s ease",
+    }}>
+      <div style={{
+        width: 20,
+        height: 20,
+        borderRadius: "50%",
+        background: "rgba(254,231,192,0.2)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        fontFamily: "Inter, sans-serif",
+        fontSize: 11,
+        fontWeight: 700,
+        color: "#FEE7C0",
+      }}>
+        {profile.display_name?.charAt(0).toUpperCase() || "?"}
+      </div>
+      <div style={{ fontFamily: "Inter, sans-serif", fontSize: 13, fontWeight: 500, color: "#FEE7C0" }}>
+        {firstName}
+      </div>
+      <button
+        onClick={onRemove}
+        aria-label={`Remove ${firstName}`}
+        style={{ background: "transparent", border: "none", padding: 2, cursor: "pointer", display: "flex", alignItems: "center" }}
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FEE7C0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </button>
+    </div>
   );
 }
 
