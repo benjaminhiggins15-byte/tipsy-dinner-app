@@ -65,6 +65,17 @@ logos) lives in CLAUDE.md; this file is the per-screen application of it.
 - Steps tab: untitled steps render flat and numbered; titled steps render as collapsible accordion rows (tap to expand, chevron rotates), collapsed by default. A "Tap each step for details" hint (Fraunces italic 55%) shows only when ≥1 step has a title.
 - History tab: "Log cook" button (filled `#233C00`/cream) at the top of the tab content, not the header. Rows: date left, score + edit-pencil right, dotted divider; a row with a note becomes the same expand/collapse pattern as Steps, note text in Fraunces italic 60%. Newly logged or edited cooks sort most-recent-first for the rest of the session; the order on first load reflects the raw query result, not a guaranteed date sort.
 
+## Recipes — Send Sheet (bottom sheet)
+- Opened from the Recipe Card header's existing share icon (owned recipes only). Same sheet conventions as the Log sheet / Save sheet: bg `#FAF7F2`, radius 24px top, centered drag handle, `position: fixed; bottom: 64` (not `absolute; inset: 0`), slide-up + backdrop-fade on open.
+- Title "SEND RECIPE" (Lazydog, uppercase) + recipe name subtitle beneath it (`#233C00`).
+- Search input: underline style (no filled box), placeholder "search by name or @handle".
+- Selected recipients render as dark-green (`#233C00`) chips — initial circle + first name in cream, small cream x to remove — in a row under the search input, above the results/connections list.
+- Results/connections rows: initial-circle avatar, name + `@handle` (Fraunces italic, muted), checkmark circle at right when selected.
+- Optional note field: recessed style matching other optional-field treatments elsewhere in the app (not the primary CTA weight).
+- Primary button: dark-green `#233C00` bg, cream text, "Send to N people" — **hidden entirely in the resting state** (no recipient selected). Resting state shows only: search → note → share-as-link, no Send button, no hint line.
+- "OR" divider (muted, centered) below the Send button once it's visible.
+- "Share as link instead" — quiet text button (not a filled CTA), routes to the existing external gift-link flow; visually and functionally distinct from the primary Send button above it.
+
 ## Write Your Own — Basics (Step 1 of 5)
 - Top bar: back arrow left, "Step 1 of 5" centered (Inter 500 uppercase cream 35%), cream "Next" pill (green text) right
 - Progress: 2px cream line, 20% filled, cream 10% track

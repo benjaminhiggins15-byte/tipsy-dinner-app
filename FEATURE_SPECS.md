@@ -1069,3 +1069,117 @@ retry-resume via `existingRecipeId`; forced Step 3 failure with successful retry
 no-photo send. All scenarios behaved as specified above. Teardown was verified
 exact-object-count with zero residue; `test2@test2.com` and all real accounts were
 confirmed untouched throughout.
+
+## Account-to-Account Sharing — Send UI (Build 3, piece 3)
+
+**Doc-size flag, not a task:** this file has grown past ~68k characters (`wc -m`),
+driven mostly by the account-to-account sharing builds. Once that whole phase
+completes (receive UI still to come), the account-sharing sections here are a good
+candidate to split into their own file. Do not split mid-phase — flagged only.
+
+This build fulfills the send UI that Build 3 deliberately deferred ("piece 3" in
+that section's forward-looking note). It is a pure client build: no schema change,
+no new SQL — it's a new caller of the already-verified `send_recipe_to_friend` /
+`sendRecipeToFriends` engine (Build 3) plus two new read-only lookup functions,
+`search_profiles`/`get_my_connections` (contract summarized in CLAUDE.md's
+Load-Bearing Contracts index; this is their full statement).
+
+**`search_profiles(query text)`** — `security definer`, `set search_path = public`,
+granted to `authenticated` only. Identity comes from `auth.uid()` (the real caller,
+not the function owner). An empty/whitespace query returns nothing — never the
+whole table. Matching is deliberately tight for launch: exact match on `handle`
+(case-insensitive) OR prefix match on `display_name` (case-insensitive); no
+substring/fuzzy matching. LIKE metacharacters (`%`, `_`, `\`) in the query are
+escaped so a literal `%` or `_` typed by a user is matched literally, not treated as
+a wildcard. Excludes the caller's own row. Capped at 10 results. Returns only `{id,
+display_name, handle}` — never a full `profiles` row, never `palate`/`inspiration`/
+`constraints`/`onboarding_complete`. **This tight exact/prefix match is a deliberate
+launch-scope decision, not a limitation** — the expectation is it loosens (e.g. to a
+substring or trigram match) if search feels too strict at scale, and that's a
+one-operator change to the `where` clause, not a shape change to the function or its
+callers.
+
+**`get_my_connections()`** — same `security definer`/`authenticated`-only shape.
+Returns the *other* party of each of the caller's `connections` rows. Because
+`connections` stores the pair canonically (`LEAST`/`GREATEST` of the two profile ids,
+per Build 4's ordering discipline) rather than as a fixed sender/recipient pair, the
+function resolves "the other party" with a case-join (`case when user_a_id =
+auth.uid() then user_b_id else user_a_id end`, joined to `profiles`) rather than
+assuming the caller is always in a fixed column — a function that instead always
+read `user_b_id` as "the other party" would silently return the caller's own profile
+half the time.
+
+**The Send sheet itself** (`RecipeCard` in `App.tsx`). Opened from the Recipe Card's
+existing top-row share icon — unchanged trigger, gated on `editable` (owned recipes
+only) same as before. That icon is now the primary share surface: it opens the send
+sheet instead of calling `handleShare` directly. The external gift-link flow
+(`shareRecipeSnapshot`/`handleShare`) is completely unchanged and untouched — it now
+lives one level deeper, behind the sheet's "Share as link instead" button, which
+simply closes the sheet and calls the existing `handleShare()`. The two share
+surfaces are deliberately kept distinct (in-app send vs. public link) rather than
+merged into one control.
+
+Sheet contents/behavior:
+- A search input, debounced 280ms, backed by `search_profiles` via the
+  `searchProfiles` wrapper in `data.ts`. Standard debounce + ignore-flag pattern
+  (matches the Lovable-double-mount convention elsewhere in the app) protects
+  against an out-of-order stale response overwriting a newer one.
+- **2-character minimum** before a search fires at all — below 2 trimmed
+  characters, no request is made and the sheet sits in the same calm resting state
+  as an empty query (no "searching…", no "no one found"; both would be false
+  claims at that point). At 2+ characters, the state machine is: pending
+  ("searching…", quiet/muted styling) → settled with results, or settled with
+  "no one found" if the debounced query genuinely matched nobody.
+  - **Timing lesson worth keeping:** the pending flag is set synchronously inside
+    the search input's `onChange`, not inside the debounce `useEffect`. Setting it
+    in the effect left a one-paint gap — the keystroke's render committed before
+    the effect ran — during which the UI would briefly show a stale "no one found"
+    from the *previous* query before the effect flipped it back to pending. Any
+    future "is a fetch pending" indicator tied to a debounced effect should set the
+    pending flag in the same synchronous handler that changes the query, not in the
+    debounced effect itself.
+- With the search box empty, the sheet shows the caller's existing connections
+  (`get_my_connections`, via the `getMyConnections` wrapper) under a "Your
+  connections" label, instead of an empty state.
+- Selecting a person (from either search results or the connections list) turns
+  them into a **persistent chip** — dark-green pill, initial circle, first name, a
+  small x to remove — in a row between the search input and the results/connections
+  area. Chips survive query changes (typing a new search does not clear existing
+  selections); a selected person is filtered out of both the search-results list and
+  the connections list while selected, so they don't appear twice; the only way to
+  deselect is the chip's own x. This reuses the existing `selectedRecipients`
+  selection state (a `Map<string, ProfileSearchResult>`) unchanged — no new data
+  model was introduced for the chip row, only a new render of the same state plus a
+  filter on the two list renders.
+- An optional one-way note (plain textarea, no formatting).
+- The Send button is hidden entirely until at least one recipient is selected, then
+  reads "Send to N people" (singular/plural aware). It calls the existing, unmodified
+  `sendRecipeToFriends(recipe.savedId, recipientIds, note)` engine from Build 3 — no
+  changes to that function or to `send_recipe_to_friend` were needed or made. Success
+  shows a quiet "Sent" toast (same toast pattern as the existing share-link
+  confirmation) and closes the sheet; failure keeps the sheet open and shows an
+  inline error. (`sendRecipeToFriends` still collapses every RPC failure mode to a
+  generic `null` — Build 3's forward-looking note about surfacing the RPC's five
+  distinct named errors instead of a generic failure remains open; this build did
+  not address it.)
+
+- **Second timing lesson worth keeping, unrelated to search:** the sheet's search
+  input originally had `autoFocus`. On mobile, `autoFocus` summons the keyboard
+  immediately, which triggers the browser's native scroll-into-view/viewport-resize
+  — and that raced the sheet's CSS-transform slide-up animation, reading as the
+  background recipe screen visibly "jumping" before the sheet finished animating in.
+  No other sheet in the app (Log sheet, Update-vs-Save-as-New sheet) autofocuses an
+  input, which is why they don't show this. Fix was simply removing `autoFocus`, not
+  changing the animation or backdrop. **Do not autoFocus an input inside a
+  slide-up/fade sheet.**
+
+Verified live end-to-end via the actual UI (not a re-run of Build 3's direct-RPC
+test): sent a real photographed recipe from a real account to two real recipient
+accounts through the sheet. Confirmed by direct DB/storage inspection: both
+`recipe_sends` rows correct and complete (sender, distinct recipients, `pending`
+status, note, full reconstitution-shaped snapshot); both `notifications` rows
+correct; the `send-{token}.jpg` photo byte-identical (etag + size) between the two
+recipients' shared copy and the untouched live original; sender identity resolvable
+via `sender_id` → `profiles` for a future "inspired by" stamp. Test rows deliberately
+left in place (not torn down) to seed the still-unbuilt receive UI's first real test
+data.
