@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName, saveReceivedRecipe, retryReceivedRecipePhoto, findReceivedRecipesWithPhotoOwed, type RecipeSendSnapshot } from "./data";
+import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName, saveReceivedRecipe, retryReceivedRecipePhoto, findReceivedRecipesWithPhotoOwed, sendRecipeToFriends, searchProfiles, getMyConnections, type RecipeSendSnapshot, type ProfileSearchResult } from "./data";
 import { type CropRect } from "./image";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
@@ -23,6 +23,8 @@ import {
   IconUser,
   IconRefresh,
   IconMessageCircle,
+  IconLink,
+  IconCheck,
 } from "@tabler/icons-react";
 import { pickChips } from "./chips";
 
@@ -2398,10 +2400,60 @@ function RecipeCard({
   const [logNote, setLogNote] = useState("");
   const [savingLog, setSavingLog] = useState(false);
   const [confirmDeleteEvent, setConfirmDeleteEvent] = useState(false);
+  const [showSendSheet, setShowSendSheet] = useState(false);
+  const [sendQuery, setSendQuery] = useState("");
+  const [sendResults, setSendResults] = useState<ProfileSearchResult[]>([]);
+  const [sendSearching, setSendSearching] = useState(false);
+  const [sendConnections, setSendConnections] = useState<ProfileSearchResult[]>([]);
+  const [selectedRecipients, setSelectedRecipients] = useState<Map<string, ProfileSearchResult>>(new Map());
+  const [sendNote, setSendNote] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [sentConfirm, setSentConfirm] = useState(false);
   const ingredients = recipe.ingredients ?? [];
   const steps = recipe.steps ?? [];
   const headlineRating = headlineRatingFromEvents(cookEvents);
   const editable = recipe.savedId != null;
+
+  // Debounced server search — the ignore flag guards against a slow earlier
+  // query's response landing after a newer one (same pattern as every other
+  // async fetch in this app; see the Lovable double-mount note in CLAUDE.md).
+  // The setTimeout provides the debounce; clearing it on every keystroke is
+  // what makes it a debounce rather than a per-keystroke fetch.
+  useEffect(() => {
+    const trimmed = sendQuery.trim();
+    if (!trimmed) {
+      setSendResults([]);
+      setSendSearching(false);
+      return;
+    }
+    let ignore = false;
+    setSendSearching(true);
+    const timer = setTimeout(async () => {
+      const results = await searchProfiles(trimmed);
+      if (ignore) return;
+      setSendResults(results ?? []);
+      setSendSearching(false);
+    }, 280);
+    return () => {
+      ignore = true;
+      clearTimeout(timer);
+    };
+  }, [sendQuery]);
+
+  // Connections load once per sheet-open, for the empty-search state.
+  useEffect(() => {
+    if (!showSendSheet) return;
+    let ignore = false;
+    (async () => {
+      const conns = await getMyConnections();
+      if (ignore) return;
+      setSendConnections(conns ?? []);
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [showSendSheet]);
 
   const toggleCookEvent = (id: string) => {
     const next = new Set(expandedCookEvents);
@@ -2576,6 +2628,53 @@ function RecipeCard({
     }
   }
 
+  function openSendSheet() {
+    setSendQuery("");
+    setSendResults([]);
+    setSelectedRecipients(new Map());
+    setSendNote("");
+    setSendError(null);
+    setShowSendSheet(true);
+  }
+
+  function closeSendSheet() {
+    setShowSendSheet(false);
+  }
+
+  function toggleRecipient(profile: ProfileSearchResult) {
+    setSelectedRecipients((prev) => {
+      const next = new Map(prev);
+      if (next.has(profile.id)) {
+        next.delete(profile.id);
+      } else {
+        next.set(profile.id, profile);
+      }
+      return next;
+    });
+  }
+
+  // Closes the send sheet, then defers to the existing, unmodified gift-link
+  // flow — same function, same behavior, just a second entry point onto it.
+  function handleShareLinkFromSendSheet() {
+    setShowSendSheet(false);
+    handleShare();
+  }
+
+  async function handleSendRecipe() {
+    if (!recipe.savedId || selectedRecipients.size === 0 || sending) return;
+    setSending(true);
+    setSendError(null);
+    const result = await sendRecipeToFriends(recipe.savedId, Array.from(selectedRecipients.keys()), sendNote.trim());
+    setSending(false);
+    if (!result) {
+      setSendError("Couldn't send. Try again.");
+      return;
+    }
+    setShowSendSheet(false);
+    setSentConfirm(true);
+    setTimeout(() => setSentConfirm(false), 2000);
+  }
+
   async function handleAddToGroceryList() {
     if (!ingredients.length) return;
     try {
@@ -2714,7 +2813,7 @@ function RecipeCard({
             <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
               {editable && (
                 <button
-                  onClick={handleShare}
+                  onClick={openSendSheet}
                   aria-label="Share"
                   style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
                 >
@@ -3908,6 +4007,265 @@ function RecipeCard({
         </>
       )}
 
+      {/* Send recipe sheet */}
+      {showSendSheet && (
+        <>
+          <style>{`
+            @keyframes tipsy-fade { from { opacity: 0; } to { opacity: 1; } }
+            @keyframes tipsy-slideup { from { transform: translateY(100%); } to { transform: translateY(0); } }
+          `}</style>
+          <div
+            onClick={closeSendSheet}
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 64, // nav-bar clearance — anchor to the real viewport, not the padded screen layer (see ScreenStage)
+              background: "rgba(35, 60, 0, 0.08)",
+              zIndex: 80,
+              display: "flex",
+              alignItems: "flex-end",
+              justifyContent: "center",
+              animation: "tipsy-fade 0.22s ease",
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: "#FAF7F2",
+                borderRadius: "24px 24px 0 0",
+                width: "100%",
+                maxHeight: "85vh",
+                display: "flex",
+                flexDirection: "column",
+                animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
+              }}
+            >
+              {/* Scrollable content */}
+              <div style={{ overflowY: "auto", minHeight: 0, flex: "1 1 auto", padding: "16px 20px 0" }}>
+                {/* Handle */}
+                <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(35,60,0,0.15)", margin: "0 auto 20px" }} />
+
+                {/* Title */}
+                <div style={{
+                  fontFamily: "'Inter', sans-serif",
+                  fontSize: 16,
+                  fontWeight: 700,
+                  letterSpacing: "0.04em",
+                  textTransform: "uppercase",
+                  color: "#233C00",
+                  textAlign: "center",
+                }}>
+                  Send recipe
+                </div>
+                <div style={{
+                  fontFamily: "Fraunces, serif",
+                  fontStyle: "italic",
+                  fontSize: 13,
+                  color: "rgba(35,60,0,0.5)",
+                  textAlign: "center",
+                  marginTop: 4,
+                  marginBottom: 20,
+                }}>
+                  {recipe.title}
+                </div>
+
+                {/* Search input */}
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  background: "transparent",
+                  borderBottom: "1px solid rgba(35,60,0,0.12)",
+                  padding: "8px 0 10px",
+                  marginBottom: 16,
+                }}>
+                  <input
+                    autoFocus
+                    value={sendQuery}
+                    onChange={(e) => setSendQuery(e.target.value)}
+                    placeholder="search by name or @handle"
+                    style={{
+                      flex: 1, background: "transparent", border: "none", outline: "none",
+                      fontFamily: "Inter, sans-serif", fontSize: 16, fontWeight: 400, color: "#233C00",
+                    }}
+                  />
+                  {sendQuery && (
+                    <button
+                      onClick={() => setSendQuery("")}
+                      aria-label="Clear search"
+                      style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", flexShrink: 0 }}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+
+                {/* Results / connections list */}
+                <div style={{ marginBottom: 16 }}>
+                  {sendQuery.trim() ? (
+                    sendSearching ? null : sendResults.length === 0 ? (
+                      <div style={{
+                        fontFamily: "Fraunces, serif",
+                        fontStyle: "italic",
+                        fontSize: 13,
+                        color: "rgba(35,60,0,0.45)",
+                        textAlign: "center",
+                        padding: "16px 0",
+                      }}>
+                        No one found. Check the handle and try again.
+                      </div>
+                    ) : (
+                      sendResults.map((profile) => (
+                        <SendRecipientRow
+                          key={profile.id}
+                          profile={profile}
+                          selected={selectedRecipients.has(profile.id)}
+                          onToggle={() => toggleRecipient(profile)}
+                        />
+                      ))
+                    )
+                  ) : (
+                    sendConnections.map((profile) => (
+                      <SendRecipientRow
+                        key={profile.id}
+                        profile={profile}
+                        selected={selectedRecipients.has(profile.id)}
+                        onToggle={() => toggleRecipient(profile)}
+                      />
+                    ))
+                  )}
+                </div>
+
+                {/* Note */}
+                <div style={{
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 10,
+                  fontWeight: 500,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.1em",
+                  color: "rgba(35,60,0,0.35)",
+                  marginBottom: 8,
+                }}>
+                  Add a note (optional)
+                </div>
+                <textarea
+                  value={sendNote}
+                  onChange={(e) => setSendNote(e.target.value)}
+                  placeholder="say something about it"
+                  rows={2}
+                  style={{
+                    width: "100%",
+                    padding: "12px 14px",
+                    background: "rgba(35,60,0,0.05)",
+                    border: "1px solid rgba(35,60,0,0.12)",
+                    borderRadius: 10,
+                    fontFamily: "Fraunces, serif",
+                    fontStyle: "italic",
+                    fontSize: 14,
+                    color: "#233C00",
+                    outline: "none",
+                    resize: "none",
+                    marginBottom: 16,
+                  }}
+                />
+
+                {sendError && (
+                  <div style={{ fontFamily: "Inter, sans-serif", fontSize: 12, color: "#B85C5C", textAlign: "center", marginBottom: 12 }}>
+                    {sendError}
+                  </div>
+                )}
+              </div>
+
+              {/* Pinned footer */}
+              <div style={{ flexShrink: 0, padding: "16px 20px 24px" }}>
+                {selectedRecipients.size > 0 && (
+                  <button
+                    onClick={handleSendRecipe}
+                    disabled={sending}
+                    style={{
+                      width: "100%",
+                      padding: "16px 20px",
+                      background: "#233C00",
+                      color: "#FAF7F2",
+                      border: "none",
+                      borderRadius: 14,
+                      fontFamily: "Inter, sans-serif",
+                      fontSize: 15,
+                      fontWeight: 500,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      cursor: sending ? "not-allowed" : "pointer",
+                      opacity: sending ? 0.6 : 1,
+                      marginBottom: 16,
+                    }}
+                  >
+                    {selectedRecipients.size === 1 ? "Send to 1 person" : `Send to ${selectedRecipients.size} people`}
+                  </button>
+                )}
+
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                  <div style={{ flex: 1, height: 1, background: "rgba(35,60,0,0.1)" }} />
+                  <div style={{
+                    fontFamily: "Inter, sans-serif", fontSize: 11, fontWeight: 500,
+                    letterSpacing: "0.05em", textTransform: "uppercase", color: "rgba(35,60,0,0.35)",
+                  }}>
+                    Or
+                  </div>
+                  <div style={{ flex: 1, height: 1, background: "rgba(35,60,0,0.1)" }} />
+                </div>
+
+                <button
+                  onClick={handleShareLinkFromSendSheet}
+                  style={{
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    background: "transparent",
+                    border: "none",
+                    padding: 0,
+                    fontFamily: "Inter, sans-serif",
+                    fontSize: 13,
+                    fontWeight: 500,
+                    color: "rgba(35,60,0,0.5)",
+                    cursor: "pointer",
+                  }}
+                >
+                  <IconLink size={15} stroke={1.5} />
+                  Share as link instead
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Sent confirmation toast */}
+      {sentConfirm && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "80px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "#233C00",
+            color: "#FEE7C0",
+            padding: "8px 16px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            fontFamily: "Inter, sans-serif",
+            fontWeight: 500,
+            zIndex: 1000,
+          }}
+        >
+          Sent
+        </div>
+      )}
+
       {/* Share confirmation toast */}
       {shareConfirm && (
         <div
@@ -3954,6 +4312,75 @@ function RecipeCard({
 
       <PhotoCropOverlay file={cropFile} onCancel={handleCropCancel} onConfirm={handleCropConfirm} />
     </div>
+  );
+}
+
+// One row in the Send Recipe sheet's result/connection list — shared by both the
+// search-results branch and the empty-query connections branch (both RPCs return
+// the same {id, display_name, handle} shape).
+function SendRecipientRow({ profile, selected, onToggle }: {
+  profile: ProfileSearchResult;
+  selected: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      style={{
+        width: "100%",
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        background: "transparent",
+        border: "none",
+        padding: "10px 0",
+        cursor: "pointer",
+        textAlign: "left",
+      }}
+    >
+      <div style={{
+        width: 36,
+        height: 36,
+        borderRadius: "50%",
+        background: "rgba(35,60,0,0.08)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        fontFamily: "Inter, sans-serif",
+        fontSize: 15,
+        fontWeight: 700,
+        color: "#233C00",
+      }}>
+        {profile.display_name?.charAt(0).toUpperCase() || "?"}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontFamily: "Inter, sans-serif", fontSize: 15, fontWeight: 700, color: "#233C00" }}>
+          {profile.display_name}
+        </div>
+        <div style={{
+          fontFamily: "Fraunces, serif",
+          fontStyle: "italic",
+          fontSize: 12,
+          color: "rgba(35,60,0,0.45)",
+        }}>
+          @{profile.handle}
+        </div>
+      </div>
+      <div style={{
+        width: 22,
+        height: 22,
+        borderRadius: "50%",
+        flexShrink: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: selected ? "#233C00" : "transparent",
+        border: selected ? "none" : "1.5px solid rgba(35,60,0,0.25)",
+      }}>
+        {selected && <IconCheck size={13} stroke={2.5} color="#FAF7F2" />}
+      </div>
+    </button>
   );
 }
 

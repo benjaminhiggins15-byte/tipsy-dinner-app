@@ -1141,6 +1141,39 @@ export type RecipeSendSnapshot = {
   serves: string | null;
 };
 
+export type ProfileSearchResult = {
+  id: string;
+  display_name: string;
+  handle: string;
+};
+
+// Wraps the search_profiles security-definer RPC — the only read path onto
+// other users' profiles (profiles SELECT stays owner-only). Returns null on
+// error so callers can distinguish "no matches" ([]) from "request failed".
+export async function searchProfiles(query: string): Promise<ProfileSearchResult[] | null> {
+  try {
+    const { data, error } = await supabase.rpc('search_profiles', { query });
+    if (error) throw error;
+    return data ?? [];
+  } catch (error) {
+    console.error('Error searching profiles:', error);
+    return null;
+  }
+}
+
+// Wraps the get_my_connections security-definer RPC — same profiles-RLS
+// rationale as searchProfiles above.
+export async function getMyConnections(): Promise<ProfileSearchResult[] | null> {
+  try {
+    const { data, error } = await supabase.rpc('get_my_connections');
+    if (error) throw error;
+    return data ?? [];
+  } catch (error) {
+    console.error('Error loading connections:', error);
+    return null;
+  }
+}
+
 // Builds the snapshot and hands it, plus a fanned-out photo copy, to the
 // send_recipe_to_friend security-definer function (see
 // supabase/migrations/20260804000001_send_recipe_to_friend.sql), which does
