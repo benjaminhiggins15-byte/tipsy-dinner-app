@@ -2423,9 +2423,12 @@ function RecipeCard({
   // itself is set synchronously in the input's onChange, not here — setting
   // it in this effect instead left a one-paint gap where the query had
   // already changed but this effect hadn't run yet, flashing stale state.
+  // A single character is treated the same as empty — too noisy to be
+  // useful, and the render below keeps it in the calm resting state rather
+  // than firing a search or showing any searching/no-match state for it.
   useEffect(() => {
     const trimmed = sendQuery.trim();
-    if (!trimmed) {
+    if (trimmed.length < 2) {
       setSendResults([]);
       setSendSearching(false);
       return;
@@ -4090,8 +4093,9 @@ function RecipeCard({
                       // Flip the pending flag in the SAME render as the keystroke —
                       // if this waited on the debounce effect instead, there'd be one
                       // paint where the query is already new but sendSearching hasn't
-                      // caught up yet, flashing the stale/empty state.
-                      setSendSearching(value.trim().length > 0);
+                      // caught up yet, flashing the stale/empty state. Only 2+ chars
+                      // count as "pending a search" — 1 char never searches at all.
+                      setSendSearching(value.trim().length >= 2);
                     }}
                     placeholder="search by name or @handle"
                     style={{
@@ -4130,7 +4134,7 @@ function RecipeCard({
                 {/* Results / connections list — selected people are filtered out here;
                     they only appear as chips above until removed. */}
                 <div style={{ marginBottom: 16 }}>
-                  {sendQuery.trim() ? (
+                  {sendQuery.trim().length >= 2 ? (
                     sendSearching ? (
                       <div style={{
                         fontFamily: "Fraunces, serif",
