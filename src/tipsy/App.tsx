@@ -2419,7 +2419,10 @@ function RecipeCard({
   // query's response landing after a newer one (same pattern as every other
   // async fetch in this app; see the Lovable double-mount note in CLAUDE.md).
   // The setTimeout provides the debounce; clearing it on every keystroke is
-  // what makes it a debounce rather than a per-keystroke fetch.
+  // what makes it a debounce rather than a per-keystroke fetch. sendSearching
+  // itself is set synchronously in the input's onChange, not here — setting
+  // it in this effect instead left a one-paint gap where the query had
+  // already changed but this effect hadn't run yet, flashing stale state.
   useEffect(() => {
     const trimmed = sendQuery.trim();
     if (!trimmed) {
@@ -2428,7 +2431,6 @@ function RecipeCard({
       return;
     }
     let ignore = false;
-    setSendSearching(true);
     const timer = setTimeout(async () => {
       const results = await searchProfiles(trimmed);
       if (ignore) return;
@@ -4082,7 +4084,15 @@ function RecipeCard({
                 }}>
                   <input
                     value={sendQuery}
-                    onChange={(e) => setSendQuery(e.target.value)}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setSendQuery(value);
+                      // Flip the pending flag in the SAME render as the keystroke —
+                      // if this waited on the debounce effect instead, there'd be one
+                      // paint where the query is already new but sendSearching hasn't
+                      // caught up yet, flashing the stale/empty state.
+                      setSendSearching(value.trim().length > 0);
+                    }}
                     placeholder="search by name or @handle"
                     style={{
                       flex: 1, background: "transparent", border: "none", outline: "none",
@@ -4121,7 +4131,18 @@ function RecipeCard({
                     they only appear as chips above until removed. */}
                 <div style={{ marginBottom: 16 }}>
                   {sendQuery.trim() ? (
-                    sendSearching ? null : sendResults.length === 0 ? (
+                    sendSearching ? (
+                      <div style={{
+                        fontFamily: "Fraunces, serif",
+                        fontStyle: "italic",
+                        fontSize: 13,
+                        color: "rgba(35,60,0,0.35)",
+                        textAlign: "center",
+                        padding: "16px 0",
+                      }}>
+                        searching…
+                      </div>
+                    ) : sendResults.length === 0 ? (
                       <div style={{
                         fontFamily: "Fraunces, serif",
                         fontStyle: "italic",
