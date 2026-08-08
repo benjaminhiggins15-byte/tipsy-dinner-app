@@ -1358,6 +1358,24 @@ export async function saveReceivedRecipe(
   return { recipeId, photoCopied };
 }
 
+// Quiet decline: the recipient's explicit "no thanks" for a pending send.
+// Pure client-side status update — no server-side function — because RLS
+// grants the recipient a status-only UPDATE on their own recipe_sends row,
+// enforced by the enforce_recipe_sends_status_only_update trigger. Never
+// notifies the sender; viewing a send commits nothing, dismiss is the only
+// explicit action that does.
+export async function dismissReceivedRecipe(sendId: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('recipe_sends')
+    .update({ status: 'dismissed' })
+    .eq('id', sendId);
+  if (error) {
+    console.error('Error dismissing received recipe:', error);
+    return false;
+  }
+  return true;
+}
+
 // Retry path for Step 3 only. Never re-runs saveRecipe or finish_received_recipe_save —
 // finish rejects a non-pending send, and the Edge Function's copy+patch is idempotent,
 // so calling just this step again is always safe.
