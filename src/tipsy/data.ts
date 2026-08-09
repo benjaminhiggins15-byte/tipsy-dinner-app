@@ -1278,6 +1278,8 @@ export async function sendRecipeToFriends(
 export type SaveReceivedRecipeResult = {
   recipeId: string;
   photoCopied: boolean; // false for both "no photo owed" and "copy failed" — check via findReceivedRecipesWithPhotoOwed if you need to distinguish
+  photoUrl?: string; // only set when photoCopied is true — lets the caller paint the photo without a refetch
+  photoVersion?: number;
 };
 
 // Thrown only for Step 1/2 failures (real failures). recipeId is set once
@@ -1344,6 +1346,8 @@ export async function saveReceivedRecipe(
   // A no-photo send and a failed copy both leave a complete, saved recipe —
   // just with photo_url left null, retryable later via retryReceivedRecipePhoto.
   let photoCopied = false;
+  let photoUrl: string | undefined;
+  let photoVersion: number | undefined;
   try {
     const { data, error: photoError } = await supabase.functions.invoke('copy-received-recipe-photo', {
       body: { send_id: sendId, recipe_id: recipeId },
@@ -1352,12 +1356,16 @@ export async function saveReceivedRecipe(
       console.error('Received-recipe photo copy failed (recipe saved; photo pending):', photoError);
     } else {
       photoCopied = data?.copied === true;
+      if (photoCopied) {
+        photoUrl = data?.photo_url;
+        photoVersion = data?.photo_version;
+      }
     }
   } catch (error) {
     console.error('Received-recipe photo copy failed (recipe saved; photo pending):', error);
   }
 
-  return { recipeId, photoCopied };
+  return { recipeId, photoCopied, photoUrl, photoVersion };
 }
 
 // Quiet decline: the recipient's explicit "no thanks" for a pending send.

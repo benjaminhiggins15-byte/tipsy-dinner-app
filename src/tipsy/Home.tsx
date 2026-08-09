@@ -13,6 +13,13 @@ import {
 import watermarkSquare from "../Logos/watermark_square.png";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 
+// ScreenStage renders the outgoing screen in a separate overlay-layer JSX
+// position during transitions (App.tsx), which mounts a fresh
+// ReceivedRecipeView instance for the slide-out — losing local state. This
+// module-level set survives that remount so a note already dismissed this
+// session doesn't reappear during the save round-trip's transition.
+const revealedReceivedNoteSendIds = new Set<string>();
+
 type HomePush = (
   s:
     | { name: "receivedPending"; items: PendingReceivedRecipe[] }
@@ -418,7 +425,9 @@ export function ReceivedRecipeView({
   clearRecipeCache: (categoryKey: string) => void;
 }) {
   const [tab, setTab] = useState<ReceivedTab>("ingredients");
-  const [noteRevealed, setNoteRevealed] = useState(!item.note);
+  const [noteRevealed, setNoteRevealed] = useState(
+    !item.note || revealedReceivedNoteSendIds.has(item.sendId)
+  );
   const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set());
   const [trayOpen, setTrayOpen] = useState(!!newCategory);
   const [saving, setSaving] = useState(false);
@@ -475,6 +484,11 @@ export function ReceivedRecipeView({
       steps: item.steps,
       savedId: result.recipeId,
       categoryKey: catKey,
+      // Only set when the photo copy succeeded — a soft-failed or no-photo
+      // send leaves these undefined so the recipe paints photoless, same as
+      // before, with no false paths.
+      photo_url: result.photoCopied ? result.photoUrl : undefined,
+      photo_version: result.photoCopied ? result.photoVersion : undefined,
     };
 
     clearRecipeCache(catKey);
@@ -922,7 +936,10 @@ export function ReceivedRecipeView({
         <ReceivedNoteOverlay
           senderName={item.senderName}
           note={item.note!}
-          onViewRecipe={() => setNoteRevealed(true)}
+          onViewRecipe={() => {
+            revealedReceivedNoteSendIds.add(item.sendId);
+            setNoteRevealed(true);
+          }}
         />
       )}
     </div>
