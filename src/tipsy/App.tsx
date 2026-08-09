@@ -11,7 +11,7 @@ import MenuInterior from "./MenuInterior";
 import RecipePicker from "./RecipePicker";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 import AuthFlow from "./AuthFlow";
-import Home, { ReceivedPending } from "./Home";
+import Home, { ReceivedPending, ReceivedRecipeView } from "./Home";
 import { supabase } from "../lib/supabase";
 import type { Session } from "@supabase/supabase-js";
 import watermarkSquare from "../Logos/watermark_square.png";
@@ -258,7 +258,8 @@ type Screen =
   | { name: "profileedit"; fieldKey: "email" | "palate" | "inspiration" | "table" | "constraints" | "identity" }
   | { name: "placeholder"; title: string }
   | { name: "home" }
-  | { name: "receivedPending"; items: PendingReceivedRecipe[] };
+  | { name: "receivedPending"; items: PendingReceivedRecipe[] }
+  | { name: "receivedRecipe"; item: PendingReceivedRecipe };
 
 type TabId = "build" | "recipes" | "grocery" | "profile" | "home";
 
@@ -306,6 +307,7 @@ function screenKey(s: Screen): string {
     case "placeholder": return `placeholder:${s.title}`;
     case "home": return "home";
     case "receivedPending": return "receivedPending";
+    case "receivedRecipe": return `receivedRecipe:${s.item.sendId}`;
   }
 }
 
@@ -454,7 +456,8 @@ function renderScreen(
     case "profileedit": return <ProfileEdit fieldKey={s.fieldKey} back={back} profile={profile || null} onUpdate={onUpdate || (async () => {})} />;
     case "placeholder": return <Placeholder title={s.title} back={back} />;
     case "home": return <Home profile={profile || null} push={push} />;
-    case "receivedPending": return <ReceivedPending items={s.items} back={back} />;
+    case "receivedPending": return <ReceivedPending items={s.items} back={back} push={push} />;
+    case "receivedRecipe": return <ReceivedRecipeView item={s.item} back={back} />;
   }
 }
 

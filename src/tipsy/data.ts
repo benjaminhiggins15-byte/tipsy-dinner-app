@@ -1380,16 +1380,20 @@ export type PendingReceivedRecipe = {
   sendId: string;
   title: string;
   description: string;
+  ingredients: { name: string; quantity: string; sort_order: number }[];
+  steps: { title: string; instruction: string }[];
+  note: string | null;
   photoUrl: string | null;
   senderId: string;
   senderName: string;
   createdAt: string;
 };
 
-// Read-only shelf feed for the Home tab. recipe_sends.recipe is the frozen
-// snapshot jsonb (see RecipeSendSnapshot); title/description come from there,
-// never from a live recipes row. Sender names are resolved via the scoped
-// get_sender_names RPC (profiles stays owner-only SELECT otherwise).
+// Read-only feed for the Home tab and the received-recipe view. recipe_sends.recipe
+// is the frozen snapshot jsonb (see RecipeSendSnapshot); title/description/
+// ingredients/steps all come from there, never from a live recipes row. Sender
+// names are resolved via the scoped get_sender_names RPC (profiles stays
+// owner-only SELECT otherwise).
 export async function getPendingReceivedRecipes(): Promise<PendingReceivedRecipe[]> {
   const userId = await getCurrentUserId();
   if (!userId) return [];
@@ -1397,7 +1401,7 @@ export async function getPendingReceivedRecipes(): Promise<PendingReceivedRecipe
   try {
     const { data, error } = await supabase
       .from('recipe_sends')
-      .select('id, recipe, photo_url, sender_id, created_at')
+      .select('id, recipe, photo_url, note, sender_id, created_at')
       .eq('recipient_id', userId)
       .eq('status', 'pending')
       .order('created_at', { ascending: false });
@@ -1416,6 +1420,9 @@ export async function getPendingReceivedRecipes(): Promise<PendingReceivedRecipe
       sendId: r.id,
       title: r.recipe?.title ?? '',
       description: r.recipe?.description ?? '',
+      ingredients: r.recipe?.ingredients ?? [],
+      steps: r.recipe?.steps ?? [],
+      note: r.note ?? null,
       photoUrl: r.photo_url ?? null,
       senderId: r.sender_id,
       senderName: nameById.get(r.sender_id) ?? 'someone',
