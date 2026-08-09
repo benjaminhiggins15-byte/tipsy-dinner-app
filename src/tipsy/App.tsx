@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName, saveReceivedRecipe, retryReceivedRecipePhoto, findReceivedRecipesWithPhotoOwed, sendRecipeToFriends, searchProfiles, getMyConnections, type RecipeSendSnapshot, type ProfileSearchResult } from "./data";
+import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName, saveReceivedRecipe, retryReceivedRecipePhoto, findReceivedRecipesWithPhotoOwed, sendRecipeToFriends, searchProfiles, getMyConnections, type RecipeSendSnapshot, type ProfileSearchResult, type PendingReceivedRecipe } from "./data";
 import { type CropRect } from "./image";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
@@ -11,6 +11,7 @@ import MenuInterior from "./MenuInterior";
 import RecipePicker from "./RecipePicker";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 import AuthFlow from "./AuthFlow";
+import Home, { ReceivedPending } from "./Home";
 import { supabase } from "../lib/supabase";
 import type { Session } from "@supabase/supabase-js";
 import watermarkSquare from "../Logos/watermark_square.png";
@@ -21,6 +22,7 @@ import {
   IconLayoutList,
   IconShoppingCart,
   IconUser,
+  IconHome,
   IconRefresh,
   IconMessageCircle,
   IconLink,
@@ -254,9 +256,11 @@ type Screen =
   | { name: "recipepicker"; menuId: string; section: MenuSection }
   | { name: "profile" }
   | { name: "profileedit"; fieldKey: "email" | "palate" | "inspiration" | "table" | "constraints" | "identity" }
-  | { name: "placeholder"; title: string };
+  | { name: "placeholder"; title: string }
+  | { name: "home" }
+  | { name: "receivedPending"; items: PendingReceivedRecipe[] };
 
-type TabId = "build" | "recipes" | "grocery" | "profile";
+type TabId = "build" | "recipes" | "grocery" | "profile" | "home";
 
 const S: Record<string, CSSProperties> = {
   page: {
@@ -300,6 +304,8 @@ function screenKey(s: Screen): string {
     case "profile": return "profile";
     case "profileedit": return `profileedit:${s.fieldKey}`;
     case "placeholder": return `placeholder:${s.title}`;
+    case "home": return "home";
+    case "receivedPending": return "receivedPending";
   }
 }
 
@@ -447,10 +453,12 @@ function renderScreen(
     case "profile": return <Profile back={back} openEdit={(k) => push({ name: "profileedit", fieldKey: k })} isTabRoot={isTabRoot} onSignOut={onSignOut!} profile={profile || null} onUpdate={onUpdate || (async () => {})} />;
     case "profileedit": return <ProfileEdit fieldKey={s.fieldKey} back={back} profile={profile || null} onUpdate={onUpdate || (async () => {})} />;
     case "placeholder": return <Placeholder title={s.title} back={back} />;
+    case "home": return <Home profile={profile || null} push={push} />;
+    case "receivedPending": return <ReceivedPending items={s.items} back={back} />;
   }
 }
 
-const TAB_ORDER: TabId[] = ["build", "recipes", "grocery", "profile"];
+const TAB_ORDER: TabId[] = ["build", "recipes", "grocery", "profile", "home"];
 
 function getTabIndex(tab: TabId): number {
   return TAB_ORDER.indexOf(tab);
@@ -463,6 +471,7 @@ export default function App() {
     recipes: [{ name: "categories" }],
     grocery: [{ name: "grocerylist" }],
     profile: [{ name: "profile" }],
+    home: [{ name: "home" }],
   });
 
   const currentStack = tabStacks[activeTab];
@@ -1266,6 +1275,7 @@ export default function App() {
               recipes: [{ name: "categories" }],
               grocery: [{ name: "grocerylist" }],
               profile: [{ name: "profile" }],
+              home: [{ name: "home" }],
             });
             setActiveTab("build");
             setShowOnboarding(true);
@@ -1466,6 +1476,7 @@ function BottomTabBar({ activeTab, onTabClick }: { activeTab: TabId; onTabClick:
     { id: "recipes", icon: <IconBook size={22} stroke={1.5} />, label: "Recipes" },
     { id: "grocery", icon: <IconShoppingCart size={22} stroke={1.5} />, label: "Grocery" },
     { id: "profile", icon: <IconUser size={22} stroke={1.5} />, label: "Profile" },
+    { id: "home", icon: <IconHome size={22} stroke={1.5} />, label: "Home" },
   ];
 
   return (

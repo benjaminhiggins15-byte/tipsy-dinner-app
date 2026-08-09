@@ -1376,6 +1376,57 @@ export async function dismissReceivedRecipe(sendId: string): Promise<boolean> {
   return true;
 }
 
+export type PendingReceivedRecipe = {
+  sendId: string;
+  title: string;
+  description: string;
+  photoUrl: string | null;
+  senderId: string;
+  senderName: string;
+  createdAt: string;
+};
+
+// Read-only shelf feed for the Home tab. recipe_sends.recipe is the frozen
+// snapshot jsonb (see RecipeSendSnapshot); title/description come from there,
+// never from a live recipes row. Sender names are resolved via the scoped
+// get_sender_names RPC (profiles stays owner-only SELECT otherwise).
+export async function getPendingReceivedRecipes(): Promise<PendingReceivedRecipe[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from('recipe_sends')
+      .select('id, recipe, photo_url, sender_id, created_at')
+      .eq('recipient_id', userId)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    const rows = data || [];
+    if (rows.length === 0) return [];
+
+    const senderIds = Array.from(new Set(rows.map((r: any) => r.sender_id)));
+    const { data: senders, error: senderError } = await supabase.rpc('get_sender_names', { ids: senderIds });
+    if (senderError) throw senderError;
+
+    const nameById = new Map<string, string>((senders || []).map((s: any) => [s.id, s.display_name]));
+
+    return rows.map((r: any) => ({
+      sendId: r.id,
+      title: r.recipe?.title ?? '',
+      description: r.recipe?.description ?? '',
+      photoUrl: r.photo_url ?? null,
+      senderId: r.sender_id,
+      senderName: nameById.get(r.sender_id) ?? 'someone',
+      createdAt: r.created_at,
+    }));
+  } catch (error) {
+    console.error('Error loading pending received recipes:', error);
+    return [];
+  }
+}
+
 // Retry path for Step 3 only. Never re-runs saveRecipe or finish_received_recipe_save —
 // finish rejects a non-pending send, and the Edge Function's copy+patch is idempotent,
 // so calling just this step again is always safe.
