@@ -34,22 +34,22 @@ function greetingForNow(): string {
   return "Good evening";
 }
 
-// Photoless fallback — first pass: the app's watermark icon on cream (#FAF7F2),
-// matching the mini-player's watermark-on-cream treatment rather than the tile's
-// own green. First draft, judged on phone — not a settled pattern yet.
-function PlaceholderArt({ iconSize = 40 }: { iconSize?: number }) {
+// Photoless tile fallback — the app's watermark icon on the card-green
+// background. A cream-on-watermark version was tried and judged worse on
+// phone; open item to revisit later, not a settled pattern either way.
+function PlaceholderArt() {
   return (
     <div
       style={{
         position: "absolute",
         inset: 0,
-        background: "#FAF7F2",
+        background: "#2E4E08",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
       }}
     >
-      <img src={watermarkSquare} alt="" style={{ width: iconSize, height: iconSize, opacity: 0.4 }} />
+      <img src={watermarkSquare} alt="" style={{ width: 40, height: 40, opacity: 0.5 }} />
     </div>
   );
 }
@@ -379,34 +379,13 @@ function ReceivedTileFullWidth({
   );
 }
 
-function ReceivedHero({ photoUrl }: { photoUrl: string | null }) {
-  return (
-    <div
-      style={{
-        position: "relative",
-        width: "100%",
-        aspectRatio: "4/3",
-        borderRadius: 30,
-        overflow: "hidden",
-        flexShrink: 0,
-        background: "#2E4E08",
-      }}
-    >
-      {photoUrl ? (
-        <img
-          src={photoUrl}
-          alt=""
-          style={{ width: "100%", height: "100%", objectFit: "cover", maxWidth: "none" }}
-        />
-      ) : (
-        <PlaceholderArt iconSize={56} />
-      )}
-    </div>
-  );
-}
-
 type ReceivedTab = "ingredients" | "steps";
 
+// Presentation below (hero/title/description/tabs/ingredient rows/step rows)
+// deliberately mirrors RecipeCard's actual rendering (App.tsx) so a received
+// recipe looks identical to one already living in the library — matched by
+// hand, not by sharing the component (RecipeCard is a known-trouble file;
+// see CLAUDE.md's Update vs Save-as-New section).
 export function ReceivedRecipeView({
   item,
   back,
@@ -416,6 +395,17 @@ export function ReceivedRecipeView({
 }) {
   const [tab, setTab] = useState<ReceivedTab>("ingredients");
   const [noteRevealed, setNoteRevealed] = useState(!item.note);
+  const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set());
+
+  const toggleStep = (idx: number) => {
+    const next = new Set(expandedSteps);
+    if (next.has(idx)) {
+      next.delete(idx);
+    } else {
+      next.add(idx);
+    }
+    setExpandedSteps(next);
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg, position: "relative" }}>
@@ -454,134 +444,327 @@ export function ReceivedRecipeView({
         <div />
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: `0 ${EDGE}px`, paddingBottom: 96 }}>
-        <ReceivedHero photoUrl={item.photoUrl} />
+      <div style={{ flex: 1, overflowY: "auto", paddingBottom: 96 }}>
+        <div style={{ padding: "4px 24px 20px" }}>
+          {/* Hero — renders only when there's a photo, matching RecipeCard:
+              a photoless recipe shows no hero block at all. */}
+          {item.photoUrl && (
+            <div style={{ marginBottom: 18 }}>
+              <div
+                style={{
+                  position: "relative",
+                  width: "100%",
+                  aspectRatio: "4 / 3",
+                  borderRadius: 30,
+                  overflow: "hidden",
+                  background: "rgba(35,60,0,0.06)",
+                }}
+              >
+                <img
+                  src={item.photoUrl}
+                  alt=""
+                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                />
+              </div>
+            </div>
+          )}
 
-        <div
-          style={{
-            fontFamily: "Lazydog, sans-serif",
-            textTransform: "uppercase",
-            fontSize: 22,
-            lineHeight: 1.2,
-            color: C.text,
-            marginTop: 20,
-          }}
-        >
-          {item.title}
-        </div>
+          <div style={{ marginBottom: 8 }}>
+            <div
+              style={{
+                fontFamily: "Inter, sans-serif",
+                fontStyle: "normal",
+                fontSize: 28,
+                fontWeight: 700,
+                letterSpacing: "0.04em",
+                textTransform: "capitalize",
+                color: "#233C00",
+                lineHeight: 1.1,
+              }}
+            >
+              {item.title}
+            </div>
+          </div>
 
-        {item.description && (
+          {item.description && (
+            <div
+              style={{
+                fontFamily: "Fraunces, serif",
+                fontStyle: "italic",
+                fontWeight: 300,
+                fontSize: 15,
+                color: "rgba(35,60,0,0.55)",
+                lineHeight: 1.5,
+                marginBottom: 12,
+              }}
+            >
+              {item.description}
+            </div>
+          )}
+
           <div
             style={{
-              fontFamily: fontDisplay,
-              fontStyle: "italic",
-              fontSize: 15,
-              lineHeight: 1.5,
-              color: C.text,
-              marginTop: 10,
+              fontFamily: "Inter, sans-serif",
+              fontSize: 12,
+              fontWeight: 500,
+              color: "rgba(35,60,0,0.5)",
             }}
           >
-            {item.description}
+            inspired by {item.senderName}
           </div>
-        )}
-
-        <div
-          style={{
-            fontFamily: fontSans,
-            fontSize: 12,
-            fontWeight: 500,
-            color: C.textLight,
-            marginTop: 10,
-          }}
-        >
-          inspired by {item.senderName}
         </div>
 
         <div
           style={{
             display: "flex",
-            gap: 8,
-            marginTop: 24,
+            padding: "20px 24px 0",
+            flexShrink: 0,
+            gap: 28,
+            borderBottom: "1px solid rgba(35,60,0,0.08)",
             position: "sticky",
             top: 0,
-            background: C.bg,
-            paddingTop: 4,
-            paddingBottom: 8,
             zIndex: 10,
+            background: "#FAF7F2",
           }}
         >
           {(["ingredients", "steps"] as ReceivedTab[]).map((t) => (
-            <div
+            <button
               key={t}
               onClick={() => setTab(t)}
               style={{
-                fontFamily: fontSans,
-                fontSize: 13,
+                paddingBottom: 12,
+                fontFamily: "Inter, sans-serif",
+                fontSize: 11,
                 fontWeight: 500,
-                letterSpacing: "0.05em",
+                letterSpacing: "0.08em",
                 textTransform: "uppercase",
-                color: tab === t ? "#FEE7C0" : C.textLight,
-                background: tab === t ? "#233C00" : "transparent",
-                border: tab === t ? "none" : "1px solid rgba(35,60,0,0.2)",
-                borderRadius: 20,
-                padding: "8px 16px",
+                color: tab === t ? "#233C00" : "rgba(35,60,0,0.3)",
+                position: "relative",
                 cursor: "pointer",
+                background: "transparent",
+                border: "none",
               }}
             >
               {t === "ingredients" ? "Ingredients" : "Steps"}
-            </div>
+              {tab === t && (
+                <div
+                  style={{
+                    position: "absolute",
+                    bottom: -1,
+                    left: 0,
+                    right: 0,
+                    height: 1.5,
+                    background: "#233C00",
+                    borderRadius: 2,
+                  }}
+                />
+              )}
+            </button>
           ))}
         </div>
 
-        {tab === "ingredients" ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
-            {item.ingredients.map((ing, i) => (
+        <div style={{ paddingTop: 4 }}>
+          <div style={{ display: tab === "ingredients" ? "block" : "none" }}>
+            {item.ingredients.map((ing, idx) => (
               <div
-                key={i}
+                key={idx}
                 style={{
-                  fontFamily: fontSans,
-                  fontSize: 15,
-                  color: C.text,
-                  lineHeight: 1.4,
+                  display: "flex",
+                  flexDirection: "row",
+                  alignItems: "flex-start",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  padding: "12px 24px",
+                  borderBottom: idx === item.ingredients.length - 1 ? "none" : "1px dotted rgba(35,60,0,0.1)",
                 }}
               >
-                {[ing.quantity, ing.name].filter(Boolean).join(" ")}
+                <span
+                  style={{
+                    fontFamily: "Inter, sans-serif",
+                    fontSize: 15,
+                    fontWeight: 400,
+                    color: "#233C00",
+                    textAlign: "left",
+                    flex: 1,
+                    maxWidth: "58%",
+                  }}
+                >
+                  {ing.name}
+                </span>
+                <span
+                  style={{
+                    fontFamily: "Inter, sans-serif",
+                    fontSize: 14,
+                    fontWeight: 500,
+                    fontVariantNumeric: "tabular-nums",
+                    color: "rgba(35,60,0,0.4)",
+                    textAlign: "right",
+                    flexShrink: 0,
+                    maxWidth: "40%",
+                  }}
+                >
+                  {ing.quantity}
+                </span>
               </div>
             ))}
+            {item.ingredients.length === 0 && (
+              <p
+                style={{
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 13,
+                  color: "rgba(35,60,0,0.4)",
+                  padding: "20px 24px",
+                }}
+              >
+                No ingredients yet.
+              </p>
+            )}
           </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 18, marginTop: 4 }}>
-            {item.steps.map((step, i) => {
-              const s = normalizeStep(step);
+          <div style={{ display: tab === "steps" ? "block" : "none", padding: "20px 24px" }}>
+            {item.steps.some((s) => !!normalizeStep(s).title.trim()) && (
+              <div
+                style={{
+                  fontFamily: "Fraunces, serif",
+                  fontStyle: "italic",
+                  fontWeight: 300,
+                  fontSize: 15,
+                  color: "rgba(35,60,0,0.55)",
+                  lineHeight: 1.5,
+                  marginBottom: 18,
+                }}
+              >
+                Tap each step for details
+              </div>
+            )}
+            {item.steps.map((step, idx) => {
+              const normalized = normalizeStep(step);
+              const hasTitle = !!(normalized.title && normalized.title.trim().length > 0);
+              const isExpanded = expandedSteps.has(idx);
+
+              if (!hasTitle) {
+                return (
+                  <div
+                    key={idx}
+                    style={{
+                      display: "flex",
+                      gap: 14,
+                      alignItems: "flex-start",
+                      marginBottom: idx === item.steps.length - 1 ? 0 : 20,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: "Inter, sans-serif",
+                        fontSize: 18,
+                        fontWeight: 500,
+                        color: "rgba(35,60,0,0.3)",
+                        flexShrink: 0,
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      {idx + 1}
+                    </span>
+                    <p
+                      style={{
+                        fontFamily: "Inter, sans-serif",
+                        fontSize: 14,
+                        color: "#233C00",
+                        lineHeight: 1.6,
+                        margin: 0,
+                      }}
+                    >
+                      {normalized.instruction}
+                    </p>
+                  </div>
+                );
+              }
+
               return (
-                <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <div
+                <div key={idx} style={{ marginBottom: idx === item.steps.length - 1 ? 0 : 10 }}>
+                  <button
+                    onClick={() => toggleStep(idx)}
                     style={{
-                      fontFamily: fontSans,
-                      fontSize: 12,
-                      fontWeight: 600,
-                      letterSpacing: "0.05em",
-                      textTransform: "uppercase",
-                      color: C.textLight,
+                      width: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      padding: "12px 14px",
+                      background: "rgba(35,60,0,0.03)",
+                      border: "1px solid rgba(35,60,0,0.08)",
+                      borderRadius: isExpanded ? "10px 10px 0 0" : 10,
+                      borderBottom: isExpanded ? "none" : "1px solid rgba(35,60,0,0.08)",
+                      cursor: "pointer",
                     }}
                   >
-                    {s.title || `Step ${i + 1}`}
-                  </div>
-                  <div
-                    style={{
-                      fontFamily: fontSans,
-                      fontSize: 15,
-                      color: C.text,
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    {s.instruction}
-                  </div>
+                    <span
+                      style={{
+                        fontFamily: "Inter, sans-serif",
+                        fontSize: 14,
+                        fontWeight: 500,
+                        color: "#233C00",
+                        textAlign: "left",
+                      }}
+                    >
+                      {idx + 1}) {normalized.title}
+                    </span>
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="rgba(35,60,0,0.25)"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      style={{
+                        transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                        transition: "transform 200ms ease",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
+                  </button>
+                  {isExpanded && (
+                    <div
+                      style={{
+                        background: "rgba(35,60,0,0.03)",
+                        border: "1px solid rgba(35,60,0,0.08)",
+                        borderTop: "none",
+                        borderRadius: "0 0 10px 10px",
+                        padding: "12px 14px",
+                      }}
+                    >
+                      <p
+                        style={{
+                          fontFamily: "Inter, sans-serif",
+                          fontSize: 14,
+                          color: "#233C00",
+                          lineHeight: 1.6,
+                          margin: 0,
+                        }}
+                      >
+                        {normalized.instruction}
+                      </p>
+                    </div>
+                  )}
                 </div>
               );
             })}
+            {item.steps.length === 0 && (
+              <p
+                style={{
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 13,
+                  color: "rgba(35,60,0,0.4)",
+                }}
+              >
+                No steps yet.
+              </p>
+            )}
           </div>
-        )}
+        </div>
       </div>
 
       <div
@@ -665,18 +848,22 @@ function ReceivedNoteOverlay({
         background: "rgba(35,60,0,0.08)",
         zIndex: 90,
         display: "flex",
-        flexDirection: "column",
-        justifyContent: "flex-end",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "0 32px",
       }}
     >
       <div
         style={{
+          width: "100%",
+          maxWidth: 320,
           background: "#FAF7F2",
-          borderRadius: "24px 24px 0 0",
-          padding: "28px 24px 32px",
+          borderRadius: 24,
+          padding: "28px 24px 24px",
           display: "flex",
           flexDirection: "column",
           gap: 16,
+          boxShadow: "0 16px 40px rgba(24,40,0,0.25)",
         }}
       >
         <div
