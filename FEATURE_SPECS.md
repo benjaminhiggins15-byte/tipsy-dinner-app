@@ -592,6 +592,23 @@ voice-adjacent (flagged during the session as the one edit touching
 formatting-house-style-protected territory) and was scoped as tightly as possible
 for that reason.
 
+**Verification method.** A fixed set of representative openers (vague → specific),
+run on the live preview under the real account, judged by eye — elevation by
+building out dishes (including a deliberately humble one), discovery by watching
+whether it asks the world on broad/protein-only asks and coheres the set, plus
+confirming already-implied-cuisine asks skip the question. Discovery is the
+behavior that needs conversation volume to trust, not a couple of screenshots.
+Founder's close: this class of tuning is discovered through real use, never
+"done" — good and improvable is the right state for a prompt surface.
+
+**Guardrails held.** Recipe XML schema / `recipeToXML`, the `normalizeStep`
+contract, `sourceId`/`sourceTitle`, photo paths/`photo_version`, Cook History local
+state, the grocery normalization call, and the chips system — all untouched.
+Recipe-context-injection architecture (system-prompt reference material, not a
+fake assistant message) untouched. Temperature left at default 1.0 deliberately.
+The AI naming call for save-as-new remains a separate logged item, not folded into
+this work.
+
 ---
 
 ## Account Identity (Build 1 of account-to-account sharing)
@@ -674,23 +691,6 @@ key, read only inside `Avatar`'s fallback branch (used when `Avatar` is
 called without a `name` prop). No current call site omits that prop, so the
 branch is dead in practice, but the constant and the fallback read were not
 deleted.
-
-**Verification method.** A fixed set of representative openers (vague → specific),
-run on the live preview under the real account, judged by eye — elevation by
-building out dishes (including a deliberately humble one), discovery by watching
-whether it asks the world on broad/protein-only asks and coheres the set, plus
-confirming already-implied-cuisine asks skip the question. Discovery is the
-behavior that needs conversation volume to trust, not a couple of screenshots.
-Founder's close: this class of tuning is discovered through real use, never
-"done" — good and improvable is the right state for a prompt surface.
-
-**Guardrails held.** Recipe XML schema / `recipeToXML`, the `normalizeStep`
-contract, `sourceId`/`sourceTitle`, photo paths/`photo_version`, Cook History local
-state, the grocery normalization call, and the chips system — all untouched.
-Recipe-context-injection architecture (system-prompt reference material, not a
-fake assistant message) untouched. Temperature left at default 1.0 deliberately.
-The AI naming call for save-as-new remains a separate logged item, not folded into
-this work.
 
 ---
 
