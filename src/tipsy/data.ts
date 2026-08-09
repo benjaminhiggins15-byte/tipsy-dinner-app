@@ -1300,6 +1300,7 @@ export async function saveReceivedRecipe(
   sendId: string,
   snapshot: RecipeSendSnapshot,
   existingRecipeId?: string,
+  categoryId?: string,
 ): Promise<SaveReceivedRecipeResult> {
   // Step 1 — RECONSTITUTE + saveRecipe. Skipped on retry (existingRecipeId
   // means a prior call already created the recipe; only Step 2 failed).
@@ -1317,6 +1318,7 @@ export async function saveReceivedRecipe(
           createdAt: new Date().toISOString(),
         },
         'manual',
+        categoryId,
       );
     } catch (error) {
       // Nothing durable was created; send stays 'pending'; safe to retry from scratch.

@@ -1,8 +1,24 @@
 import { useState, useEffect } from "react";
-import { getPendingReceivedRecipes, normalizeStep, type PendingReceivedRecipe } from "./data";
+import {
+  getPendingReceivedRecipes,
+  normalizeStep,
+  saveReceivedRecipe,
+  dismissReceivedRecipe,
+  addRecipeToMenuSection,
+  type PendingReceivedRecipe,
+  type Recipe,
+  type RecipeSendSnapshot,
+  type MenuSection,
+} from "./data";
 import watermarkSquare from "../Logos/watermark_square.png";
+import SaveRecipeFlow from "./SaveRecipeFlow";
 
-type HomePush = (s: { name: "receivedPending"; items: PendingReceivedRecipe[] } | { name: "receivedRecipe"; item: PendingReceivedRecipe }) => void;
+type HomePush = (
+  s:
+    | { name: "receivedPending"; items: PendingReceivedRecipe[] }
+    | { name: "receivedRecipe"; item: PendingReceivedRecipe }
+    | { name: "newcategoryforreceived"; item: PendingReceivedRecipe }
+) => void;
 
 type ProfileType = {
   id: string;
@@ -388,14 +404,25 @@ type ReceivedTab = "ingredients" | "steps";
 // see CLAUDE.md's Update vs Save-as-New section).
 export function ReceivedRecipeView({
   item,
+  newCategory,
   back,
+  push,
+  finishSaveRecipe,
+  clearRecipeCache,
 }: {
   item: PendingReceivedRecipe;
+  newCategory?: { key: string; label: string };
   back: () => void;
+  push: HomePush;
+  finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
+  clearRecipeCache: (categoryKey: string) => void;
 }) {
   const [tab, setTab] = useState<ReceivedTab>("ingredients");
   const [noteRevealed, setNoteRevealed] = useState(!item.note);
   const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set());
+  const [trayOpen, setTrayOpen] = useState(!!newCategory);
+  const [saving, setSaving] = useState(false);
+  const [dismissing, setDismissing] = useState(false);
 
   const toggleStep = (idx: number) => {
     const next = new Set(expandedSteps);
@@ -408,6 +435,51 @@ export function ReceivedRecipeView({
   };
 
   const noteShowing = !!item.note && !noteRevealed;
+
+  const handleDismiss = async () => {
+    if (dismissing) return;
+    setDismissing(true);
+    await dismissReceivedRecipe(item.sendId);
+    back();
+  };
+
+  const handlePickCategory = async (
+    catKey: string,
+    catLabel: string,
+    menuInfo?: { menuId: string; section: MenuSection }
+  ) => {
+    setTrayOpen(false);
+    setSaving(true);
+
+    const snapshot: RecipeSendSnapshot = {
+      title: item.title,
+      description: item.description,
+      ingredients: item.ingredients,
+      steps: item.steps,
+      cook_time: null,
+      serves: null,
+    };
+
+    const result = await saveReceivedRecipe(item.sendId, snapshot, undefined, catKey);
+
+    if (menuInfo) {
+      await addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, result.recipeId);
+    }
+
+    const recipe: Recipe = {
+      title: item.title,
+      description: item.description,
+      color: "linear-gradient(135deg, #C5DCF4 0%, #85B7EB 100%)",
+      category: catLabel.toLowerCase(),
+      ingredients: item.ingredients.map((ing) => ({ name: ing.name, qty: ing.quantity })),
+      steps: item.steps,
+      savedId: result.recipeId,
+      categoryKey: catKey,
+    };
+
+    clearRecipeCache(catKey);
+    finishSaveRecipe(recipe, catKey, catLabel);
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg, position: "relative" }}>
@@ -795,7 +867,8 @@ export function ReceivedRecipeView({
         }}
       >
         <button
-          onClick={() => console.log("dismiss stub", item.sendId)}
+          onClick={handleDismiss}
+          disabled={dismissing || saving}
           style={{
             flex: 1,
             fontFamily: fontSans,
@@ -806,13 +879,15 @@ export function ReceivedRecipeView({
             border: "1.5px solid rgba(35,60,0,0.25)",
             borderRadius: 14,
             padding: "14px 0",
-            cursor: "pointer",
+            cursor: dismissing || saving ? "default" : "pointer",
+            opacity: dismissing || saving ? 0.5 : 1,
           }}
         >
           Dismiss
         </button>
         <button
-          onClick={() => console.log("save stub", item.sendId)}
+          onClick={() => setTrayOpen(true)}
+          disabled={dismissing || saving}
           style={{
             flex: 2,
             fontFamily: fontSans,
@@ -823,12 +898,25 @@ export function ReceivedRecipeView({
             border: "none",
             borderRadius: 14,
             padding: "14px 0",
-            cursor: "pointer",
+            cursor: dismissing || saving ? "default" : "pointer",
+            opacity: dismissing || saving ? 0.5 : 1,
           }}
         >
-          Save to my library
+          {saving ? "Saving…" : "Save to my library"}
         </button>
       </div>
+
+      {trayOpen && (
+        <SaveRecipeFlow
+          onClose={() => setTrayOpen(false)}
+          onPick={handlePickCategory}
+          onNew={() => {
+            setTrayOpen(false);
+            push({ name: "newcategoryforreceived", item });
+          }}
+          initialSelectedCategory={newCategory || null}
+        />
+      )}
 
       {noteShowing && (
         <ReceivedNoteOverlay

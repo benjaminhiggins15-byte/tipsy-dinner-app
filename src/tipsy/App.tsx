@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName, saveReceivedRecipe, retryReceivedRecipePhoto, findReceivedRecipesWithPhotoOwed, sendRecipeToFriends, searchProfiles, getMyConnections, type RecipeSendSnapshot, type ProfileSearchResult, type PendingReceivedRecipe } from "./data";
+import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName, sendRecipeToFriends, searchProfiles, getMyConnections, type ProfileSearchResult, type PendingReceivedRecipe } from "./data";
 import { type CropRect } from "./image";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
@@ -29,23 +29,6 @@ import {
   IconCheck,
 } from "@tabler/icons-react";
 import { pickChips } from "./chips";
-
-// ==================== TEMPORARY — Session (a) test scaffolding ====================
-// Console-only hooks for exercising the receive/save engine before any receive UI
-// exists (that's Session (b)). Same throwaway pattern as the one-time step-title
-// backfill hook: attach to window, invoke from the browser console, remove before
-// Session (b) starts building the real receive UI. Never wired into a render path.
-if (typeof window !== "undefined") {
-  (window as any).__tdSaveReceived = (
-    sendId: string,
-    snapshot: RecipeSendSnapshot,
-    existingRecipeId?: string,
-  ) => saveReceivedRecipe(sendId, snapshot, existingRecipeId);
-  (window as any).__tdRetryReceivedPhoto = (sendId: string, recipeId: string) =>
-    retryReceivedRecipePhoto(sendId, recipeId);
-  (window as any).__tdFindPhotoOwed = () => findReceivedRecipesWithPhotoOwed();
-}
-// ==================== END TEMPORARY scaffolding ====================
 
 type RecipeDraft = {
   title: string;
@@ -259,7 +242,8 @@ type Screen =
   | { name: "placeholder"; title: string }
   | { name: "home" }
   | { name: "receivedPending"; items: PendingReceivedRecipe[] }
-  | { name: "receivedRecipe"; item: PendingReceivedRecipe };
+  | { name: "receivedRecipe"; item: PendingReceivedRecipe; newCategory?: { key: string; label: string } }
+  | { name: "newcategoryforreceived"; item: PendingReceivedRecipe };
 
 type TabId = "build" | "recipes" | "grocery" | "profile" | "home";
 
@@ -308,6 +292,7 @@ function screenKey(s: Screen): string {
     case "home": return "home";
     case "receivedPending": return "receivedPending";
     case "receivedRecipe": return `receivedRecipe:${s.item.sendId}`;
+    case "newcategoryforreceived": return `newcategoryforreceived:${s.item.sendId}`;
   }
 }
 
@@ -321,6 +306,7 @@ function renderScreen(
   finishDeleteCategory?: () => void,
   finishDeleteRecipe?: () => void,
   finishCreateCategoryForRecipe?: (catKey: string, catLabel: string, draft: RecipeDraft, returnTo: "cook" | "addown") => void,
+  finishCreateCategoryForReceived?: (catKey: string, catLabel: string, item: PendingReceivedRecipe) => void,
   finishSaveRecipe?: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void,
   onSignOut?: () => void,
   profile?: ProfileType | null,
@@ -457,7 +443,24 @@ function renderScreen(
     case "placeholder": return <Placeholder title={s.title} back={back} />;
     case "home": return <Home profile={profile || null} push={push} />;
     case "receivedPending": return <ReceivedPending items={s.items} back={back} push={push} />;
-    case "receivedRecipe": return <ReceivedRecipeView item={s.item} back={back} />;
+    case "receivedRecipe": return (
+      <ReceivedRecipeView
+        item={s.item}
+        newCategory={s.newCategory}
+        back={back}
+        push={push}
+        finishSaveRecipe={(r, k, l) => finishSaveRecipe?.(r, k, l)}
+        clearRecipeCache={clearRecipeCache || (() => {})}
+      />
+    );
+    case "newcategoryforreceived": return (
+      <NewCategory
+        back={back}
+        onSaved={(cat) => {
+          if (cat) finishCreateCategoryForReceived?.(cat.key, cat.label, s.item);
+        }}
+      />
+    );
   }
 }
 
@@ -971,6 +974,16 @@ export default function App() {
     }
   };
 
+  // Mirrors finishCreateCategoryForRecipe's "cook" branch — receiving a
+  // recipe has no addown-equivalent, so there's only one return target.
+  const finishCreateCategoryForReceived = (catKey: string, catLabel: string, item: PendingReceivedRecipe) => {
+    if (transition) return;
+    updateCurrentTabStack((prev) => {
+      const newStack = prev.slice(0, -1); // Remove newcategoryforreceived screen
+      return [...newStack, { name: "receivedRecipe", item, newCategory: { key: catKey, label: catLabel } }];
+    });
+  };
+
   // Transfer to Build with a recipe and question
   const transferToRecipeChat = (recipe: SavedRecipe, question: string, onCollisionCancel: () => void) => {
     if (transition) return;
@@ -1061,6 +1074,7 @@ export default function App() {
     setTabStacks((stacks) => ({
       ...stacks,
       build: [{ name: "cook" }], // Reset Build tab to root
+      home: [{ name: "home" }], // Reset Home tab to root — prevents a just-saved received recipe from lingering as a stale receivedRecipe/receivedPending screen
       recipes: [
         { name: "categories" },
         { name: "recipes", categoryKey, categoryLabel },
@@ -1160,6 +1174,7 @@ export default function App() {
           finishDeleteCategory={finishDeleteCategory}
           finishDeleteRecipe={finishDeleteRecipe}
           finishCreateCategoryForRecipe={finishCreateCategoryForRecipe}
+          finishCreateCategoryForReceived={finishCreateCategoryForReceived}
           finishSaveRecipe={finishSaveRecipe}
           onSignOut={handleSignOut}
           profile={profile}
@@ -1320,6 +1335,7 @@ function ScreenStage({
   finishDeleteCategory,
   finishDeleteRecipe,
   finishCreateCategoryForRecipe,
+  finishCreateCategoryForReceived,
   finishSaveRecipe,
   onSignOut,
   profile,
@@ -1347,6 +1363,7 @@ function ScreenStage({
   finishDeleteCategory: () => void;
   finishDeleteRecipe: () => void;
   finishCreateCategoryForRecipe: (catKey: string, catLabel: string, draft: RecipeDraft, returnTo: "cook" | "addown") => void;
+  finishCreateCategoryForReceived: (catKey: string, catLabel: string, item: PendingReceivedRecipe) => void;
   finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
   onSignOut: () => void;
   profile: ProfileType | null;
@@ -1452,7 +1469,7 @@ function ScreenStage({
         pointerEvents: isTransitioning ? "none" : "auto",
         paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
       }}>
-        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat)}
+        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat)}
       </div>
 
       {/* Overlay layer - only during transitions, renders from screen */}
@@ -1465,7 +1482,7 @@ function ScreenStage({
           pointerEvents: "none",
           paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
         }}>
-          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat)}
+          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat)}
         </div>
       )}
     </div>
