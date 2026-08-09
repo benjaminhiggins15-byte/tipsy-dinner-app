@@ -407,44 +407,56 @@ export function ReceivedRecipeView({
     setExpandedSteps(next);
   };
 
+  const noteShowing = !!item.note && !noteRevealed;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg, position: "relative" }}>
       <div
         style={{
-          display: "grid",
-          gridTemplateColumns: "1fr auto 1fr",
-          alignItems: "center",
-          padding: "16px 24px",
-          flexShrink: 0,
+          display: "flex",
+          flexDirection: "column",
+          flex: 1,
+          minHeight: 0,
+          filter: noteShowing ? "blur(8px)" : "none",
+          transition: "filter 400ms ease",
         }}
       >
-        <button
-          onClick={back}
-          aria-label="Back"
-          style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", justifySelf: "start" }}
-        >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.6)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
-        </button>
         <div
           style={{
-            fontFamily: fontSans,
-            fontSize: 13,
-            fontWeight: 500,
-            letterSpacing: "0.1em",
-            textTransform: "uppercase",
-            color: C.text,
-            justifySelf: "center",
-            whiteSpace: "nowrap",
+            display: "grid",
+            gridTemplateColumns: "1fr auto 1fr",
+            alignItems: "center",
+            padding: "16px 24px",
+            flexShrink: 0,
           }}
         >
-          Recipe Preview
+          <button
+            onClick={back}
+            aria-label="Back"
+            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", justifySelf: "start" }}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.6)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
+          <div
+            style={{
+              fontFamily: fontSans,
+              fontSize: 13,
+              fontWeight: 500,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              color: C.text,
+              justifySelf: "center",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Recipe Preview
+          </div>
+          <div />
         </div>
-        <div />
-      </div>
 
-      <div style={{ flex: 1, overflowY: "auto", paddingBottom: 96 }}>
+        <div style={{ flex: 1, overflowY: "auto", paddingBottom: 96 }}>
         <div style={{ padding: "4px 24px 20px" }}>
           {/* Hero — renders only when there's a photo, matching RecipeCard:
               a photoless recipe shows no hero block at all. */}
@@ -766,6 +778,7 @@ export function ReceivedRecipeView({
           </div>
         </div>
       </div>
+      </div>
 
       <div
         style={{
@@ -817,10 +830,10 @@ export function ReceivedRecipeView({
         </button>
       </div>
 
-      {item.note && !noteRevealed && (
+      {noteShowing && (
         <ReceivedNoteOverlay
           senderName={item.senderName}
-          note={item.note}
+          note={item.note!}
           onViewRecipe={() => setNoteRevealed(true)}
         />
       )}
