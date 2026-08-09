@@ -1183,3 +1183,135 @@ recipients' shared copy and the untouched live original; sender identity resolva
 via `sender_id` → `profiles` for a future "inspired by" stamp. Test rows deliberately
 left in place (not torn down) to seed the still-unbuilt receive UI's first real test
 data.
+
+## Account-to-Account Sharing — Receiving (the Home screen cornerstone)
+
+This is the receive-side UI that Build 4 (Session a)'s save engine was built for —
+a new `Home` tab (`src/tipsy/Home.tsx`) that turns the plumbing above into an actual
+screen. Shipped across several sessions on branch `account-sharing-receive-plumbing`,
+which stays **intentionally unmerged** until the Home screen is shelf-complete (see
+the branch note in CLAUDE.md's Standing Cleanup / Watch Items — do not read
+"unmerged" as "unfinished" or "broken"). This section will fold into a proper
+account-sharing-wide split of FEATURE_SPECS.md once that phase completes; it is not
+split out on its own yet.
+
+**Home tab and shell.** `Home` is `TAB_ORDER`'s 5th, last entry — a deliberate
+append, not an insert elsewhere in the array (inserting mid-array disturbs
+`ScreenStage`'s screen-key/stack bookkeeping). The shell is a light `#FAF7F2`
+background with an italic Fraunces greeting ("Good morning/afternoon/evening" by
+local hour, plus the user's first name from `profile.display_name`) — no chrome
+beyond that; the bottom nav is the only other persistent element.
+
+**Received shelf + tiles.** Below the greeting, a horizontally-scrolling shelf of up
+to 4 tiles, one per `pending`-status received recipe (`getPendingReceivedRecipes`,
+existing from Build 4 Session a). Each tile: a blurred, scaled-up cover photo behind
+a bottom scrim gradient carrying the recipe title and "from {senderName}" — or, when
+the send had no photo, a flat card-green (`#2E4E08`) panel with the app's watermark
+monogram centered at reduced opacity as a photoless fallback. A "View all (N)" link
+appears only once there are more than 4 pending items, pushing to the full list.
+Zero pending items renders just the bare greeting — no dedicated empty-state copy yet.
+
+**View-all pending list.** A separate full list screen (`ReceivedPending` in the same
+file) takes a static `items` snapshot as a prop rather than its own live query —
+**known minor staleness**: saving or dismissing a recipe from inside this list can
+leave a momentarily-stale row until the user backs out and re-enters (logged in
+CLAUDE.md's Standing Cleanup, not fixed).
+
+**Received recipe view.** Opening a tile pushes `ReceivedRecipeView`, which
+deliberately hand-matches `RecipeCard`'s presentation (hero photo, title, tabs for
+ingredients/steps, step-row expansion) so a received recipe is visually
+indistinguishable from one already in the library — built as a byte-for-byte
+presentational match, not by importing or extending `RecipeCard` itself (`RecipeCard`
+is a known-trouble file per CLAUDE.md; this view is a sibling, never fused in). It is
+strictly read-only: no Cook History, no edit, no delete, none of the owner-only
+controls a saved `RecipeCard` has. Where a saved recipe's card would show nothing
+special, this view's description area carries "inspired by {senderName}" instead —
+the pre-save equivalent of the `inspired_by_name` stamp that lands on the recipe row
+itself once saved (see Build 4 Session a above).
+
+**Note overlay.** When the send included a note, a centered card overlay ("{sender}
+sent you this" + the note text + a "View recipe" button) shows over a blurred version
+of the recipe content beneath, and is skipped entirely when there's no note. It is
+meant to show **once per recipe, ever, for the rest of that viewing session** — not
+re-arm on every re-entry. This required a specific fix: `ScreenStage` renders the
+outgoing screen in a separate overlay-layer JSX position during transitions (see
+CLAUDE.md's Architecture / SSR section on the ScreenStage tree), which mounts a
+*fresh* `ReceivedRecipeView` instance to animate the slide-out whenever the user
+leaves this screen (e.g. right after tapping Save) — a fresh instance re-derives its
+"note revealed" state from `item.note` and re-shows the note mid-transition. Fixed
+with a module-level `Set<sendId>` in `Home.tsx` (`revealedReceivedNoteSendIds`) that
+records "seen" outside component state, so the remount doesn't re-arm it. This is a
+per-session (page-lifetime) memory, not persisted — acceptable, since the underlying
+send is no longer pending after save/dismiss anyway and won't be re-opened this way.
+
+**Save.** Tapping Save opens `SaveRecipeFlow` — the exact same category-picker sheet
+used by the normal AI/manual save flow — reused verbatim, unmodified. Because that
+sheet's "add to menu" step and "create new category" affordance are both unconditional
+(not caller-configurable), reusing it correctly required wiring both round-trips, not
+just category selection:
+- **Category pick** → `saveReceivedRecipe(sendId, snapshot, undefined, categoryId)`
+  (the settled Session (a) resolution: the category the user picks now flows through
+  as a real `categoryId`, resolving the categoryless-recipe invisibility gap flagged
+  in Build 4 Session a — a received recipe now gets a real `recipe_categories` row
+  and is visible in the Recipes tab like any other saved recipe).
+- **Add to menu** (if chosen in the sheet) → `addRecipeToMenuSection` afterward, same
+  as the normal flow.
+- **New category** → a dedicated `newcategoryforreceived` screen +
+  `finishCreateCategoryForReceived` App-root function, built as an additive parallel
+  path rather than reusing the existing `newcategoryforrecipe`/`RecipeDraft`/
+  `returnTo` machinery — `PendingReceivedRecipe`'s shape doesn't fit `RecipeDraft`
+  cleanly, and that machinery is Cook/AddYourOwn-coupled, both known-trouble-adjacent.
+  Returns to `ReceivedRecipeView` with the newly created category pre-selected,
+  un-animated (mirrors the existing `finishCreateCategoryForRecipe` "cook" branch,
+  which is likewise un-animated).
+
+After a successful save: `clearRecipeCache(categoryId)` is called directly (not
+through `finishSaveRecipe`'s own inline cache-clear, which has a pre-existing bug —
+see CLAUDE.md — of never dropping the `'__all__'` cache entry); the user lands on the
+saved recipe exactly like a normal save, via the existing `finishSaveRecipe`; and the
+Home tab's stack is reset to root (mirroring the existing Build-tab reset already in
+`finishSaveRecipe`) so the now-resolved received recipe can't linger as a stale
+screen in the Home stack.
+
+**Photo on first paint.** The copied photo is available in the same round trip:
+`copy-received-recipe-photo`'s response already includes `photo_url`/`photo_version`
+on success, so `SaveReceivedRecipeResult` was extended with optional `photoUrl`/
+`photoVersion` fields (populated only when `photoCopied` is true) and the landed
+`Recipe` object is built with them set. Fixes what would otherwise be a first-paint
+photo-missing flash (fixed before ever shipping to `main`, not a shipped regression) —
+without this, the recipe would paint photoless until a navigate-away-and-back forced
+a refetch. The soft-fail contract from Build 4 Session a is unchanged: a failed or
+skipped copy simply leaves these fields unset, painting photoless exactly as before.
+
+**Dismiss.** Quiet, no confirmation modal: `dismissReceivedRecipe(sendId)` (existing,
+trivial status-only update) then back to Home. Confirmed at the data layer that this
+is genuinely soft and silent — the `recipe_sends` row survives with `status =
+'dismissed'` (never deleted), and dismissing creates **no** new `notifications` row
+for the sender; the only notification that ever exists for a send is the single
+`recipe_received` one created at send time.
+
+**Temporary test scaffolding removed.** The `window.__tdSaveReceived` /
+`__tdRetryReceivedPhoto` / `__tdFindPhotoOwed` console-only hooks from Build 4 Session
+a were deleted from `App.tsx` once this real Save/Dismiss UI existed to exercise the
+engine instead, per that session's own note to do so.
+
+**Data-layer verification (live Supabase, read-only queries via service role, no
+teardown needed since no throwaway data was created this pass):**
+- **Connection formed, first-class and deduped.** A single `connections` row exists
+  between the two test accounts used, correctly ordered via canonical `least`/
+  `greatest`, with `created_via` pointing at the send whose save actually triggered
+  formation (confirmed by matching timestamps against the underlying recipe's
+  `created_at`). A second save between the same pair did not create a duplicate row —
+  the `on conflict do nothing` guard holds in practice, not just in the function body.
+- **Attribution is a stored value, not just rendered text.** Both recipes saved from
+  received sends carry `inspired_by_id`/`inspired_by_name` as real column values
+  matching the sender.
+- **Dismiss and Save notification behavior confirmed identical to spec:** exactly one
+  `notifications` row per send exists in all cases (saved or dismissed), timestamped
+  at send time; zero rows ever appear for the original sender as a result of a
+  recipient's save or dismiss action.
+- **Photo copy is a real, independent object.** The recipient's copy lives at their
+  own `{recipientId}/{recipeId}.jpg` path (never a `send-`-prefixed name), with a
+  storage object id distinct from the sender's original `send-{token}.jpg` object —
+  genuinely two objects, byte-identical (matching etag and size) rather than a
+  reference, confirming the copy is real and independently deletable.

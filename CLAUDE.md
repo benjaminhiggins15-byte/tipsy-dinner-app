@@ -51,6 +51,10 @@ pointer named — do not duplicate it here.
 - **`recipe_sends.saved_recipe_id` is settable exactly once** (null → a recipient-owned recipe id, never reassignable) — enforced by extending the existing `enforce_recipe_sends_status_only_update` trigger; service role bypasses RLS but NOT triggers, so this holds even for the elevated photo-copy actor. Full detail: Account-to-Account Sharing — Build 4 (Session a) in FEATURE_SPECS.md.
 - **`finish_received_recipe_save` (`SECURITY DEFINER`) is the only path that stamps `inspired_by`, forms the connection, sets `saved_recipe_id`, and flips status** — atomically, guarded on caller-is-recipient and status-is-pending, row-locked against a concurrent double-finish. Connection ordering uses canonical `LEAST`/`GREATEST` of the two profile ids — the table's UNIQUE constraint alone would NOT catch a reversed-pair duplicate without this ordering discipline. Full detail: Account-to-Account Sharing — Build 4 (Session a) in FEATURE_SPECS.md.
 - **`profiles` stays owner-only SELECT — `search_profiles`/`get_my_connections` (both `SECURITY DEFINER`, `authenticated`-only) are the ONLY way an authenticated user reads another user's profile data**, and both return only `{id, display_name, handle}`, never a full row. `search_profiles` matches handle exact (case-insensitive) or display_name prefix (case-insensitive), excludes the caller, requires a 2+ char query, caps at 10 rows, and escapes LIKE wildcards; `get_my_connections` resolves the other party per row via a case-join rather than assuming canonical id ordering. The tight exact/prefix match is a deliberate launch-scope choice, not a limitation — expected to loosen on friction at scale, a one-operator change with no shape change. Full detail: Account-to-Account Sharing — Send UI in FEATURE_SPECS.md.
+- **`get_sender_names` is the ONLY sanctioned `sender_id`→display-name lookup** — `SECURITY DEFINER`, scoped to senders who have actually sent the caller a recipe, returns `{id, display_name}` only, never a full row. Full detail: Account-to-Account Sharing — Receiving in FEATURE_SPECS.md.
+- **The receive/save path is three steps in fixed order** — `saveReceivedRecipe` (create the recipe, with the picked category now forwarded through) → `finish_received_recipe_save` (forms the first-class `connections` row, stamps `inspired_by`, sets `saved_recipe_id`) → `copy-received-recipe-photo` (soft-fail). Callers must invalidate the cache via `clearRecipeCache` directly, not `finishSaveRecipe`'s inline clear (see that function's known `'__all__'` gap). Full detail: Account-to-Account Sharing — Receiving in FEATURE_SPECS.md.
+- **`connections` is first-class, canonical, and deduped** — one row per pair regardless of which side saved or how many times; this is the seed a future social feed reads from. Full detail: Account-to-Account Sharing — Receiving in FEATURE_SPECS.md.
+- **The received recipe view must visually MATCH `RecipeCard`, but as a sibling, never fused into it** — a received recipe should look identical to one already in the library; built by hand-matching presentation, not by sharing the component (`RecipeCard` is itself a known-trouble file). Full detail: Account-to-Account Sharing — Receiving in FEATURE_SPECS.md.
 
 ---
 
@@ -132,6 +136,13 @@ took over the header icon slot (commit `254e0b5`). There is no reserved 5th slot
 the current tab bar layout; a fifth tab remains a product idea for a future social
 feature, not a structural placeholder.
 
+**Superseded 2026-08-09**: that fifth tab now exists — `Home` (`IconHome`), added for
+the account-to-account sharing receiving surface, appended LAST in `TAB_ORDER`
+deliberately (inserting it elsewhere in the array disturbs `ScreenStage`). Moving it
+to a more prominent position in the bar is a future-session product decision, not a
+structural blocker. Full detail: Account-to-Account Sharing — Receiving in
+FEATURE_SPECS.md.
+
 ---
 
 ## Data Layer
@@ -195,6 +206,11 @@ FEATURE_SPECS.md). Builds 1 & 2's schema remains entirely dashboard-only, per th
 paragraph above — this one function is the sole tracked exception, pending the
 still-deferred full schema export. Do not treat this as "schema is now tracked" —
 re-check `supabase/migrations/` directly rather than assuming its contents.
+
+**STALE, per the doc's own advice above — re-checked this session:** the directory
+now also holds `search_profiles`, `get_my_connections`, and `get_sender_names`
+(added across the Receiving builds). Still not the full schema export — same
+caution applies, re-check the directory rather than trusting either count.
 
 **Legacy localStorage keys still in use:** `tipsyDinnerEmail`, `tipsyDinnerTable`.
 `tipsyDinnerName` is no longer a name source — `display_name` is authoritative (see
@@ -506,3 +522,11 @@ code defects).
 - A standing baseline of pre-existing TypeScript errors unrelated to feature work. Re-count with `bunx tsc --noEmit` before ever claiming a change introduced zero new errors — do not trust a documented figure; this count has drifted (31 → 40) and will again.
 - Reusable loading-spinner / "Updating…" pattern from the grocery work is a good candidate to reuse wherever async waits show poor feedback (e.g. Occasions/Menus load flash).
 - **`deleteSavedRecipe` swallows errors.** On failure it logs to `console.error` and returns — it never throws or returns a status. Its one caller (`AddYourOwn.tsx`) doesn't check a return value either, so a failed delete still closes the confirm modal and navigates away as if it had succeeded. Known, deliberately not fixed; out of scope if encountered incidentally — only fix it as its own deliberate task.
+- **Branch `account-sharing-receive-plumbing` is INTENTIONALLY long-lived and unmerged.** Receiving (Home tab, shelf, received recipe view, note overlay, Save/Dismiss) is functionally complete and data-verified as of this session, but stays off `main` until the Home screen is shelf-complete across future sessions. A future session finding this branch still unmerged is not a sign anything was left broken or forgotten — check FEATURE_SPECS.md's Receiving section for what's actually done before assuming otherwise.
+- Send sheet's "YOUR CONNECTIONS" label reads oddly once received-recipe connections exist too — reframing toward "Recents" / "people you've shared with" is deferred to a deliberate social-visibility design pass, not a fix for the send surface itself.
+- `finishSaveRecipe`'s inline cache-clear never drops `'__all__'` (pre-existing gap in the normal save flow, not received-specific) — the received-recipe save path sidesteps it by calling `clearRecipeCache` directly instead.
+- `saveRecipe` drops `cook_time`/`serves` for ALL recipes, not just received ones — root cause of the known cook-time/serves-not-displaying issue.
+- `ReceivedPending` (the "View all" pending list) renders from a static snapshot — a save/dismiss actioned from inside it may show a stale row until backing out and re-entering.
+- `recipe_sends.sender_id`/`recipient_id` are unindexed — fine at current volume, worth an index as a future optimization.
+- Aesthetic-pass items from Receiving, not yet addressed: the photoless-tile monogram reads as a visibly distinct-shade box rather than blending in (treatment needs rethinking); the note overlay's background blur is slightly too intense (lighten it).
+- `get_sender_names` landed as a tracked migration in `supabase/migrations/` — the first in-repo SQL for the receive path specifically. Reinforces (doesn't replace) the still-pending full schema export, which remains its own dedicated session.

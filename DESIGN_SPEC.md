@@ -124,6 +124,25 @@ logos) lives in CLAUDE.md; this file is the per-screen application of it.
 - Expanded body: cream 3% bg, cream 8% border, border-top none, radius 0 0 14px 14px
 - Recipe rows: name (Inter 500 cream 14px) + meta (Inter cream 30% 11px), X remove right (cream 15%). "add a recipe" row at bottom. Tapping a recipe opens the card; back returns here
 
+## Home — Greeting + Received Shelf
+- Background: light `#FAF7F2` (not the green gradient) — same treatment as Recipe Card / Profile / Send Sheet. Home is the bottom nav's 5th tab (`IconHome`), appended last after Profile.
+- Greeting: Fraunces italic, ~22px, `#233C00` — "Good morning/afternoon/evening" (by local hour) + the user's first name, top-left, no other header chrome.
+- Section label "RECEIVED RECIPES": Inter 500 uppercase 13px `#233C00`, letter-spacing 0.1em. "View all (N)" (Inter 500 12px, `rgba(35,60,0,0.6)`) sits at the right of the same row, shown only once there are more than 4 pending items.
+- Tiles: 190×142, radius 20px, horizontal scroll, gap 12px, up to 4 shown. Photo tiles: cover photo blurred (6px) and scaled up 1.1×, with a bottom-to-top scrim (`rgba(24,40,0,0.85)` → transparent) carrying the title (Lazydog uppercase, cream `#FEE7C0`, 2-line clamp) and "from {senderName}" (Inter 500 11px, cream 75%). Photoless tiles: flat `#2E4E08` panel with the app's watermark monogram centered at 50% opacity — currently reads as a visibly distinct-shade box against the shelf rather than blending in; open aesthetic item, not yet resolved.
+- Zero pending items: bare greeting only, no dedicated empty-state illustration/copy yet.
+
+## Home — Received Recipe View
+- Hand-matches the Recipe Card's layout (hero photo, title, Fraunces italic description, Ingredients/Steps tabs, step-row expansion) so a received recipe looks indistinguishable from one already saved — built as its own sibling view, not by reusing `RecipeCard`.
+- Read-only: no History tab, no edit/delete/camera controls. Description area shows "inspired by {senderName}" in place of any owner-only meta.
+- Bottom action bar: Save / Dismiss, fixed to the screen (`position: fixed; bottom: 64`), same nav-bar-clearance convention as every other full-height sheet in the app.
+- Tapping Save opens the same category-picker sheet used everywhere else in the app (see Write Your Own — Save Sheet above) — no separate received-specific picker UI.
+
+## Home — Note Overlay
+- Full-screen scrim, `rgba(35,60,0,0.08)`, fixed and clearance-respecting (`bottom: 64`), centering a card.
+- Card: `#FAF7F2` bg, radius 24px, max-width 320px, soft drop shadow (`0 16px 40px rgba(24,40,0,0.25)`).
+- Content: "{senderName} sent you this" (Inter 500 uppercase 13px, `rgba(35,60,0,0.6)`) → note text (Fraunces italic 17px, `#233C00`) → full-width "View recipe" button (`#233C00` bg, cream `#FEE7C0` text, radius 14px).
+- Recipe content beneath is blurred while the overlay shows — blur currently judged slightly too intense; open aesthetic item, not yet resolved. Shown once per recipe per viewing session; skipped entirely when the send has no note.
+
 ## Profile
 - Background: light `#FAF7F2` (not the green gradient) — same treatment as the Recipe Card, dark text/icon strokes throughout.
 - Header: back arrow left (only when not the tab root — see CLAUDE.md Navigation), avatar right (initials on `#233C00` circle, sourced from `display_name`). Center is a single tappable name-forward block, not a page-title label: `display_name` prominent (Inter 700, ~22px, `#233C00`) with `@handle` directly beneath, small/muted/italic (Fraunces italic, ~12px, `rgba(35,60,0,0.45)`), and a trailing chevron (`rgba(35,60,0,0.25)`) indicating it opens an editor. Empty-state fallbacks: "Add your name" for the title, "add a handle" for the handle line — both still tappable.
