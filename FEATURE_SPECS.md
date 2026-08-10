@@ -797,6 +797,16 @@ cannot; no authenticated client can insert a `connections` row at all. All seede
 test rows were deleted afterward — the three new tables hold zero rows in production
 as of this write-up.
 
+**Schema-inventory note (moved here from CLAUDE.md's Data Layer section).** Build 2
+of account-to-account sharing added three more tables (`connections`, `recipe_sends`,
+`notifications`) and two more columns (`recipes.inspired_by_name`/`inspired_by_id`)
+to the dashboard-only schema, the same hand-applied-SQL way as every other table in
+the app — see the Supabase section above for the full inventory.
+
+**Known optimization not yet needed (moved here from CLAUDE.md's Standing Cleanup /
+Watch Items):** `recipe_sends.sender_id`/`recipient_id` are unindexed — fine at
+current volume, worth an index as a future optimization.
+
 ---
 
 ## Account-to-Account Sharing — Build 3: Sending (invisible half shipped; UI deferred)
@@ -922,6 +932,20 @@ exists internally (five separately-worded `raise exception` messages inside
 something more specific than a generic failure toast — piece 3 should surface the
 RPC's distinct named errors rather than re-collapsing them.
 
+**Deliberately lopsided exception (moved here from CLAUDE.md's Data Layer section):**
+`supabase/migrations/` now exists in-repo, containing ONLY
+`20260804000001_send_recipe_to_friend.sql` (the `send_recipe_to_friend` function
+documented above). Builds 1 & 2's schema remains entirely dashboard-only, per
+CLAUDE.md's Data Layer dashboard-only-schema convention — this one function is the
+sole tracked exception, pending the still-deferred full schema export. Do not treat
+this as "schema is now tracked" — re-check `supabase/migrations/` directly rather
+than assuming its contents.
+
+**STALE, per the doc's own advice above — re-checked this session:** the directory
+now also holds `search_profiles`, `get_my_connections`, and `get_sender_names`
+(added across the Receiving builds). Still not the full schema export — same
+caution applies, re-check the directory rather than trusting either count.
+
 ## Account-to-Account Sharing — Build 4 (Session a): Receiving — the save engine
 
 This session shipped the receive-side counterpart to Build 3's send-side plumbing:
@@ -1030,9 +1054,17 @@ nothing` so an already-existing connection is a silent no-op; and sets
 drift apart mid-failure.
 
 **`copy-received-recipe-photo`** is the app's first Edge Function to use the service
-role at all — see the new CLAUDE.md Load-Bearing Contracts bullet for the
-authorize-with-caller/act-with-admin pattern it establishes. Config: `verify_jwt =
-true` (unlike `ai-chat`'s `verify_jwt = false` anonymous-proxy pattern).
+role at all, and establishes the pattern any future service-role function should
+follow: **authorize with the caller, act with admin.** Every decision about whether
+the copy is allowed to happen is made using a CALLER-scoped client built from the
+forwarded JWT (the same caller identity `auth.uid()` would resolve to) — who is
+asking, whether they own the send, whether it's already been copied. Only once that
+decision is made does the function switch to the service-role client, and only to
+*act*: the storage `.copy()` call itself and the `photo_url`/`photo_version` patch on
+the recipe row. The service-role client never makes an authorization decision on its
+own — it is muscle, not judgment. Config: `verify_jwt = true` (unlike `ai-chat`'s
+`verify_jwt = false` anonymous-proxy pattern), so the function has a real caller
+identity to authorize against in the first place.
 
 **Session (b) decision, carried forward and now settled — categoryless-recipe
 invisibility.** During this session's verification it was confirmed that
@@ -1069,6 +1101,17 @@ retry-resume via `existingRecipeId`; forced Step 3 failure with successful retry
 no-photo send. All scenarios behaved as specified above. Teardown was verified
 exact-object-count with zero residue; `test2@test2.com` and all real accounts were
 confirmed untouched throughout.
+
+**Schema-inventory note (moved here from CLAUDE.md's Data Layer section).** Build 4
+(Session a) of account-to-account sharing added one more column
+(`recipe_sends.saved_recipe_id`), extended the existing
+`enforce_recipe_sends_status_only_update` trigger to also guard that column, added
+the `finish_received_recipe_save` `SECURITY DEFINER` function, and added the
+`copy-received-recipe-photo` Edge Function — all applied directly (dashboard/CLI),
+same convention as everything else in this section. See above for the full detail,
+including the connection-forming (`finish_received_recipe_save`) and photo-copy
+(`copy-received-recipe-photo`) paths this build added on top of Build 2/3's data
+model.
 
 ## Account-to-Account Sharing — Send UI (Build 3, piece 3)
 
@@ -1184,13 +1227,18 @@ via `sender_id` → `profiles` for a future "inspired by" stamp. Test rows delib
 left in place (not torn down) to seed the still-unbuilt receive UI's first real test
 data.
 
+**Known naming issue (moved here from CLAUDE.md's Standing Cleanup / Watch Items):**
+Send sheet's "YOUR CONNECTIONS" label reads oddly once received-recipe connections
+exist too — reframing toward "Recents" / "people you've shared with" is deferred to
+a deliberate social-visibility design pass, not a fix for the send surface itself.
+
 ## Account-to-Account Sharing — Receiving (the Home screen cornerstone)
 
 This is the receive-side UI that Build 4 (Session a)'s save engine was built for —
 a new `Home` tab (`src/tipsy/Home.tsx`) that turns the plumbing above into an actual
 screen. Shipped across several sessions on branch `account-sharing-receive-plumbing`,
 which stays **intentionally unmerged** until the Home screen is shelf-complete (see
-the branch note in CLAUDE.md's Standing Cleanup / Watch Items — do not read
+the "Known issues / cleanup items" note near the end of this section — do not read
 "unmerged" as "unfinished" or "broken"). This section will fold into a proper
 account-sharing-wide split of FEATURE_SPECS.md once that phase completes; it is not
 split out on its own yet.
@@ -1211,11 +1259,22 @@ monogram centered at reduced opacity as a photoless fallback. A "View all (N)" l
 appears only once there are more than 4 pending items, pushing to the full list.
 Zero pending items renders just the bare greeting — no dedicated empty-state copy yet.
 
+**`get_sender_names(ids uuid[])` is the ONLY sanctioned `sender_id`→display-name
+lookup**, backing every `{senderName}` shown on this screen. `SECURITY DEFINER`,
+`set search_path = public`, granted to `authenticated` only, same privilege shape as
+`search_profiles`/`get_my_connections` (Send UI above). Rejects an unauthenticated
+caller; a null/empty `ids` array returns no rows rather than erroring. Scoped
+tightly: for each requested id, it only returns a name if that id has actually sent
+the calling user a recipe (`exists` check against `recipe_sends` where
+`sender_id = <that id>` and `recipient_id = auth.uid()`), so it can't be used as a
+general profile-lookup by id the way `search_profiles` can by handle/name. Returns
+`{id, display_name}` only — never a full `profiles` row, never `handle`.
+
 **View-all pending list.** A separate full list screen (`ReceivedPending` in the same
 file) takes a static `items` snapshot as a prop rather than its own live query —
 **known minor staleness**: saving or dismissing a recipe from inside this list can
-leave a momentarily-stale row until the user backs out and re-enters (logged in
-CLAUDE.md's Standing Cleanup, not fixed).
+leave a momentarily-stale row until the user backs out and re-enters (see the "Known
+issues / cleanup items" note near the end of this section, not fixed).
 
 **Received recipe view.** Opening a tile pushes `ReceivedRecipeView`, which
 deliberately hand-matches `RecipeCard`'s presentation (hero photo, title, tabs for
@@ -1267,7 +1326,8 @@ just category selection:
 
 After a successful save: `clearRecipeCache(categoryId)` is called directly (not
 through `finishSaveRecipe`'s own inline cache-clear, which has a pre-existing bug —
-see CLAUDE.md — of never dropping the `'__all__'` cache entry); the user lands on the
+see the "Known issues / cleanup items" note near the end of this section — of never
+dropping the `'__all__'` cache entry); the user lands on the
 saved recipe exactly like a normal save, via the existing `finishSaveRecipe`; and the
 Home tab's stack is reset to root (mirroring the existing Build-tab reset already in
 `finishSaveRecipe`) so the now-resolved received recipe can't linger as a stale
@@ -1315,3 +1375,28 @@ teardown needed since no throwaway data was created this pass):**
   storage object id distinct from the sender's original `send-{token}.jpg` object —
   genuinely two objects, byte-identical (matching etag and size) rather than a
   reference, confirming the copy is real and independently deletable.
+
+**Known issues / cleanup items (moved here from CLAUDE.md's Standing Cleanup / Watch
+Items):**
+- **Branch `account-sharing-receive-plumbing` is INTENTIONALLY long-lived and
+  unmerged.** Receiving (Home tab, shelf, received recipe view, note overlay,
+  Save/Dismiss) is functionally complete and data-verified as of this session, but
+  stays off `main` until the Home screen is shelf-complete across future sessions. A
+  future session finding this branch still unmerged is not a sign anything was left
+  broken or forgotten — check this section for what's actually done before assuming
+  otherwise.
+- `finishSaveRecipe`'s inline cache-clear never drops `'__all__'` (pre-existing gap in
+  the normal save flow, not received-specific) — the received-recipe save path
+  sidesteps it by calling `clearRecipeCache` directly instead.
+- `saveRecipe` drops `cook_time`/`serves` for ALL recipes, not just received ones —
+  root cause of the known cook-time/serves-not-displaying issue.
+- `ReceivedPending` (the "View all" pending list) renders from a static snapshot — a
+  save/dismiss actioned from inside it may show a stale row until backing out and
+  re-entering.
+- Aesthetic-pass items from Receiving, not yet addressed: the photoless-tile monogram
+  reads as a visibly distinct-shade box rather than blending in (treatment needs
+  rethinking); the note overlay's background blur is slightly too intense (lighten
+  it).
+- `get_sender_names` landed as a tracked migration in `supabase/migrations/` — the
+  first in-repo SQL for the receive path specifically. Reinforces (doesn't replace)
+  the still-pending full schema export, which remains its own dedicated session.
