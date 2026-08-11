@@ -464,14 +464,14 @@ function renderScreen(
   }
 }
 
-const TAB_ORDER: TabId[] = ["build", "recipes", "grocery", "profile", "home"];
+const TAB_ORDER: TabId[] = ["home", "build", "recipes", "grocery", "profile"];
 
 function getTabIndex(tab: TabId): number {
   return TAB_ORDER.indexOf(tab);
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<TabId>("build");
+  const [activeTab, setActiveTab] = useState<TabId>("home");
   const [tabStacks, setTabStacks] = useState<Record<TabId, Screen[]>>({
     build: [{ name: "cook" }],
     recipes: [{ name: "categories" }],
@@ -1492,11 +1492,11 @@ function ScreenStage({
 /* ---------------- Bottom Tab Bar ---------------- */
 function BottomTabBar({ activeTab, onTabClick }: { activeTab: TabId; onTabClick: (tab: TabId) => void }) {
   const tabs: { id: TabId; icon: React.ReactNode; label: string }[] = [
+    { id: "home", icon: <IconHome size={22} stroke={1.5} />, label: "Home" },
     { id: "build", icon: <IconChefHat size={22} stroke={1.5} />, label: "Build" },
     { id: "recipes", icon: <IconBook size={22} stroke={1.5} />, label: "Recipes" },
     { id: "grocery", icon: <IconShoppingCart size={22} stroke={1.5} />, label: "Grocery" },
     { id: "profile", icon: <IconUser size={22} stroke={1.5} />, label: "Profile" },
-    { id: "home", icon: <IconHome size={22} stroke={1.5} />, label: "Home" },
   ];
 
   return (
