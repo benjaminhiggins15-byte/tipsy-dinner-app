@@ -5655,18 +5655,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
     <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative", background: "#FAF7F2" }}>
       {/* Header - Logo (and Write your own button when empty) */}
       {!expanded && (
-        <div style={{ height: 52, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 24px 0 24px", flexShrink: 0, position: "relative", zIndex: 1 }}>
-          <div style={{ display: "flex", alignItems: "center" }}>
-            <img
-              src={watermarkCircle}
-              alt="Tipsy Dinner"
-              style={{
-                height: 36,
-                width: "auto",
-                display: "block",
-              }}
-            />
-          </div>
+        <div style={{ height: 52, display: "flex", alignItems: "center", justifyContent: "flex-end", padding: "20px 24px 0 24px", flexShrink: 0, position: "relative", zIndex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             {isEmpty && (
               <button

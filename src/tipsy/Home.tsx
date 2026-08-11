@@ -11,6 +11,7 @@ import {
   type MenuSection,
 } from "./data";
 import watermarkSquare from "../Logos/watermark_square.png";
+import watermarkCircle from "../Logos/watermark_circle.png";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 
 // ScreenStage renders the outgoing screen in a separate overlay-layer JSX
@@ -194,7 +195,7 @@ export default function Home({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg }}>
-      <div style={{ padding: `28px ${EDGE}px 8px`, flexShrink: 0 }}>
+      <div style={{ padding: `28px ${EDGE}px 8px`, flexShrink: 0, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div
           style={{
             fontFamily: fontDisplay,
@@ -205,6 +206,7 @@ export default function Home({
         >
           {greetingForNow()}{firstName ? `, ${firstName}` : ""}
         </div>
+        <img src={watermarkCircle} alt="Tipsy Dinner" style={{ height: 36, width: "auto", display: "block" }} />
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: 16 }}>
