@@ -109,8 +109,8 @@ re-audit replaces it — see the doc-hygiene note in the Color palette section a
 
 **Logo assets** (`src/Logos/`) — path is case-sensitive on Linux/Vercel:
 - `Full_logo.png` — full "tipsy DINNER" wordmark. Splash screen only.
-- `watermark_square.png` — square tD monogram. Build top-left + mini player.
-- `watermark_circle.png` — circular tD monogram. Available if needed.
+- `watermark_square.png` — square tD monogram. Mini player only (Build removed it this session).
+- `watermark_circle.png` — circular tD monogram. Home header, top-right of greeting (moved off Build this session).
 ```js
 import tDSquare from '../Logos/watermark_square.png'
 import fullLogo from '../Logos/Full_logo.png'
@@ -142,6 +142,12 @@ deliberately (inserting it elsewhere in the array disturbs `ScreenStage`). Movin
 to a more prominent position in the bar is a future-session product decision, not a
 structural blocker. Full detail: Account-to-Account Sharing — Receiving in
 FEATURE_SPECS.md.
+
+**Superseded 2026-08-11**: `Home` moved from last to FIRST — `TAB_ORDER` is now
+`home, build, recipes, grocery, profile`; app launches on Home (`activeTab` inits
+`"home"`). `BottomTabBar`'s hardcoded icon array was reordered to match by hand. TD
+circle logo moved off Build's header onto Home's (top-right of greeting); Build's
+header now shows only its right-side action button.
 
 ---
 
@@ -285,7 +291,7 @@ menu?" (Build hero).
 
 - Supabase Auth (`@supabase/supabase-js`). Client `src/lib/supabase.ts`. Screens `src/tipsy/SignUp.tsx`, `src/tipsy/SignIn.tsx`; slide transitions via `src/tipsy/AuthFlow.tsx`.
 - Email/password + Google OAuth, both working. Email confirmation disabled (intentional). Profile auto-created on signup via Postgres trigger.
-- Routing: no session → SignUp; session + `onboarding_complete` false → Onboarding; session + true → Build.
+- Routing: no session → SignUp; session + `onboarding_complete` false → Onboarding; session + true → app shell, now opening on Home (see 2026-08-11 note above).
 - Onboarding: three questions (palate, inspiration, constraints), each writes to `profiles`; loader sets `onboarding_complete` true.
 - Signup persists `display_name` into `profiles` for both email/password and Google
   OAuth, and silently derives a unique `handle` alongside it for genuinely new

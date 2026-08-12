@@ -18,7 +18,7 @@ logos) lives in CLAUDE.md; this file is the per-screen application of it.
 
 ## Build — Empty State
 - Gradient behind all content
-- Top bar: tD square PNG left, "Write your own" ghost pill right (Inter 500, cream 60%, border cream 20%, radius 20px)
+- Top bar: logo removed this session (moved to Home header, see Home — Greeting section) — row is now `flex-end`, holding only the "Write a recipe" ghost pill on the right (Inter 500, cream 60%, border cream 20%, radius 20px)
 - Hero: "what's on the menu?" centered — Lazydog uppercase, cream, ~48–52px
 - Bottom stack (above input): three suggestion chips (data-driven — see CLAUDE.md Build Chips), "or just type" divider, input bar
 - Chips: Fraunces italic, cream 85%, bg cream 6%, border cream 14%, radius 12px, padding 13px 18px
@@ -26,7 +26,7 @@ logos) lives in CLAUDE.md; this file is the per-screen application of it.
 - Input bar: on #182800 footer, cream placeholder, send circle in #1E3A42
 
 ## Build — Active State
-- Same gradient, same top bar (tD PNG left only once conversation starts)
+- Same gradient, same top bar as Empty State — no logo (removed this session); shows the refresh icon button alone, right-aligned (`flex-end`), once a conversation starts
 - Conversation thread on green, justified to bottom
 - User messages: cream (#FEE7C0) bubble, radius 18px 18px 4px 18px, green (#233C00) Inter text
 - AI messages: no bubble, Fraunces italic cream text directly on green, max-width 88%
@@ -125,8 +125,8 @@ logos) lives in CLAUDE.md; this file is the per-screen application of it.
 - Recipe rows: name (Inter 500 cream 14px) + meta (Inter cream 30% 11px), X remove right (cream 15%). "add a recipe" row at bottom. Tapping a recipe opens the card; back returns here
 
 ## Home — Greeting + Received Shelf
-- Background: light `#FAF7F2` (not the green gradient) — same treatment as Recipe Card / Profile / Send Sheet. Home is the bottom nav's 5th tab (`IconHome`), appended last after Profile.
-- Greeting: Fraunces italic, ~22px, `#233C00` — "Good morning/afternoon/evening" (by local hour) + the user's first name, top-left, no other header chrome.
+- Background: light `#FAF7F2` (not the green gradient) — same treatment as Recipe Card / Profile / Send Sheet. Home is the bottom nav's 1st tab (`IconHome`) — moved from last to first this session — and is now the app's launch screen (opens on load).
+- Header is a space-between flex row: Greeting (Fraunces italic, ~22px, `#233C00` — "Good morning/afternoon/evening" by local hour + the user's first name) on the left; TD circle logo (`watermark_circle.png`, height 36) on the right, opposite the greeting — moved here from Build's header this session.
 - Section label "RECEIVED RECIPES": Inter 500 uppercase 13px `#233C00`, letter-spacing 0.1em. "View all (N)" (Inter 500 12px, `rgba(35,60,0,0.6)`) sits at the right of the same row, shown only once there are more than 4 pending items.
 - Tiles: 190×142, radius 20px, horizontal scroll, gap 12px, up to 4 shown. Photo tiles: cover photo blurred (6px) and scaled up 1.1×, with a bottom-to-top scrim (`rgba(24,40,0,0.85)` → transparent) carrying the title (Lazydog uppercase, cream `#FEE7C0`, 2-line clamp) and "from {senderName}" (Inter 500 11px, cream 75%). Photoless tiles: flat `#2E4E08` panel with the app's watermark monogram centered at 50% opacity — currently reads as a visibly distinct-shade box against the shelf rather than blending in; open aesthetic item, not yet resolved.
 - Zero pending items: bare greeting only, no dedicated empty-state illustration/copy yet.

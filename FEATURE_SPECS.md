@@ -1243,12 +1243,17 @@ the "Known issues / cleanup items" note near the end of this section — do not 
 account-sharing-wide split of FEATURE_SPECS.md once that phase completes; it is not
 split out on its own yet.
 
-**Home tab and shell.** `Home` is `TAB_ORDER`'s 5th, last entry — a deliberate
-append, not an insert elsewhere in the array (inserting mid-array disturbs
-`ScreenStage`'s screen-key/stack bookkeeping). The shell is a light `#FAF7F2`
-background with an italic Fraunces greeting ("Good morning/afternoon/evening" by
-local hour, plus the user's first name from `profile.display_name`) — no chrome
-beyond that; the bottom nav is the only other persistent element.
+**Home tab and shell.** `Home` is now `TAB_ORDER`'s 1st entry and the app's launch
+tab (`activeTab` initializes to `"home"`) — moved from its original last-entry
+position in a later session; `BottomTabBar`'s separate hardcoded tab-icon array was
+reordered to match (the two arrays aren't derived from one another, so a future
+reorder must touch both). The shell is a light `#FAF7F2` background with a header
+row (space-between flex) holding an italic Fraunces greeting
+("Good morning/afternoon/evening" by local hour, plus the user's first name from
+`profile.display_name`) on the left and the TD circle logo (`watermark_circle.png`)
+top-right — moved here from Build's header, which no longer shows any logo. No
+other chrome beyond that header; the bottom nav is the only other persistent
+element.
 
 **Received shelf + tiles.** Below the greeting, a horizontally-scrolling shelf of up
 to 4 tiles, one per `pending`-status received recipe (`getPendingReceivedRecipes`,
