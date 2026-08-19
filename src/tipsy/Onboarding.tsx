@@ -1,4 +1,5 @@
 import { useState, useEffect, type CSSProperties } from "react";
+import { generateTasteProfile } from "./data";
 
 type ProfileType = {
   id: string;
@@ -91,14 +92,21 @@ function QuestionScreen({
   );
 }
 
-function Loader({ onUpdate, onDone }: { onUpdate: (updates: Partial<ProfileType>) => Promise<void>; onDone: () => void }) {
+function Loader({ onUpdate, onDone, profile }: { onUpdate: (updates: Partial<ProfileType>) => Promise<void>; onDone: () => void; profile: ProfileType | null }) {
   useEffect(() => {
     const t = setTimeout(async () => {
       await onUpdate({ onboarding_complete: true });
+      if (profile) {
+        generateTasteProfile(profile.id, {
+          palate: profile.palate,
+          inspiration: profile.inspiration,
+          constraints: profile.constraints,
+        });
+      }
       onDone();
     }, 2500);
     return () => clearTimeout(t);
-  }, [onDone, onUpdate]);
+  }, [onDone, onUpdate, profile]);
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", alignItems: "center", justifyContent: "center", gap: 28, padding: 32 }}>
       <style>{`@keyframes tipsyPulse {0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(1.08);opacity:1}}`}</style>
@@ -156,7 +164,7 @@ export default function Onboarding({ onComplete, profile, onUpdate }: Props) {
     if (s === 1) return <QuestionScreen key="s1" label="Taste" question="Your palate" hint="Cuisines, flavors, techniques — what makes your cooking yours?" field="palate" onUpdate={onUpdate} onNext={next} />;
     if (s === 2) return <QuestionScreen key="s2" label="Inspiration" question="Your inspiration" hint="Sites, accounts, chefs, cookbooks — who shapes how you cook?" field="inspiration" onUpdate={onUpdate} onNext={next} />;
     if (s === 3) return <QuestionScreen key="s3" label="Constraints" question="Your no-gos" hint="Allergies, aversions, or anything that never makes your plate?" field="constraints" onUpdate={onUpdate} onNext={next} />;
-    return <Loader key="s4" onUpdate={onUpdate} onDone={onComplete} />;
+    return <Loader key="s4" onUpdate={onUpdate} onDone={onComplete} profile={profile} />;
   };
 
   const DURATION = 280;

@@ -1,6 +1,6 @@
 import { useState, type CSSProperties } from "react";
 import { supabase } from "../lib/supabase";
-import { isValidHandleFormat } from "./data";
+import { isValidHandleFormat, generateTasteProfile } from "./data";
 
 type ProfileType = {
   id: string;
@@ -343,7 +343,19 @@ export function ProfileEdit({ fieldKey, back, profile, onUpdate }: { fieldKey: F
           onClick={async () => {
             // Use Supabase for migrated fields, localStorage for legacy fields
             if (fieldKey === "palate" || fieldKey === "inspiration" || fieldKey === "constraints") {
+              const previousValue =
+                fieldKey === "palate" ? (profile?.palate || "") :
+                fieldKey === "inspiration" ? (profile?.inspiration || "") :
+                (profile?.constraints || "");
+              const changed = val !== previousValue;
               await onUpdate({ [fieldKey]: val });
+              if (changed && profile) {
+                generateTasteProfile(profile.id, {
+                  palate: fieldKey === "palate" ? val : profile.palate,
+                  inspiration: fieldKey === "inspiration" ? val : profile.inspiration,
+                  constraints: fieldKey === "constraints" ? val : profile.constraints,
+                });
+              }
             } else {
               // Legacy fields (email, table) still use localStorage
               try { localStorage.setItem(storageKey, val); } catch { /* noop */ }

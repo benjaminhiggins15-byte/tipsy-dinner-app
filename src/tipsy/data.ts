@@ -117,6 +117,98 @@ export async function deriveHandleFromName(
   return candidate;
 }
 
+// Isolated AI island, same shape as grocery enrichment above: a single
+// non-conversational ai-chat call that always regenerates from all three
+// current answers (never a partial/incremental update), and is designed to
+// be called fire-and-forget from onboarding-completion or an answer edit.
+// Must never throw and never block or interrupt the caller's own save —
+// on any failure (network, non-200, empty response, or the profiles write
+// itself) it logs and returns, leaving taste_profile exactly as it was.
+const TASTE_PROFILE_SYSTEM_PROMPT_TEMPLATE = (palate: string, inspiration: string, constraints: string) => `You are interpreting a home cook's onboarding answers into a "taste profile" — a short natural-language description of their cooking tastes.
+
+This profile is NOT read by the user. It is read by another AI system that uses it to help personalize recipe suggestions and other features. Write for that reader: clear, confident, and directly usable. Do not hedge with phrases like "may" or "possibly" or "it's unclear." Instead, let the STRENGTH of your wording match the STRENGTH of the signal in their answers — state strong signals firmly, and frame weak or thin signals as loose leanings rather than facts.
+
+How this profile is meant to be used (state this understanding in your framing): the taste and flavor leanings below are a CENTER OF GRAVITY, not a boundary — something to lean toward, not a rule that forbids everything else. A well-chosen dish outside these leanings can be a welcome surprise; the goal is personalization, never restriction. The ONE exception is the constraints section: dietary restrictions, allergies, and dislikes are binding and must always be respected.
+
+You are given three answers:
+- PALATE — the cuisines, flavors, and techniques that define their cooking.
+- INSPIRATION — who or what inspires how they cook.
+- NO-GOS — dislikes, restrictions, and allergies.
+
+Write a taste profile as a few short prose movements (no bullet points, no scores, no numeric ratings, no markdown formatting — plain text only). Cover, in flowing prose:
+
+1. Their palate and flavor leanings — the cuisines and sensory qualities they gravitate toward, including any tension or nuance worth preserving (e.g. wanting food both bright and comforting). Describe QUALITIES and characteristics, not specific dishes. Capture the "why" or the feel where the answer supports it.
+
+2. Their inspiration and cooking register — what their inspiration says about the LEVEL and STYLE of food they aspire to (approachable vs. fine-dining, familiar vs. adventurous, etc). If this answer is thin, state it as a soft lean, not a strong fact — do not inflate two words into a detailed philosophy.
+
+3. Their constraints — ALWAYS include a clear, explicitly labeled statement of dietary restrictions, allergies, and dislikes, and ALWAYS name the SEVERITY of each in plain words the downstream system can act on: "hard allergy," "dietary restriction," "strong dislike," or "mild dislike." If there are no restrictions or allergies, say so explicitly (e.g. "No dietary restrictions or allergies.").
+
+   Judge severity from the INTENSITY OF THE USER'S OWN WORDS, not from the mere fact that they named something. If they used no intensity language — just naming an item plainly (e.g. "parsley") — default to the MILDEST accurate reading ("mild dislike"). Reserve "strong dislike" for when the user actually signals intensity (words like "hate," "can't stand," "never," "really don't like"). Reserve "hard allergy" / "dietary restriction" for explicit allergies or diets (e.g. "allergic to shellfish," "vegetarian," "no pork"). Never escalate severity beyond what the words support. Never omit this constraint statement, even if the answer is empty.
+
+Rules:
+- Read intent, not spelling. If an answer contains an obvious typo (e.g. "parsely"), interpret the intended meaning silently without correcting or commenting on it.
+- Do NOT invent preferences, cuisines, or constraints that are not supported by the answers. In particular, do NOT invent specific example dishes, recipes, or menus — describe flavor qualities and characteristics instead. A thin answer should produce a thin, honest interpretation — not a fabricated rich one.
+- Do NOT restate the questions or quote the raw answers back. Interpret them.
+- Keep it focused and readable — a clean interpretation another system can reason against, not a rambling essay. A few tight paragraphs at most. End when the interpretation is complete; do NOT add a closing flourish, epigram, or lifestyle summary.
+
+PALATE: ${palate}
+INSPIRATION: ${inspiration}
+NO-GOS: ${constraints}`;
+
+export async function generateTasteProfile(
+  userId: string,
+  answers: { palate: string; inspiration: string; constraints: string }
+): Promise<void> {
+  try {
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    if (!supabaseAnonKey) throw new Error("Supabase key not found");
+
+    const systemPrompt = TASTE_PROFILE_SYSTEM_PROMPT_TEMPLATE(
+      answers.palate,
+      answers.inspiration,
+      answers.constraints
+    );
+
+    const response = await fetch(
+      "https://xzpmmthreeyscidhwriv.supabase.co/functions/v1/ai-chat",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${supabaseAnonKey}`,
+        },
+        body: JSON.stringify({
+          messages: [{ role: "user", content: "Generate the taste profile now." }],
+          systemPrompt,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Edge Function error: ${errorText}`);
+    }
+
+    let fullText = "";
+    for await (const chunk of parseSSEStream(response)) {
+      if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta") {
+        fullText += chunk.delta.text;
+      }
+    }
+
+    if (!fullText.trim()) throw new Error("Empty response from taste profile generation call");
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ taste_profile: fullText.trim() })
+      .eq('id', userId);
+
+    if (error) throw error;
+  } catch (error) {
+    console.error('Taste profile generation failed:', error);
+  }
+}
+
 export type Recipe = {
   title: string;
   description: string;
