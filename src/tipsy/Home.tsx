@@ -5,6 +5,7 @@ import {
   saveReceivedRecipe,
   dismissReceivedRecipe,
   addRecipeToMenuSection,
+  computeMySlice,
   type PendingReceivedRecipe,
   type Recipe,
   type RecipeSendSnapshot,
@@ -183,6 +184,23 @@ export default function Home({
       if (ignore) return;
       setPending(items);
       setLoading(false);
+    })();
+    // Layer 3 trigger only — no shelf UI yet (Layer 4). Fire-and-log so we
+    // can confirm the compute-slice runtime fired correctly on Home mount.
+    (async () => {
+      const result = await computeMySlice();
+      if (ignore) return;
+      if (result?.slice) {
+        console.log("[compute-slice]", {
+          computed: result.computed,
+          fallback: result.fallback ?? false,
+          relaxed: result.relaxed ?? false,
+          recipe_ids: result.slice.recipe_ids,
+          picks: result.picks_with_reasons?.map((p) => p.title),
+        });
+      } else {
+        console.log("[compute-slice] no slice available", result);
+      }
     })();
     return () => {
       ignore = true;

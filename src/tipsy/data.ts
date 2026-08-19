@@ -209,6 +209,67 @@ export async function generateTasteProfile(
   }
 }
 
+function localDateString(): string {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+export type ComputeSliceResult = {
+  slice?: {
+    id: string;
+    user_id: string;
+    slice_date: string;
+    recipe_ids: string[];
+    selection_reason: string | null;
+    status: string;
+    created_at: string;
+  } | null;
+  computed: boolean;
+  fallback?: boolean;
+  relaxed?: boolean;
+  picks_with_reasons?: { id: string; title: string; reason: string }[];
+  error?: string;
+};
+
+// Layer 3 assignment runtime trigger. Same fail-quiet discipline as
+// generateTasteProfile/enrichGroceryItems above: never throws, on any
+// failure logs and returns null so the caller (a mount effect) never blocks
+// or breaks on this. Unlike ai-chat's anonymous calls, this hits an
+// authenticated Edge Function (compute-slice) that derives identity from the
+// caller's own session JWT — so the real access token is sent, not the anon key.
+export async function computeMySlice(): Promise<ComputeSliceResult | null> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const accessToken = session?.access_token;
+    if (!accessToken) return null;
+
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    if (!supabaseUrl) throw new Error('Supabase URL not found');
+
+    const response = await fetch(`${supabaseUrl}/functions/v1/compute-slice`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ local_date: localDateString() }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`compute-slice error: ${errorText}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('computeMySlice failed:', error);
+    return null;
+  }
+}
+
 export type Recipe = {
   title: string;
   description: string;
