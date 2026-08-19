@@ -61,7 +61,7 @@ type ProfileType = {
 };
 
 // Helper: Convert recipe to XML format for AI context (used in App and Cook components)
-const recipeToXML = (recipe: { title: string; description: string; ingredients: { name: string; qty: string }[]; steps: RecipeStep[] }): string => {
+export const recipeToXML = (recipe: { title: string; description: string; ingredients: { name: string; qty: string }[]; steps: RecipeStep[] }): string => {
   const ingredientsXML = recipe.ingredients.map(ing =>
     `<item><name>${ing.name}</name><qty>${ing.qty}</qty></item>`
   ).join('\n');
@@ -87,7 +87,7 @@ ${stepsXML}
 // Single source of truth for the conversational system prompt, previously
 // triplicated byte-for-byte across fireAICall, sendMessage, and handleChipClick.
 // Any prompt edit now only needs to happen here.
-const buildSystemPrompt = (
+export const buildSystemPrompt = (
   profile: { palate: string; inspiration: string; constraints: string },
   currentRecipe?: { title: string; description: string; ingredients: { name: string; qty: string }[]; steps: RecipeStep[] } | null
 ): string => {
@@ -168,7 +168,7 @@ In the recipe JSON, the ingredient name field must contain only the ingredient n
 // edit really was the same dish) just means the user sees "save as new" instead of
 // "update" — a harmless inconvenience. A false "evolution" (keeping the anchor for a
 // genuinely different dish) is permanent data loss. Fail toward the harmless side.
-const parseRecipeFromAIResponse = (fullText: string, sourceId?: string, sourceTitle?: string): RecipeDraft | null => {
+export const parseRecipeFromAIResponse = (fullText: string, sourceId?: string, sourceTitle?: string): RecipeDraft | null => {
   // Parse for recipe XML
   const recipeMatch = fullText.match(/<recipe>([\s\S]*?)<\/recipe>/);
   let parsedRecipe: RecipeDraft | null = null;
