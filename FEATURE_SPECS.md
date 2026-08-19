@@ -1383,13 +1383,16 @@ teardown needed since no throwaway data was created this pass):**
 
 **Known issues / cleanup items (moved here from CLAUDE.md's Standing Cleanup / Watch
 Items):**
-- **Branch `account-sharing-receive-plumbing` is INTENTIONALLY long-lived and
-  unmerged.** Receiving (Home tab, shelf, received recipe view, note overlay,
-  Save/Dismiss) is functionally complete and data-verified as of this session, but
-  stays off `main` until the Home screen is shelf-complete across future sessions. A
-  future session finding this branch still unmerged is not a sign anything was left
-  broken or forgotten — check this section for what's actually done before assuming
-  otherwise.
+- **Branch `account-sharing-receive-plumbing` has grown beyond its original scope —
+  it now also carries the unrelated suggested-recipes Layers 1–3 (pool generation,
+  taste profile, compute-slice assignment runtime; see the three sections above).**
+  Receiving (Home tab, shelf, received recipe view, note overlay, Save/Dismiss) is
+  functionally complete and data-verified; Layers 1–3 are likewise built and
+  verified end-to-end against the live DB. The branch is on track to merge to
+  `main` — it is no longer being deliberately held open, just not yet promoted. A
+  future session finding this branch unmerged should check this section and git
+  history for what's actually landed before assuming anything was left broken or
+  forgotten.
 - `finishSaveRecipe`'s inline cache-clear never drops `'__all__'` (pre-existing gap in
   the normal save flow, not received-specific) — the received-recipe save path
   sidesteps it by calling `clearRecipeCache` directly instead.
@@ -1405,3 +1408,302 @@ Items):**
 - `get_sender_names` landed as a tracked migration in `supabase/migrations/` — the
   first in-repo SQL for the receive path specifically. Reinforces (doesn't replace)
   the still-pending full schema export, which remains its own dedicated session.
+
+---
+
+## Suggested Recipes Pool — Layer 1 (offline generation pipeline)
+
+A backend-only content pipeline, unrelated to account-to-account sharing above. It
+pre-populates a pool of AI-generated recipes so a future feature (a "suggested for
+you" surface, not yet built) has real inventory to draw from instead of calling the
+AI live per-user. Nothing in the live app reads this table yet — this section
+documents generation-side infrastructure only.
+
+**`suggested_recipe_pool` table.** Holds recipes in the same shape as the app's own
+recipe model (title, description, ingredients, steps) plus a set of factual tags
+stored as real queryable columns rather than embedded in text: `cuisine`,
+`meal_type`, `season`, `effort`, `holiday`, and boolean dietary flags
+(`is_vegetarian`, `is_vegan`, `is_gluten_free`, `is_dairy_free`, `contains_pork`,
+`contains_shellfish`, `contains_nuts`). Also carries `batch_id` and `matrix_cell`
+(`<cuisine>:<meal_type>`) to identify which generation run and which target cell a
+row came from. Two independent status columns:
+- `dietary_check_status` — `'clean' | 'flagged' | 'unchecked'`. Set by the
+  deterministic checker described below at insert time; never auto-corrects a row,
+  only marks it for human attention.
+- `vetting_status` — `'pending'` at insert; reserved for a future human-review step
+  before a row is eligible to surface to real users. Nothing currently advances it
+  past `'pending'`.
+
+RLS is enabled with **no policies defined** — deny-all by default, same posture as
+`connections`/`notifications` elsewhere in this doc. No anon or authenticated client
+can read or write this table at all; every script in this section talks to it via the
+Supabase **service role** key, never the anon key.
+
+**`scripts/matrix-pipeline.mjs`.** A standalone Bun script, not part of the deployed
+app, that fills the pool cell by cell.
+
+- **Reuses the live app's own generation engine unchanged.** It imports
+  `buildSystemPrompt` and `parseRecipeFromAIResponse` directly from
+  `src/tipsy/App.tsx` (both exported specifically to make this possible) and
+  `parseSSEStream` from `src/tipsy/data.ts`. The recipe a user gets from Build and the
+  recipe this script inserts into the pool come from the identical prompt-building
+  and response-parsing code path — no separate/forked prompt logic to drift out of
+  sync.
+  - **`buildSystemPrompt()`/`parseRecipeFromAIResponse()` are also load-bearing for
+    the live conversational app (see AI Layer above) — do not edit either one for
+    pipeline-specific needs. Anything this script needs beyond what those two already
+    produce is layered on in the script itself** (the tagging instruction and the
+    dietary checker below), never by changing the shared functions' behavior.
+- **Tagging instruction.** The script stamps `cuisine`/`meal_type` itself (it already
+  knows which matrix cell it's generating for) rather than asking the AI to name
+  them. Everything else — season, effort, holiday, and the seven dietary booleans —
+  is elicited by appending a fixed tagging instruction to the user message (not baked
+  into `buildSystemPrompt`, since that prompt is shared with the live app and must
+  stay untouched), asking for a `<tags>` XML block after the recipe block. The script
+  parses that block with its own regex-based reader, independent of
+  `parseRecipeFromAIResponse`.
+- **Matrix definition and additive shortfall logic.** The matrix is cuisine ×
+  meal_type, with cuisines grouped into three tiers and a per-tier, per-meal-type
+  target depth (dinner/lunch use the tier's depth directly; breakfast only gets the
+  full depth for Tier 1, else a shallower depth; dessert/snack are shallow for every
+  tier). Before generating anything for a cell, the script counts existing
+  `suggested_recipe_pool` rows for that `(cuisine, meal_type)` pair and computes
+  `shortfall = max(0, target − existing)` — it only ever generates the gap, never
+  regenerates or duplicates what's already there. This makes the table itself the
+  resume state: the script can be interrupted at any point and re-run safely, and can
+  be re-run later to top up a cell (e.g. after a tier promotion, or to backfill a
+  cell that failed in an earlier run) without any separate tracking file. A
+  `--recheck-only` mode runs the dietary checker against existing rows without
+  generating anything new.
+- **Deterministic dietary checker (flag-for-review, not auto-correct).** After
+  parsing the AI's dietary tags, the script independently scans the parsed
+  ingredient list (matched per-ingredient-item, not as one joined blob of text) for
+  terms that contradict a claimed tag — e.g. a gluten term when `is_gluten_free` is
+  claimed true, a dairy or animal-product term when `is_vegan`/`is_dairy_free` is
+  claimed true, a meat/pork term when `is_vegetarian`/`contains_pork` is claimed
+  false. This is plain string matching, not an AI call — cheap, fast, and
+  reproducible. It has two exclusion mechanisms to cut down false positives:
+  compound-phrase masking (e.g. "coconut milk", "butter beans" are masked out before
+  dairy-term matching, since they aren't actually dairy), and a serving-context
+  exclusion for bread-family gluten terms that only suppresses a match when the same
+  ingredient text also contains a serving-accompaniment phrase like "for serving". A
+  contradiction never modifies the row's data — it only sets
+  `dietary_check_status = 'flagged'` (else `'clean'`) so a human can review the
+  specific title/cell/term later.
+- **Per-recipe failure isolation.** Each recipe's generate → parse → tag → check →
+  insert sequence is wrapped in its own try/catch; a failure is logged and collected
+  into an in-memory failures list rather than aborting the run, so one bad recipe
+  leaves its cell merely short of target (picked up by a later re-run) instead of
+  killing the whole batch.
+- **90-second timeout + single bounded retry on the AI call.** The fetch to the
+  `ai-chat` edge function is wrapped in an `AbortController` with a 90-second timer,
+  guarding against a connection that silently stalls mid-stream rather than erroring
+  cleanly (observed once in practice as a multi-hour hang with zero CPU activity). A
+  thin wrapper calls the underlying request once, and on any failure (including a
+  timeout) retries exactly once more before letting the error propagate to the
+  per-recipe try/catch above — deliberately not a retry loop.
+- **Real, measured token/cost tracking.** Input/output token counts are read
+  directly off the Anthropic SSE stream's own usage events (`message_start` /
+  `message_delta`), not estimated, and summed across the run for an actual-cost
+  report.
+
+**Greek → Tier 1 promotion.** Greek/Mediterranean was originally slotted into Tier 2
+of the matrix but was promoted to Tier 1 (deeper target depth) before the full run,
+without changing its cuisine slug (`'greek'`) — done deliberately so a small number
+of rows already generated under that same slug in an earlier proof run counted toward
+the same cell rather than becoming an orphaned duplicate set.
+
+**Current state (as of this pipeline's most recent full run):** 342 rows in
+`suggested_recipe_pool`, every matrix cell at its target depth (shortfall of 0
+everywhere), 27 rows sitting at `dietary_check_status = 'flagged'` and
+`vetting_status = 'pending'`, awaiting a future human-review pass before any are
+eligible to surface to real users.
+
+## Suggested Recipes — Layer 2 (taste profile)
+
+Backend-only, no UI. Sits between onboarding (which collects the three raw answers)
+and a future Layer 3 (recipe assignment against the pool built in Layer 1 above).
+Layer 2's job is narrow: turn a user's three onboarding answers into a single prose
+interpretation that a downstream AI can reason against directly, instead of
+re-deriving that interpretation from raw fragments on every call.
+
+**`profiles.taste_profile` column.** Text, nullable, no default. Holds a natural-
+language paragraph-or-few interpretation of the user's `palate`/`inspiration`/
+`constraints` answers. **Not user-facing** — nothing in the app renders it; it exists
+purely as input to a future AI consumer (Layer 3). Because of that, v1 deliberately
+ships with no dedicated inspection UI — the column is plain text and human-readable
+directly in the Supabase dashboard, which was judged sufficient for now. Existing RLS
+on `profiles` (owner-only, row-level) covers the new column automatically; no policy
+changes were needed since Postgres RLS doesn't have a column-level dimension. The raw
+answers themselves (`palate`/`inspiration`/`constraints`) are never modified by this
+feature — `taste_profile` is always fully re-derivable from them, and the column is
+free to be wiped and regenerated at any time without any data loss.
+
+**`generateTasteProfile` (data.ts).** The generation helper. Same shape and posture
+as `enrichGroceryItems` elsewhere in this file: an isolated AI island, not part of
+the conversational system prompt, with its own dedicated system prompt template (not
+exported — private to the module). Contract:
+- Takes a user id and the current values of all three answers.
+- **Always full-regenerate, never incremental.** Every call re-sends all three
+  current answers and replaces `taste_profile` wholesale — there is no partial-update
+  path and no attempt to diff against the previous profile.
+- Calls the shared `ai-chat` edge function via the same anon-key `fetch` + SSE-parse
+  pattern used by the app's other `ai-chat` call sites (`parseSSEStream` from this
+  same file).
+- On success, writes the result directly to `profiles.taste_profile` for that user
+  id via an owner-scoped Supabase `.update()`.
+- **Fail-quiet by contract.** Any failure — network error, non-OK response, empty
+  model output, or the `profiles` write itself failing — is caught, logged via
+  `console.error`, and swallowed. The function never throws and never returns an
+  error the caller has to handle. It also never touches `taste_profile` on failure,
+  so a failed regeneration leaves whatever was there (old profile or `NULL`)
+  untouched rather than clearing it.
+- Designed to be called **fire-and-forget**: callers invoke it without `await`-ing
+  its completion and continue immediately: it never blocks or delays the caller's own
+  save/navigation flow.
+
+**Trigger point 1 — onboarding completion.** Wired into the `Loader` step of
+`Onboarding.tsx`, immediately after the `onboarding_complete: true` write resolves.
+Fires once, using the three answers the user just finished entering. Fire-and-forget
+— onboarding's own transition into the app proceeds immediately without waiting on
+generation.
+
+**Trigger point 2 — taste-answer edit.** Wired into `ProfileEdit`'s save handler in
+`Profile.tsx`. Guarded to fire **only** when the field being saved is one of
+`palate`/`inspiration`/`constraints` **and** the saved value actually differs from
+the previous value (a no-op edit, e.g. re-saving the same text, does not trigger
+regeneration). When it does fire, it passes the **full current set of all three
+answers** (the just-edited one plus the other two unchanged ones) — consistent with
+the full-regenerate-only contract in `generateTasteProfile` itself; there is no
+mechanism anywhere in this feature for a partial/single-field profile update.
+Fire-and-forget here too — the edit's own save-and-navigate-back proceeds
+immediately.
+
+**Backfill for pre-existing users.** Both trigger points only fire going forward;
+users who onboarded before this feature shipped had `taste_profile` sitting `NULL`
+indefinitely with no future trigger that would ever populate it. Addressed with a
+one-off, throwaway script (`scripts/backfill-taste-profiles.mjs`, service-role key,
+not part of the deployed app — same posture as the Layer 1 pipeline scripts above).
+It selects every row where `taste_profile IS NULL`, skips any row where all three
+answers are blank (nothing to generate from), and otherwise calls `ai-chat` with the
+**identical system prompt** `generateTasteProfile` uses (replicated verbatim in the
+script rather than exported from `data.ts`, to avoid touching app code for a
+throwaway artifact) and writes the result. Idempotent by construction: both the
+initial `SELECT` and the final `UPDATE` are scoped with `taste_profile IS NULL`, so
+re-running the script only ever picks up rows that are still unset (failed or never
+reached on a prior run) and never overwrites a row that already has a profile,
+whether that profile came from the script itself or from one of the two live trigger
+points. Per-row failures are caught and logged individually and do not abort the
+run. Run once against all pre-existing users at the end of this session; not wired
+into the app and not scheduled to run again automatically.
+
+## Suggested Recipes — Layer 3 (assignment runtime)
+
+Backend-only, no UI. Consumes the pool built in Layer 1 and the per-user
+interpretation built in Layer 2 to actually assign each user a personalized set of
+recipes: a per-user, per-day "slice" of 3-4 dinner recipes, computed on demand and
+cached for the rest of that user's local day. Nothing in the app surfaces this slice
+to a user yet — that shelf UI is Layer 4, a separate future session.
+
+**Two-stage picker.** Stage 1 is a deterministic Postgres filter, no AI involved:
+`meal_type = 'dinner'`, a soft season match (`season IS NULL OR season = '<current
+season>'` — soft because roughly 90% of pool rows have no `season` tag at all; a
+hard match would starve the candidate set until a future pool-tagging pass fixes
+that), any hard dietary/allergy gates derived from the user's `taste_profile` text
+(only sentences containing "hard allergy" or "dietary restriction" are considered —
+a mere dislike, however strongly worded, never becomes a boolean gate), and a
+don't-repeat exclusion against the ids appearing in that user's last ~30 slices.
+Don't-repeat relaxes gracefully rather than failing outright: if the exclusion would
+drop the candidate pool below 8, ids are added back one at a time, oldest-shown
+first, until either 8 is reached or the exclusion is fully lifted. Stage 2 is the
+one AI call: the exact selection prompt and defensive-parse logic proven out
+against two real, contrasting user profiles before this runtime was built (see
+verification note below) — given the user's `taste_profile` and the Stage 1
+candidate list, it returns 3-4 picks (each with a one-sentence reason) plus a short
+whole-set `slice_reason`, strict JSON only, picks validated against the real
+candidate id set before anything is trusted.
+
+**`compute-slice` Edge Function.** The only way a slice gets computed or read live.
+Follows the two-actor pattern established by `copy-received-recipe-photo` (see
+Account-to-Account Sharing above): a caller-scoped client resolves the real
+authenticated user via `.auth.getUser()` against the request's own `Authorization`
+header — **identity is never taken from the request body** — and a separate
+service-role client does the actual pool read and slice write. Request flow, in
+order:
+1. **Freshness check, first, before anything else.** Look up
+   `user_recipe_slices` for `(user_id, slice_date = local_date)` with
+   `status = 'ready'`. If found, return it immediately with `computed: false` and
+   no further work — no pool read, no AI call. This is the mechanism that makes a
+   same-day repeat Home open free: verified end-to-end against a real account (see
+   below), a second call in the same day returned the identical `recipe_ids`
+   with zero AI spend.
+2. Otherwise, run Stage 1 then Stage 2 as described above.
+3. **Upsert** the result into `user_recipe_slices` keyed on the table's
+   `(user_id, slice_date)` unique constraint, and return it with `computed: true`
+   plus the per-pick reasons and `slice_reason` for observability.
+4. **Graceful fallback, not a hard error, on AI failure.** If Stage 1 comes up
+   short (fewer than 3 candidates survive) or Stage 2's response fails to parse
+   into 3-4 valid picks, the function falls back to the user's own most recent
+   prior `status = 'ready'` slice (if one exists) rather than surfacing an error to
+   the caller — a stale slice is judged strictly better than no slice or a broken
+   one. Only if no prior slice exists either does the function return an error.
+
+`local_date` is supplied by the caller (the user's own local date, not server UTC)
+so the freshness boundary lines up with the day the user actually experiences; a
+plausibility-checked server-UTC date is used as a fallback if the caller omits it
+or sends something unparseable.
+
+**`user_recipe_slices` table.** RLS shape deliberately mirrors `grocery_items`
+elsewhere in this doc — owner-only SELECT/INSERT/UPDATE/DELETE via `auth.uid() =
+user_id` — with one deliberate hardening beyond the `grocery_items` precedent: the
+UPDATE policy carries a `WITH CHECK` clause (not just `USING`), closing a gap that
+exists on the `grocery_items` policy it's modeled on. Columns: `user_id`,
+`slice_date`, `recipe_ids` (jsonb array of pool ids, order = the AI's own pick
+order), `selection_reason` (nullable text — the whole-set `slice_reason`, or `NULL`
+on a stale-fallback slice), `status` (`'ready'` is the only value written today),
+`created_at`. A single `unique (user_id, slice_date)` constraint does double duty:
+it's both the freshness-check lookup key and the `upsert`'s `onConflict` target, and
+it's what makes a same-day recompute physically impossible to duplicate even under
+a race. There is no separate history table for don't-repeat — Stage 1's exclusion
+logic reads directly off past rows in this same table (last ~30, ordered by
+`slice_date desc`), so the slice history and the don't-repeat memory are the same
+data, never allowed to drift apart.
+
+**Refresh model.** Calendar-day expiry, keyed to the user's own local date, not a
+rolling TTL. Lazy: nothing precomputes a slice ahead of time. First mount of the day
+computes it, every subsequent mount that same local day is a cache read. This is
+the sole property directly proven end-to-end (see below): a cold call against a
+real account computed and persisted a slice; an immediate second call against the
+same account and date returned the identical `recipe_ids` with `computed: false`
+and no AI call.
+
+**Trigger point — Home mount.** `computeMySlice()` (`data.ts`) is called from
+`Home.tsx`'s existing mount effect, alongside the pre-existing pending-received-
+recipes fetch, sharing that effect's own `ignore` flag (Lovable double-mount
+guard). Same fail-quiet AI-island posture as `generateTasteProfile`/
+`enrichGroceryItems`: wrapped in try/catch, `console.error`s and returns `null` on
+any failure, never throws, never blocks Home's own render. **v1 has no shelf UI at
+all** — the result is only `console.log`'d for now; rendering it as an actual
+suggestion shelf on Home is Layer 4, out of scope for this session.
+
+**v1 simplifications, deliberate:**
+- **Dinner-only.** `meal_type = 'dinner'` is hardcoded in Stage 1. Time-of-day-
+  aware meal-type selection (a breakfast slice in the morning, etc.) is deferred to
+  a future version — the pool already has the `meal_type` tag to support it later,
+  nothing about this schema blocks it.
+- **Season is soft, not hard**, purely because ~90% of pool rows carry no
+  `season` value yet (see Layer 1 above); revisit as a hard filter only after a
+  future pool-tagging pass fills that column in meaningfully.
+
+**Verified.** The selection prompt itself was proven, before this runtime was
+built, against two real profiles chosen to be maximally different (the founder's
+own Mediterranean/Italian-leaning profile vs. a profile with a genuine hard shrimp/
+shellfish allergy): the two got fully distinct 4-recipe slices with zero shared
+titles, and the allergic profile's slice contained zero shellfish dishes. Separately,
+the deployed runtime itself was proven end-to-end against a real account (the
+founder's): a cold call computed and persisted a real slice, cross-checked pick-by-
+pick against the live pool table for correct `meal_type`/cuisine/dietary data; an
+immediate second call against the same account and date read the cached row with
+`computed: false` and no second AI call; and a read-only simulation of a
+hypothetical hard shellfish allergy against that day's real candidate pool
+confirmed zero shellfish rows survive the gate.

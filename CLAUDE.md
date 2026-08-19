@@ -162,6 +162,9 @@ header now shows only its right-side action button.
 - `grocery_items` — grocery list rows (raw + AI-enriched fields), owner-only
 - `grocery_list_shares` — frozen snapshots for public grocery share links; owner-write + anon-read
 - `recipe_shares` — frozen snapshots for public recipe share links; owner-write + anon-read (same pattern as `grocery_list_shares`; see Recipe Sharing in FEATURE_SPECS.md)
+- `suggested_recipe_pool` — offline-generated recipe pool for a future suggestions feature; RLS deny-all, service-role-only, no live app read path yet. Full detail: Suggested Recipes Pool — Layer 1 in FEATURE_SPECS.md.
+- `profiles.taste_profile` (text, nullable) — AI-generated prose interpretation of a user's onboarding answers, for a future Layer 3 consumer, not the user. Full detail: Suggested Recipes — Layer 2 in FEATURE_SPECS.md.
+- `user_recipe_slices` — per-user, per-day 3-4 recipe slice computed by the `compute-slice` Edge Function; owner-only RLS, no shelf UI yet. Full detail: Suggested Recipes — Layer 3 (assignment runtime) in FEATURE_SPECS.md.
 
 **Key schema decisions:**
 - Ingredients stored as **free-text strings**, NOT structured `{amount, unit}`. Deliberate and load-bearing: fits the free-text nature of AI cooking ("a good glug of olive oil"); AI normalizes on demand where structure is needed. The AI is the bridge between free-text recipes and any feature that computes over ingredients (grocery, future pantry/nutrition/scaling). Full structured-storage migration is a trigger-gated option — revisit ONLY if a feature must compute across the whole library's quantities in *stored* form.
