@@ -323,6 +323,8 @@ function renderScreen(
   clearBuildConversation?: () => void,
   buildMessageIdRef?: React.MutableRefObject<number>,
   transferToRecipeChat?: (recipe: SavedRecipe, question: string, onCollisionCancel: () => void) => void,
+  buildSeedTick?: number,
+  seedBuildFromChip?: (prompt: string) => void,
 ) {
   switch (s.name) {
     case "cook": return (
@@ -343,6 +345,7 @@ function renderScreen(
         setCurrentRecipe={setBuildCurrentRecipe || (() => {})}
         onClearConversation={clearBuildConversation || (() => {})}
         messageIdRef={buildMessageIdRef || { current: 0 }}
+        seedTick={buildSeedTick ?? 0}
       />
     );
     case "addown": return (
@@ -441,7 +444,7 @@ function renderScreen(
     case "profile": return <Profile back={back} openEdit={(k) => push({ name: "profileedit", fieldKey: k })} isTabRoot={isTabRoot} onSignOut={onSignOut!} profile={profile || null} onUpdate={onUpdate || (async () => {})} />;
     case "profileedit": return <ProfileEdit fieldKey={s.fieldKey} back={back} profile={profile || null} onUpdate={onUpdate || (async () => {})} />;
     case "placeholder": return <Placeholder title={s.title} back={back} />;
-    case "home": return <Home profile={profile || null} push={push} />;
+    case "home": return <Home profile={profile || null} push={push} seedBuildFromChip={seedBuildFromChip || (() => {})} />;
     case "receivedPending": return <ReceivedPending items={s.items} back={back} push={push} />;
     case "receivedRecipe": return (
       <ReceivedRecipeView
@@ -496,6 +499,11 @@ export default function App() {
   const [buildCurrentRecipe, setBuildCurrentRecipe] = useState<RecipeDraft | null>(null);
   const buildMessageIdRef = useRef(0);
   const buildAutoFireAI = useRef(false); // Flag to auto-fire AI on Build mount
+  // Increments on every seed (transferToRecipeChat or seedBuildFromChip) so Cook's
+  // auto-fire guard can re-arm per seed instead of once per Cook mount — Cook
+  // survives ordinary tab switches, so a plain "have I fired yet" ref would only
+  // ever fire once per app session without this.
+  const [buildSeedTick, setBuildSeedTick] = useState(0);
 
   const profileInitialized = useRef(false);
 
@@ -1022,7 +1030,31 @@ export default function App() {
     // Set flag to auto-fire AI call when Cook mounts
     buildAutoFireAI.current = true;
 
+    // New seed — re-arm Cook's auto-fire guard even if a prior seed already fired
+    // once this session (see buildSeedTick declaration above).
+    setBuildSeedTick((t) => t + 1);
+
     // Navigate to Build tab
+    switchToTab("build");
+  };
+
+  // Seed Build with a bare prompt and no recipe attached (Home prompt-chip
+  // launch). Same shape as transferToRecipeChat, minus the recipe object.
+  const seedBuildFromChip = (prompt: string) => {
+    if (transition) return;
+
+    buildMessageIdRef.current = 0;
+    setBuildCurrentRecipe(null);
+
+    const userMessage: BuildMessage = {
+      id: ++buildMessageIdRef.current,
+      role: "user",
+      text: prompt.trim(),
+    };
+    setBuildMessages([userMessage]);
+    setBuildConversationHistory([{ role: "user", content: prompt.trim() }]);
+    setBuildSeedTick((t) => t + 1);
+
     switchToTab("build");
   };
 
@@ -1191,6 +1223,8 @@ export default function App() {
           clearBuildConversation={clearBuildConversation}
           buildMessageIdRef={buildMessageIdRef}
           transferToRecipeChat={transferToRecipeChat}
+          buildSeedTick={buildSeedTick}
+          seedBuildFromChip={seedBuildFromChip}
         />
         <BottomTabBar activeTab={activeTab} onTabClick={switchToTab} />
       </div>
@@ -1352,6 +1386,8 @@ function ScreenStage({
   clearBuildConversation,
   buildMessageIdRef,
   transferToRecipeChat,
+  buildSeedTick,
+  seedBuildFromChip,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back"; fromIsTabRoot?: boolean; toIsTabRoot?: boolean } | null;
@@ -1380,6 +1416,8 @@ function ScreenStage({
   clearBuildConversation: () => void;
   buildMessageIdRef: React.MutableRefObject<number>;
   transferToRecipeChat: (recipe: SavedRecipe, question: string, onCollisionCancel: () => void) => void;
+  buildSeedTick: number;
+  seedBuildFromChip: (prompt: string) => void;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
@@ -1469,7 +1507,7 @@ function ScreenStage({
         pointerEvents: isTransitioning ? "none" : "auto",
         paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
       }}>
-        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat)}
+        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip)}
       </div>
 
       {/* Overlay layer - only during transitions, renders from screen */}
@@ -1482,7 +1520,7 @@ function ScreenStage({
           pointerEvents: "none",
           paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
         }}>
-          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat)}
+          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip)}
         </div>
       )}
     </div>
@@ -5042,7 +5080,7 @@ function BackArrow() {
 }
 
 /* ---------------- Cook ---------------- */
-function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpdate, messages, setMessages, conversationHistory, setConversationHistory, currentRecipe, setCurrentRecipe, onClearConversation, messageIdRef }: {
+function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpdate, messages, setMessages, conversationHistory, setConversationHistory, currentRecipe, setCurrentRecipe, onClearConversation, messageIdRef, seedTick }: {
   back: () => void;
   push: (s: Screen) => void;
   finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
@@ -5058,6 +5096,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
   setCurrentRecipe: (recipe: RecipeDraft | null) => void;
   onClearConversation: () => void;
   messageIdRef: React.MutableRefObject<number>;
+  seedTick: number;
 }) {
 
   const [trayOpen, setTrayOpen] = useState(!!screen.newCategory);
@@ -5106,26 +5145,34 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
     }
   }, [recipePulse]);
 
-  // Auto-fire AI call when transferring from recipe chat
-  const autoFireRef = useRef(false);
+  // Auto-fire AI call when transferring from recipe chat, or when seeded from
+  // a Home prompt chip. Guard is keyed on seedTick (bumped by App on every
+  // seed) rather than a plain fired-once boolean, because Cook survives
+  // ordinary tab switches — a plain boolean would only ever fire once per
+  // app session, silently no-op-ing every seed after the first.
+  const firedSeedTickRef = useRef<number | null>(null);
   useEffect(() => {
-    // Check if this is a transferred conversation that needs auto-fire
-    // Condition: conversationHistory has just the user question, currentRecipe exists (recipe-loaded chat)
-    const needsAutoFire =
-      !autoFireRef.current &&
+    const seededShape =
       !typing &&
       messages.length === 1 &&
       messages[0].role === "user" &&
       conversationHistory.length === 1 &&
       conversationHistory[0].role === "user" &&
-      currentRecipe !== null;
+      firedSeedTickRef.current !== seedTick;
+
+    // Existing case: transferToRecipeChat (Recipe Card chat icon) — a recipe is attached.
+    const isRecipeAttachedSeed = currentRecipe !== null;
+    // New case: seedBuildFromChip (Home prompt chip) — no recipe attached.
+    const isPromptOnlySeed = currentRecipe === null;
+
+    const needsAutoFire = seededShape && (isRecipeAttachedSeed || isPromptOnlySeed);
 
     if (needsAutoFire) {
-      autoFireRef.current = true; // Mark as fired to prevent re-firing
+      firedSeedTickRef.current = seedTick; // Mark this seed as fired to prevent re-firing
       // Fire AI call with the existing conversation history
       fireAICall(conversationHistory);
     }
-  }, [messages, conversationHistory, typing, currentRecipe]);
+  }, [messages, conversationHistory, typing, currentRecipe, seedTick]);
 
   const fireAICall = async (history: ConversationMessage[]) => {
     setTyping(true);

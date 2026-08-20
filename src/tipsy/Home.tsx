@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   getPendingReceivedRecipes,
   normalizeStep,
@@ -11,6 +11,7 @@ import {
   type RecipeSendSnapshot,
   type MenuSection,
 } from "./data";
+import { pickChips } from "./chips";
 import watermarkSquare from "../Logos/watermark_square.png";
 import watermarkCircle from "../Logos/watermark_circle.png";
 import SaveRecipeFlow from "./SaveRecipeFlow";
@@ -170,12 +171,16 @@ function ReceivedTile({
 export default function Home({
   profile,
   push,
+  seedBuildFromChip,
 }: {
   profile: ProfileType | null;
   push: HomePush;
+  seedBuildFromChip: (prompt: string) => void;
 }) {
   const [pending, setPending] = useState<PendingReceivedRecipe[]>([]);
   const [loading, setLoading] = useState(true);
+  // Pick 3 chips once per mount (same pool/logic Build's empty state uses)
+  const displayChips = useMemo(() => pickChips(new Date()), []);
 
   useEffect(() => {
     let ignore = false;
@@ -225,6 +230,47 @@ export default function Home({
           {greetingForNow()}{firstName ? `, ${firstName}` : ""}
         </div>
         <img src={watermarkCircle} alt="Tipsy Dinner" style={{ height: 36, width: "auto", display: "block" }} />
+      </div>
+
+      <div
+        style={{
+          flexShrink: 0,
+          display: "flex",
+          flexDirection: "row",
+          overflowX: "auto",
+          padding: `12px ${EDGE}px 4px`,
+          gap: 12,
+          WebkitOverflowScrolling: "touch",
+        }}
+      >
+        {displayChips.map((chip, index) => (
+          <button
+            key={index}
+            onClick={() => seedBuildFromChip(chip.prompt)}
+            style={{
+              minWidth: 200,
+              height: 72,
+              background: "rgba(35,60,0,0.06)",
+              border: "1px solid rgba(35,60,0,0.1)",
+              borderRadius: 16,
+              padding: "14px 16px",
+              cursor: "pointer",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "flex-start",
+              justifyContent: "center",
+              gap: 4,
+              flexShrink: 0,
+            }}
+          >
+            <div style={{ fontFamily: fontSans, fontWeight: 700, fontSize: 15, color: C.text, lineHeight: 1.2 }}>
+              {chip.header}
+            </div>
+            <div style={{ fontFamily: fontDisplay, fontStyle: "italic", fontWeight: 300, fontSize: 13, color: C.textLight, lineHeight: 1.2 }}>
+              {chip.body}
+            </div>
+          </button>
+        ))}
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: 16 }}>
