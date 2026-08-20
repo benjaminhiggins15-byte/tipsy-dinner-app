@@ -80,7 +80,7 @@ function PlaceholderArt() {
   );
 }
 
-function ReceivedTile({
+export function ReceivedTile({
   item,
   onOpen,
 }: {
@@ -170,15 +170,17 @@ function ReceivedTile({
 
 export default function Home({
   profile,
-  push,
   seedBuildFromChip,
+  goToReceivedShelf,
 }: {
   profile: ProfileType | null;
-  push: HomePush;
   seedBuildFromChip: (prompt: string) => void;
+  goToReceivedShelf: () => void;
 }) {
-  const [pending, setPending] = useState<PendingReceivedRecipe[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Count-only — the actual shelf (full tile data) now lives on the Recipes
+  // tab, which runs its own independent fetch of the same function. This is
+  // deliberately NOT shared/lifted state; each fetch is separate on purpose.
+  const [pendingCount, setPendingCount] = useState(0);
   // Pick 3 chips once per mount (same pool/logic Build's empty state uses)
   const displayChips = useMemo(() => pickChips(new Date()), []);
 
@@ -187,8 +189,7 @@ export default function Home({
     (async () => {
       const items = await getPendingReceivedRecipes();
       if (ignore) return;
-      setPending(items);
-      setLoading(false);
+      setPendingCount(items.length);
     })();
     // Layer 3 trigger only — no shelf UI yet (Layer 4). Fire-and-log so we
     // can confirm the compute-slice runtime fired correctly on Home mount.
@@ -213,8 +214,6 @@ export default function Home({
   }, []);
 
   const firstName = profile?.display_name?.split(" ")[0] || profile?.display_name || "";
-  const visible = pending.slice(0, 4);
-  const hasMore = pending.length > 4;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg }}>
@@ -274,56 +273,27 @@ export default function Home({
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: 16 }}>
-        {!loading && pending.length > 0 && (
-          <div style={{ marginTop: 20 }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: `0 ${EDGE}px`,
-                marginBottom: 12,
-              }}
-            >
-              <div
-                style={{
-                  fontFamily: fontSans,
-                  fontSize: 13,
-                  fontWeight: 500,
-                  letterSpacing: "0.1em",
-                  textTransform: "uppercase",
-                  color: C.text,
-                }}
-              >
-                Received recipes
-              </div>
-              {hasMore && (
-                <div
-                  onClick={() => push({ name: "receivedPending", items: pending })}
-                  style={{
-                    fontFamily: fontSans,
-                    fontSize: 12,
-                    fontWeight: 500,
-                    color: C.textLight,
-                    cursor: "pointer",
-                  }}
-                >
-                  View all ({pending.length})
-                </div>
-              )}
+        {pendingCount > 0 && (
+          <div
+            onClick={goToReceivedShelf}
+            style={{
+              margin: `20px ${EDGE}px 0`,
+              padding: "14px 16px",
+              borderRadius: 16,
+              background: "rgba(35,60,0,0.06)",
+              border: "1px solid rgba(35,60,0,0.1)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              cursor: "pointer",
+            }}
+          >
+            <div style={{ fontFamily: fontSans, fontSize: 14, fontWeight: 500, color: C.text }}>
+              {pendingCount} recipe{pendingCount === 1 ? "" : "s"} waiting in Recipes
             </div>
-            <div
-              style={{
-                display: "flex",
-                gap: 12,
-                overflowX: "auto",
-                padding: `0 ${EDGE}px`,
-              }}
-            >
-              {visible.map((item) => (
-                <ReceivedTile key={item.sendId} item={item} onOpen={(i) => push({ name: "receivedRecipe", item: i })} />
-              ))}
-            </div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
           </div>
         )}
       </div>

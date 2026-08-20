@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName, sendRecipeToFriends, searchProfiles, getMyConnections, type ProfileSearchResult, type PendingReceivedRecipe } from "./data";
+import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName, sendRecipeToFriends, searchProfiles, getMyConnections, type ProfileSearchResult, type PendingReceivedRecipe, getPendingReceivedRecipes } from "./data";
 import { type CropRect } from "./image";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
@@ -11,7 +11,7 @@ import MenuInterior from "./MenuInterior";
 import RecipePicker from "./RecipePicker";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 import AuthFlow from "./AuthFlow";
-import Home, { ReceivedPending, ReceivedRecipeView } from "./Home";
+import Home, { ReceivedPending, ReceivedRecipeView, ReceivedTile } from "./Home";
 import { supabase } from "../lib/supabase";
 import type { Session } from "@supabase/supabase-js";
 import watermarkSquare from "../Logos/watermark_square.png";
@@ -325,6 +325,7 @@ function renderScreen(
   transferToRecipeChat?: (recipe: SavedRecipe, question: string, onCollisionCancel: () => void) => void,
   buildSeedTick?: number,
   seedBuildFromChip?: (prompt: string) => void,
+  goToReceivedShelf?: () => void,
 ) {
   switch (s.name) {
     case "cook": return (
@@ -444,7 +445,7 @@ function renderScreen(
     case "profile": return <Profile back={back} openEdit={(k) => push({ name: "profileedit", fieldKey: k })} isTabRoot={isTabRoot} onSignOut={onSignOut!} profile={profile || null} onUpdate={onUpdate || (async () => {})} />;
     case "profileedit": return <ProfileEdit fieldKey={s.fieldKey} back={back} profile={profile || null} onUpdate={onUpdate || (async () => {})} />;
     case "placeholder": return <Placeholder title={s.title} back={back} />;
-    case "home": return <Home profile={profile || null} push={push} seedBuildFromChip={seedBuildFromChip || (() => {})} />;
+    case "home": return <Home profile={profile || null} seedBuildFromChip={seedBuildFromChip || (() => {})} goToReceivedShelf={goToReceivedShelf || (() => {})} />;
     case "receivedPending": return <ReceivedPending items={s.items} back={back} push={push} />;
     case "receivedRecipe": return (
       <ReceivedRecipeView
@@ -827,6 +828,32 @@ export default function App() {
         [tab]: [...stacks[tab], screen],
       }));
     }
+  };
+
+  // Resets the Recipes tab to root (categories — where the received-recipes
+  // shelf now renders) and switches to it. A dedicated function rather than
+  // switchToTab("recipes", {name:"categories"}) — that appends the screen to
+  // whatever the tab's current stack already is, which would push a
+  // duplicate root (or land under unrelated depth) if the Recipes tab was
+  // previously left mid-navigation, e.g. inside a recipe detail.
+  const goToReceivedShelf = () => {
+    if (transition) return;
+    const root: Screen = { name: "categories" };
+    const fromIndex = getTabIndex(activeTab);
+    const toIndex = getTabIndex("recipes");
+    const direction = toIndex > fromIndex ? "forward" : "back";
+    setTransition({
+      from: current,
+      to: root,
+      direction,
+      fromIsTabRoot: isTabRoot,
+      toIsTabRoot: true,
+    });
+    setActiveTab("recipes");
+    setTabStacks((stacks) => ({
+      ...stacks,
+      recipes: [root],
+    }));
   };
 
   const push = (s: Screen) => {
@@ -1225,6 +1252,7 @@ export default function App() {
           transferToRecipeChat={transferToRecipeChat}
           buildSeedTick={buildSeedTick}
           seedBuildFromChip={seedBuildFromChip}
+          goToReceivedShelf={goToReceivedShelf}
         />
         <BottomTabBar activeTab={activeTab} onTabClick={switchToTab} />
       </div>
@@ -1388,6 +1416,7 @@ function ScreenStage({
   transferToRecipeChat,
   buildSeedTick,
   seedBuildFromChip,
+  goToReceivedShelf,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back"; fromIsTabRoot?: boolean; toIsTabRoot?: boolean } | null;
@@ -1418,6 +1447,7 @@ function ScreenStage({
   transferToRecipeChat: (recipe: SavedRecipe, question: string, onCollisionCancel: () => void) => void;
   buildSeedTick: number;
   seedBuildFromChip: (prompt: string) => void;
+  goToReceivedShelf: () => void;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
@@ -1507,7 +1537,7 @@ function ScreenStage({
         pointerEvents: isTransitioning ? "none" : "auto",
         paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
       }}>
-        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip)}
+        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf)}
       </div>
 
       {/* Overlay layer - only during transitions, renders from screen */}
@@ -1520,7 +1550,7 @@ function ScreenStage({
           pointerEvents: "none",
           paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
         }}>
-          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip)}
+          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf)}
         </div>
       )}
     </div>
@@ -1608,6 +1638,21 @@ function BottomTabBar({ activeTab, onTabClick }: { activeTab: TabId; onTabClick:
 function Categories({ push, back, isTabRoot, ensureRecipesLoaded }: { push: (s: Screen) => void; back: () => void; isTabRoot: boolean; ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void> }) {
   const [cats, setCats] = useState<{ key: string; label: string; gradient: string }[]>([]);
   const [recipeCounts, setRecipeCounts] = useState<Record<string, number>>({});
+  const [pendingReceived, setPendingReceived] = useState<PendingReceivedRecipe[]>([]);
+
+  // Independent from Home's own count-only fetch of the same function — this
+  // one loads full tile data (title/photo/sender) for the shelf below.
+  useEffect(() => {
+    let ignore = false;
+    (async () => {
+      const items = await getPendingReceivedRecipes();
+      if (ignore) return;
+      setPendingReceived(items);
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   useEffect(() => {
     let ignore = false;
@@ -1682,6 +1727,45 @@ function Categories({ push, back, isTabRoot, ensureRecipesLoaded }: { push: (s: 
           </button>
         </div>
       </div>
+
+      {/* Received recipes shelf — relocated here from Home; same functions,
+          same nav targets, same shared Screen union. Surface move only. */}
+      {pendingReceived.length > 0 && (
+        <div style={{ flexShrink: 0, padding: "4px 0 12px" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "0 20px",
+              marginBottom: 12,
+            }}
+          >
+            <div style={{ fontFamily: "Inter, sans-serif", fontSize: 13, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase", color: "#233C00" }}>
+              Received recipes
+            </div>
+            {pendingReceived.length > 4 && (
+              <div
+                onClick={() => push({ name: "receivedPending", items: pendingReceived })}
+                style={{
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: "rgba(35,60,0,0.6)",
+                  cursor: "pointer",
+                }}
+              >
+                View all ({pendingReceived.length})
+              </div>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 12, overflowX: "auto", padding: "0 20px 4px" }}>
+            {pendingReceived.slice(0, 4).map((item) => (
+              <ReceivedTile key={item.sendId} item={item} onOpen={(i) => push({ name: "receivedRecipe", item: i })} />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Grid */}
       <div style={{ flex: 1, overflowY: "auto", padding: "8px 20px 16px" }}>
