@@ -191,25 +191,59 @@ export default function Home({
 
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: 16 }}>
         {pendingSummary && (
+          // Same dark-green/cream identity as the received tiles on the
+          // Recipes list (ReceivedTileFullWidth) — deliberately compact and
+          // deferential here, sitting below the chip cards, not competing
+          // with them. Distinct shape from a photo tile on purpose: no
+          // carousel, no image — a received recipe should read as its own
+          // thing here, not a preview of the (future) suggestion carousel.
           <div
             onClick={goToReceivedShelf}
             style={{
-              margin: `20px ${EDGE}px 0`,
-              padding: "14px 16px",
-              borderRadius: 16,
-              background: "rgba(35,60,0,0.06)",
-              border: "1px solid rgba(35,60,0,0.1)",
+              margin: `14px ${EDGE}px 0`,
+              padding: "10px 14px",
+              borderRadius: 14,
+              background: "#2E4E08",
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
+              gap: 10,
               cursor: "pointer",
             }}
           >
-            <div style={{ fontFamily: fontSans, fontSize: 14, fontWeight: 500, color: C.text }}>
-              {pendingSummary.title} from {pendingSummary.senderName}
-              {pendingSummary.count > 1 ? ` · +${pendingSummary.count - 1} more` : ""}
+            <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+              <div
+                style={{
+                  fontFamily: "Lazydog, sans-serif",
+                  textTransform: "uppercase",
+                  fontSize: 13,
+                  lineHeight: 1.2,
+                  color: "#FEE7C0",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {pendingSummary.title}
+              </div>
+              <div
+                style={{
+                  fontFamily: fontSans,
+                  fontSize: 11,
+                  fontWeight: 500,
+                  color: "rgba(254,231,192,0.75)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                from {pendingSummary.senderName}
+                {pendingSummary.count > 1 && (
+                  <span style={{ color: "rgba(254,231,192,0.5)" }}> · +{pendingSummary.count - 1} more</span>
+                )}
+              </div>
             </div>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(254,231,192,0.6)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
               <polyline points="9 18 15 12 9 6" />
             </svg>
           </div>
