@@ -49,7 +49,6 @@ const C = {
 const fontDisplay = "'Fraunces', serif";
 const fontSans = "'Inter', sans-serif";
 
-const TILE_WIDTH = 190;
 const TILE_HEIGHT = 142;
 const EDGE = 20;
 
@@ -80,94 +79,6 @@ function PlaceholderArt() {
   );
 }
 
-export function ReceivedTile({
-  item,
-  onOpen,
-}: {
-  item: PendingReceivedRecipe;
-  onOpen: (item: PendingReceivedRecipe) => void;
-}) {
-  return (
-    <div
-      onClick={() => onOpen(item)}
-      style={{
-        position: "relative",
-        width: TILE_WIDTH,
-        height: TILE_HEIGHT,
-        minWidth: TILE_WIDTH,
-        borderRadius: 20,
-        overflow: "hidden",
-        cursor: "pointer",
-        flexShrink: 0,
-        background: "#2E4E08",
-      }}
-    >
-      {item.photoUrl ? (
-        <div
-          style={{
-            position: "absolute",
-            inset: -10,
-            backgroundImage: `url(${item.photoUrl})`,
-            backgroundSize: "cover",
-            backgroundPosition: "center",
-            filter: "blur(6px)",
-            transform: "scale(1.1)",
-          }}
-        />
-      ) : (
-        <PlaceholderArt />
-      )}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          background: "linear-gradient(0deg, rgba(24,40,0,0.85) 0%, rgba(24,40,0,0.15) 55%, rgba(24,40,0,0) 100%)",
-        }}
-      />
-      <div
-        style={{
-          position: "absolute",
-          left: 14,
-          right: 14,
-          bottom: 12,
-          display: "flex",
-          flexDirection: "column",
-          gap: 3,
-        }}
-      >
-        <div
-          style={{
-            fontFamily: "Lazydog, sans-serif",
-            textTransform: "uppercase",
-            fontSize: 14,
-            lineHeight: 1.2,
-            color: "#FEE7C0",
-            display: "-webkit-box",
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical",
-            overflow: "hidden",
-          }}
-        >
-          {item.title}
-        </div>
-        <div
-          style={{
-            fontFamily: fontSans,
-            fontSize: 11,
-            fontWeight: 500,
-            color: "rgba(254,231,192,0.75)",
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-        >
-          from {item.senderName}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function Home({
   profile,
   seedBuildFromChip,
@@ -177,10 +88,12 @@ export default function Home({
   seedBuildFromChip: (prompt: string) => void;
   goToReceivedShelf: () => void;
 }) {
-  // Count-only — the actual shelf (full tile data) now lives on the Recipes
-  // tab, which runs its own independent fetch of the same function. This is
-  // deliberately NOT shared/lifted state; each fetch is separate on purpose.
-  const [pendingCount, setPendingCount] = useState(0);
+  // Slim summary only (most recent title + sender + count) — the actual
+  // shelf/list (full tile data) lives on the Recipes tab, which runs its own
+  // independent fetch of the same function. This is deliberately NOT
+  // shared/lifted state; each fetch is separate on purpose. getPendingReceivedRecipes
+  // already orders by created_at descending, so items[0] is the most recent.
+  const [pendingSummary, setPendingSummary] = useState<{ title: string; senderName: string; count: number } | null>(null);
   // Pick 3 chips once per mount (same pool/logic Build's empty state uses)
   const displayChips = useMemo(() => pickChips(new Date()), []);
 
@@ -189,7 +102,11 @@ export default function Home({
     (async () => {
       const items = await getPendingReceivedRecipes();
       if (ignore) return;
-      setPendingCount(items.length);
+      setPendingSummary(
+        items.length > 0
+          ? { title: items[0].title, senderName: items[0].senderName, count: items.length }
+          : null
+      );
     })();
     // Layer 3 trigger only — no shelf UI yet (Layer 4). Fire-and-log so we
     // can confirm the compute-slice runtime fired correctly on Home mount.
@@ -273,7 +190,7 @@ export default function Home({
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: 16 }}>
-        {pendingCount > 0 && (
+        {pendingSummary && (
           <div
             onClick={goToReceivedShelf}
             style={{
@@ -289,7 +206,8 @@ export default function Home({
             }}
           >
             <div style={{ fontFamily: fontSans, fontSize: 14, fontWeight: 500, color: C.text }}>
-              {pendingCount} recipe{pendingCount === 1 ? "" : "s"} waiting in Recipes
+              {pendingSummary.title} from {pendingSummary.senderName}
+              {pendingSummary.count > 1 ? ` · +${pendingSummary.count - 1} more` : ""}
             </div>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="9 18 15 12 9 6" />

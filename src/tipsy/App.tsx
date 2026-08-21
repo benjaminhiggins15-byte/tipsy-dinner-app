@@ -11,7 +11,7 @@ import MenuInterior from "./MenuInterior";
 import RecipePicker from "./RecipePicker";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 import AuthFlow from "./AuthFlow";
-import Home, { ReceivedPending, ReceivedRecipeView, ReceivedTile } from "./Home";
+import Home, { ReceivedPending, ReceivedRecipeView } from "./Home";
 import { supabase } from "../lib/supabase";
 import type { Session } from "@supabase/supabase-js";
 import watermarkSquare from "../Logos/watermark_square.png";
@@ -830,29 +830,33 @@ export default function App() {
     }
   };
 
-  // Resets the Recipes tab to root (categories — where the received-recipes
-  // shelf now renders) and switches to it. A dedicated function rather than
-  // switchToTab("recipes", {name:"categories"}) — that appends the screen to
+  // Resets the Recipes tab to [categories, receivedPending] and switches to
+  // it, landing directly on the received-recipes list — a dedicated function
+  // rather than switchToTab("recipes", {name}) — that appends the screen to
   // whatever the tab's current stack already is, which would push a
   // duplicate root (or land under unrelated depth) if the Recipes tab was
-  // previously left mid-navigation, e.g. inside a recipe detail.
-  const goToReceivedShelf = () => {
+  // previously left mid-navigation, e.g. inside a recipe detail. Fetches its
+  // own copy of the pending items for the list screen — a one-off fetch
+  // triggered by the tap, not lifted/shared state.
+  const goToReceivedShelf = async () => {
     if (transition) return;
+    const items = await getPendingReceivedRecipes();
     const root: Screen = { name: "categories" };
+    const list: Screen = { name: "receivedPending", items };
     const fromIndex = getTabIndex(activeTab);
     const toIndex = getTabIndex("recipes");
     const direction = toIndex > fromIndex ? "forward" : "back";
     setTransition({
       from: current,
-      to: root,
+      to: list,
       direction,
       fromIsTabRoot: isTabRoot,
-      toIsTabRoot: true,
+      toIsTabRoot: false,
     });
     setActiveTab("recipes");
     setTabStacks((stacks) => ({
       ...stacks,
-      recipes: [root],
+      recipes: [root, list],
     }));
   };
 
@@ -1640,8 +1644,9 @@ function Categories({ push, back, isTabRoot, ensureRecipesLoaded }: { push: (s: 
   const [recipeCounts, setRecipeCounts] = useState<Record<string, number>>({});
   const [pendingReceived, setPendingReceived] = useState<PendingReceivedRecipe[]>([]);
 
-  // Independent from Home's own count-only fetch of the same function — this
-  // one loads full tile data (title/photo/sender) for the shelf below.
+  // Independent from Home's own slim-summary fetch of the same function —
+  // this one loads the full list, used for the pending-count button's count
+  // and passed straight through to the ReceivedPending screen it opens.
   useEffect(() => {
     let ignore = false;
     (async () => {
@@ -1728,42 +1733,30 @@ function Categories({ push, back, isTabRoot, ensureRecipesLoaded }: { push: (s: 
         </div>
       </div>
 
-      {/* Received recipes shelf — relocated here from Home; same functions,
-          same nav targets, same shared Screen union. Surface move only. */}
+      {/* Compact pending-received control — relocated here from Home. Quiet,
+          hairline styling (not a heavy tile); opens the existing
+          ReceivedPending list screen. Surface/nav only, same functions. */}
       {pendingReceived.length > 0 && (
-        <div style={{ flexShrink: 0, padding: "4px 0 12px" }}>
-          <div
+        <div style={{ flexShrink: 0, padding: "0 20px 12px" }}>
+          <button
+            onClick={() => push({ name: "receivedPending", items: pendingReceived })}
             style={{
               display: "flex",
               alignItems: "center",
-              justifyContent: "space-between",
-              padding: "0 20px",
-              marginBottom: 12,
+              gap: 6,
+              padding: "8px 14px",
+              borderRadius: 20,
+              border: "1px solid rgba(35,60,0,0.15)",
+              background: "rgba(35,60,0,0.04)",
+              cursor: "pointer",
+              fontFamily: "Inter, sans-serif",
+              fontSize: 12,
+              fontWeight: 500,
+              color: "#233C00",
             }}
           >
-            <div style={{ fontFamily: "Inter, sans-serif", fontSize: 13, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase", color: "#233C00" }}>
-              Received recipes
-            </div>
-            {pendingReceived.length > 4 && (
-              <div
-                onClick={() => push({ name: "receivedPending", items: pendingReceived })}
-                style={{
-                  fontFamily: "Inter, sans-serif",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  color: "rgba(35,60,0,0.6)",
-                  cursor: "pointer",
-                }}
-              >
-                View all ({pendingReceived.length})
-              </div>
-            )}
-          </div>
-          <div style={{ display: "flex", gap: 12, overflowX: "auto", padding: "0 20px 4px" }}>
-            {pendingReceived.slice(0, 4).map((item) => (
-              <ReceivedTile key={item.sendId} item={item} onOpen={(i) => push({ name: "receivedRecipe", item: i })} />
-            ))}
-          </div>
+            Received ({pendingReceived.length})
+          </button>
         </div>
       )}
 
