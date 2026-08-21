@@ -405,6 +405,33 @@ UTC string-parsing.
 cases across all timing shapes at their tight window edges; imports the real chip
 defs. Re-run whenever timing logic or calendar entries change.
 
+**Home also renders these same three chips (2026-08-20), via a second, separate
+consumption path.** `Home.tsx` calls the identical `pickChips(new Date())` (its own
+`useMemo`, own 3-chip row, same visual styling as Cook's chip row) but wires taps to
+a new App-root function, `seedBuildFromChip(prompt)`, instead of `handleChipClick`.
+Where `handleChipClick` types the prompt into an already-open Build conversation,
+`seedBuildFromChip` seeds a **fresh** one-message Build conversation (clearing any
+prior `buildCurrentRecipe`/history) and switches straight to the Build tab, auto-firing
+the AI on arrival — a live, already-talking session, not a pre-filled input box.
+`sendMessage`/`fireAICall`/`handleChipClick`, `buildSystemPrompt`, and the `ai-chat`
+edge function itself were not touched.
+
+**Auto-fire re-arm (`buildSeedTick`).** Implementing the chip-seed path surfaced a
+pre-existing, previously-undocumented bug in Cook's auto-fire guard: it was a plain
+`useRef(false)` that, once fired, could never fire again for the lifetime of that
+`Cook` mount — and Cook survives ordinary tab switches (see CLAUDE.md's Build
+Conversation Persistence section), so in practice it only ever auto-fired once per
+app session, silently no-opping on every subsequent seed. This affected BOTH seed
+paths: `seedBuildFromChip` (new) and the pre-existing `transferToRecipeChat`
+(Recipe Card chat icon, see CLAUDE.md's Chat from Recipe Card section). Fixed with a
+monotonic `buildSeedTick` counter (App-root state) incremented by both seeding
+functions, compared against a `firedSeedTickRef` inside Cook's auto-fire effect —
+re-arming the guard on every new seed rather than once per Cook lifetime. Both seed
+shapes are distinguished inside the same effect: `isRecipeAttachedSeed` (a recipe is
+attached — `transferToRecipeChat`'s case) vs. `isPromptOnlySeed` (no recipe —
+`seedBuildFromChip`'s case); either shape auto-fires as long as `firedSeedTickRef`
+hasn't already recorded the current tick.
+
 ---
 
 ## View All Recipes
@@ -1264,6 +1291,61 @@ monogram centered at reduced opacity as a photoless fallback. A "View all (N)" l
 appears only once there are more than 4 pending items, pushing to the full list.
 Zero pending items renders just the bare greeting — no dedicated empty-state copy yet.
 
+**Superseded 2026-08-20 — shelf relocated to the Recipes tab; Home gets a compact
+card instead (Thread 2, `home-screen-layer-4`).** The tile shelf described in the
+paragraph above no longer renders on Home — it moved to the TOP of the Recipes tab
+(`Categories` in App.tsx, above the category grid): a compact, quiet "Received (N)"
+pill (hairline border, faint tint — deliberately NOT the dark-green image tiles)
+that renders only when pending items exist, and opens the exact same, unmodified
+`ReceivedPending` "view all" screen the old Home shelf's link used to open (reused
+verbatim, not rebuilt). `Categories` runs its own independent mount-effect fetch of
+`getPendingReceivedRecipes()` (double-mount `ignore`-flag pattern, matching every
+other fetch in this codebase) for this pill's count and for the full item list it
+hands to `ReceivedPending`.
+
+Home keeps a presence, but deliberately lighter: its own SEPARATE, independent
+slim mount-effect fetch of the same `getPendingReceivedRecipes()` call (sharing the
+mount effect's `ignore` flag with the unrelated `computeMySlice()` call beside it,
+per the existing pattern) captures only `{title, senderName, count}` from the
+most-recent pending item (the query already orders `created_at` descending, so
+`items[0]` is correct with no extra sort). This deliberately is NOT shared/lifted
+state with the Recipes tab's fetch — two independent fetches of the same read-only
+function, not one fetch threaded through props or App-root state. Home renders this
+as a single compact dark-green (`#2E4E08`) / cream (`#FEE7C0`) card — same color
+identity as the tiles above, so a received recipe reads as one consistent object
+across both screens — sized deliberately small and deferential, sitting below the
+prompt-chip row rather than competing with it. Copy: recipe title (Lazydog,
+uppercase) on line one, "from {senderName}" (small Inter, dimmed) on line two, with
+a subtly dimmer "· +{N-1} more" suffix when more than one is pending. Renders only
+when a summary exists — no empty state at zero, same posture as before.
+
+Tapping either the Recipes-tab pill or the Home card routes through a navigation
+function — `goToReceivedShelf` (App-root) for the Home card, the tab's own `push`
+for the pill — but they resolve to two different landing spots by design: the pill
+(already on the Recipes tab, already holding the loaded list) pushes
+`{name: "receivedPending", items}` onto the current stack; the Home card is a
+cross-tab jump, so `goToReceivedShelf` fetches its own copy of the pending items on
+tap (a one-off fetch triggered by the action, not persisted state) and atomically
+resets the ENTIRE Recipes-tab stack to `[{name: "categories"}, {name:
+"receivedPending", items}]` before switching `activeTab` — landing the user
+directly on the list, not just the Recipes root. This bypasses `switchToTab`
+deliberately: passing an explicit screen to `switchToTab(tab, screen)` only
+*appends* to whatever that tab's stack already is, which risked a duplicate root
+push (or landing atop unrelated depth) if Recipes had been left mid-navigation, e.g.
+inside a recipe detail. `goToReceivedShelf`'s reset guarantees a clean single-tap
+back out to `categories` regardless of where Recipes was left.
+
+No receiving LOGIC changed by this relocation — `saveReceivedRecipe`,
+`finish_received_recipe_save`, `copy-received-recipe-photo`, and
+`dismissReceivedRecipe` are byte-for-byte untouched; `ReceivedRecipeView` and
+`ReceivedPending` themselves needed zero internal changes (both were already fully
+prop-driven and tab-agnostic via the shared `Screen` union — see CLAUDE.md's
+ScreenStage tree note). One deliberate non-change: `finishSaveRecipe`'s existing
+`home: [{name: "home"}]` stack-reset line (see the "Save" paragraph below) is now a
+harmless no-op, since Home no longer hosts any received-recipe screen for it to
+clear — left in place rather than touched, to avoid risking edits to that shared,
+known-trouble function for a cosmetic cleanup.
+
 **`get_sender_names(ids uuid[])` is the ONLY sanctioned `sender_id`→display-name
 lookup**, backing every `{senderName}` shown on this screen. `SECURITY DEFINER`,
 `set search_path = public`, granted to `authenticated` only, same privilege shape as
@@ -1604,6 +1686,20 @@ interpretation built in Layer 2 to actually assign each user a personalized set 
 recipes: a per-user, per-day "slice" of 3-4 dinner recipes, computed on demand and
 cached for the rest of that user's local day. Nothing in the app surfaces this slice
 to a user yet — that shelf UI is Layer 4, a separate future session.
+
+**Layer 4 (the suggestions carousel) is Thread 3 — NOT started as of 2026-08-20,
+blocked on a client-safe read path.** `user_recipe_slices` itself is owner-only
+readable (see its RLS shape below), but its `recipe_ids` are foreign values into
+`suggested_recipe_pool`, which is RLS deny-all/service-role-only today (see "Suggested
+Recipes Pool — Layer 1" above) — no client, anon or authenticated, can resolve those
+ids into actual recipe rows yet. Before any carousel UI can render real content,
+Thread 3 needs one of: a `SECURITY DEFINER` RPC scoped to a caller's own slice ids
+(same pattern as `get_sender_names`/`search_profiles` elsewhere in this doc), or
+denormalizing the picked recipes' display fields directly onto `user_recipe_slices`
+at compute time. Whichever path is chosen, it should also settle the open design
+question flagged in DESIGN_SPEC.md: the carousel must read as visually DISTINCT from
+the received-recipe card/pill (Thread 2) — a suggestion is the app's idea, a
+received recipe is a person's — not a shared component or look.
 
 **Two-stage picker.** Stage 1 is a deterministic Postgres filter, no AI involved:
 `meal_type = 'dinner'`, a soft season match (`season IS NULL OR season = '<current

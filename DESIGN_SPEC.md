@@ -40,6 +40,7 @@ logos) lives in CLAUDE.md; this file is the per-screen application of it.
 - 2×4 grid, gap 12px, padding 0 20px
 - Cards: bg #2E4E08, radius 16px, padding 16px. Tabler icon top-left (cream 20%, 32px), count bottom (Inter 11px cream 40%), title bottom (Inter 700 uppercase cream, letter-spacing 0.08em, 15px)
 - Empty dashed card sits first in the grid (top-left), not last: cream 4% bg, dashed border cream 15%, centered plus — moved forward so it doesn't drift below the fold as the library grows
+- **Received-pending pill** (added 2026-08-20, part of the Home-shelf relocation — see "Home — Greeting + Received Shelf" above): sits below the header, above the category grid, `padding: 0 20px 12px`, shown only when there are pending items. Pill button: flex row, `gap: 6`, `padding: 8px 14px`, `borderRadius: 20`, `border: 1px solid rgba(35,60,0,0.15)`, `background: rgba(35,60,0,0.04)` — quiet/outline treatment, not a filled CTA. Label "Received (N)", Inter 500 12px `#233C00`. Tapping pushes the existing `ReceivedPending` list screen (same screen Home's card also opens, via a different navigation path — see FEATURE_SPECS.md).
 
 ## Recipes — Recipe List
 - Header: back arrow left, category name (Inter 500 uppercase cream) + count (Inter cream 35%) stacked, no right action; search icon top right (alongside the delete-category trash icon)
@@ -130,6 +131,41 @@ logos) lives in CLAUDE.md; this file is the per-screen application of it.
 - Section label "RECEIVED RECIPES": Inter 500 uppercase 13px `#233C00`, letter-spacing 0.1em. "View all (N)" (Inter 500 12px, `rgba(35,60,0,0.6)`) sits at the right of the same row, shown only once there are more than 4 pending items.
 - Tiles: 190×142, radius 20px, horizontal scroll, gap 12px, up to 4 shown. Photo tiles: cover photo blurred (6px) and scaled up 1.1×, with a bottom-to-top scrim (`rgba(24,40,0,0.85)` → transparent) carrying the title (Lazydog uppercase, cream `#FEE7C0`, 2-line clamp) and "from {senderName}" (Inter 500 11px, cream 75%). Photoless tiles: flat `#2E4E08` panel with the app's watermark monogram centered at 50% opacity — currently reads as a visibly distinct-shade box against the shelf rather than blending in; open aesthetic item, not yet resolved.
 - Zero pending items: bare greeting only, no dedicated empty-state illustration/copy yet.
+
+**Superseded 2026-08-20** — the tile shelf above (section label, "View all (N)", 190×142
+tiles) was relocated off Home entirely this session (see "Account-to-Account
+Sharing — Receiving" in FEATURE_SPECS.md for the full relocation writeup). Home's
+current composition, top to bottom: greeting header (unchanged, as above) → a row of
+data-driven prompt chips (same chip visual treatment as Build — Empty State: Fraunces
+italic, cream-on-green tokens re-mapped to this light-bg screen — see CLAUDE.md /
+FEATURE_SPECS.md "Build Home-Screen Suggestion Chips") → a carousel slot reserved
+below the chips for the Thread 3 suggestions feature, not yet built → a compact
+received-recipe card, conditional on pending items existing, sitting last/lowest in
+the stack.
+- Received card (replaces the old shelf): single card, NOT a horizontal scroll.
+  `margin: 14px {EDGE}px 0`, `padding: 10px 14px`, `borderRadius: 14`, `background:
+  #2E4E08` (dark green) — deliberately reusing the tile shelf's old color identity so
+  a received recipe still visually says "someone sent you this" wherever it appears
+  in the app. Flex row, `justify-content: space-between`, `gap: 10`. Left side
+  (stacked, `gap: 2`, single-line ellipsis both rows): title in Lazydog uppercase,
+  cream `#FEE7C0`, 13px; "from {senderName}" in Inter 500 11px `rgba(254,231,192,0.75)`,
+  with a trailing "· +{N-1} more" in `rgba(254,231,192,0.5)` when more than one item is
+  pending. Right side: a small 14×14 chevron-right stroke icon, `rgba(254,231,192,0.6)`.
+  Tapping the card navigates directly to the received list (not a shelf/tile
+  intermediate step).
+- Deliberate sizing decision: the card is sized SMALL and deferential — it must not
+  outweigh the chip row above it. This is a one-line summary of the most recent/first
+  pending item plus a count, not a multi-item shelf.
+- Deliberate distinctness decision: the received card and the future suggestions
+  carousel are NOT the same visual language on purpose. A received recipe is a
+  person-to-person event (someone sent you this) and stays dark-green/cream/card-shaped;
+  the coming carousel (app-generated suggestions) must look different from this card
+  when it's built — do not reuse this card's exact treatment for it.
+- The Recipes tab (`Categories` screen) also gained a small received-recipe entry
+  point this session — see "Recipes — Categories" below for its pill styling. Home's
+  card and the Categories pill are two independent, separately-fetched summaries of
+  the same underlying pending list (see FEATURE_SPECS.md for why the fetches were
+  deliberately not shared/lifted).
 
 ## Home — Received Recipe View
 - Hand-matches the Recipe Card's layout (hero photo, title, Fraunces italic description, Ingredients/Steps tabs, step-row expansion) so a received recipe looks indistinguishable from one already saved — built as its own sibling view, not by reusing `RecipeCard`.

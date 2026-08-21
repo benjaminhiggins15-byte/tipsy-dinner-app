@@ -55,6 +55,7 @@ pointer named — do not duplicate it here.
 - **The receive/save path is three steps in fixed order** — `saveReceivedRecipe` → `finish_received_recipe_save` → `copy-received-recipe-photo` (soft-fail). Callers must invalidate the cache via `clearRecipeCache` directly, not `finishSaveRecipe`'s inline clear. Full detail: Account-to-Account Sharing — Receiving in FEATURE_SPECS.md.
 - **`connections` is first-class, canonical, and deduped** — one row per pair regardless of which side saved or how many times; this is the seed a future social feed reads from. Full detail: Account-to-Account Sharing — Receiving in FEATURE_SPECS.md.
 - **The received recipe view must visually MATCH `RecipeCard`, but as a sibling, never fused into it** — built by hand-matching presentation, not by sharing the component (`RecipeCard` is itself a known-trouble file). Full detail: Account-to-Account Sharing — Receiving in FEATURE_SPECS.md.
+- **The received-recipe shelf relocated off Home to a Recipes-tab pill; Home keeps only a small dark-green summary card, deliberately distinct from the future suggestions carousel.** Full detail: Account-to-Account Sharing — Receiving in FEATURE_SPECS.md; visual spec in DESIGN_SPEC.md's Home and Recipes — Categories sections.
 
 ---
 
