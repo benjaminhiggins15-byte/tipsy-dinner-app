@@ -301,8 +301,8 @@ function SuggestionsCarousel({
             <div
               key={i}
               style={{
-                minWidth: "80%",
-                height: 96,
+                minWidth: "44%",
+                height: 150,
                 borderRadius: 16,
                 background: "rgba(35,60,0,0.03)",
                 border: "1px solid rgba(35,60,0,0.08)",
@@ -311,12 +311,11 @@ function SuggestionsCarousel({
                 display: "flex",
                 flexDirection: "column",
                 gap: 8,
-                justifyContent: "center",
+                justifyContent: "flex-end",
               }}
             >
-              <div style={{ width: "55%", height: 10, borderRadius: 4, background: "rgba(35,60,0,0.08)" }} />
-              <div style={{ width: "35%", height: 8, borderRadius: 4, background: "rgba(35,60,0,0.06)" }} />
-              <div style={{ width: "85%", height: 8, borderRadius: 4, background: "rgba(35,60,0,0.06)" }} />
+              <div style={{ width: "70%", height: 20, borderRadius: 4, background: "rgba(35,60,0,0.08)" }} />
+              <div style={{ width: "40%", height: 8, borderRadius: 4, background: "rgba(35,60,0,0.06)" }} />
             </div>
           ))}
         </div>
@@ -400,24 +399,26 @@ function SuggestionsCarousel({
           <div
             key={pick.id}
             style={{
-              minWidth: "80%",
+              minWidth: "44%",
+              height: 150,
               scrollSnapAlign: "start",
               borderRadius: 16,
-              background: "rgba(35,60,0,0.04)",
+              background: "rgba(35,60,0,0.06)",
               border: "1px solid rgba(35,60,0,0.1)",
               flexShrink: 0,
               padding: 16,
               display: "flex",
               flexDirection: "column",
-              gap: 6,
+              justifyContent: "flex-end",
+              gap: 4,
             }}
           >
             <div
               style={{
                 fontFamily: "Lazydog, sans-serif",
                 textTransform: "uppercase",
-                fontSize: 15,
-                lineHeight: 1.2,
+                fontSize: 24,
+                lineHeight: 1.08,
                 color: C.text,
               }}
             >
@@ -434,17 +435,6 @@ function SuggestionsCarousel({
               }}
             >
               {pick.cuisine} · {pick.effort}
-            </div>
-            <div
-              style={{
-                fontFamily: "Georgia, serif",
-                fontStyle: "italic",
-                fontSize: 13,
-                lineHeight: 1.35,
-                color: C.textLight,
-              }}
-            >
-              {pick.description}
             </div>
           </div>
         ))}
