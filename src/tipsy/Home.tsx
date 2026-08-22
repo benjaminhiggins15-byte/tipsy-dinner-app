@@ -293,7 +293,7 @@ function SuggestionsCarousel({
             display: "flex",
             flexDirection: "row",
             overflowX: "hidden",
-            padding: "0 0 4px",
+            padding: `0 ${EDGE}px 4px`,
             gap: 12,
           }}
         >
@@ -312,8 +312,6 @@ function SuggestionsCarousel({
                 flexDirection: "column",
                 gap: 8,
                 justifyContent: "flex-end",
-                marginLeft: i === 0 ? EDGE : 0,
-                marginRight: i === 2 ? EDGE : 0,
               }}
             >
               <div style={{ width: "70%", height: 20, borderRadius: 4, background: "rgba(35,60,0,0.08)" }} />
@@ -392,12 +390,14 @@ function SuggestionsCarousel({
           flexDirection: "row",
           overflowX: "auto",
           scrollSnapType: "x mandatory",
-          padding: "0 0 4px",
+          scrollPaddingLeft: EDGE,
+          scrollPaddingRight: EDGE,
+          padding: `0 ${EDGE}px 4px`,
           gap: 12,
           WebkitOverflowScrolling: "touch",
         }}
       >
-        {picks.map((pick, index) => (
+        {picks.map((pick) => (
           <div
             key={pick.id}
             style={{
@@ -413,8 +413,6 @@ function SuggestionsCarousel({
               flexDirection: "column",
               justifyContent: "flex-end",
               gap: 4,
-              marginLeft: index === 0 ? EDGE : 0,
-              marginRight: index === picks.length - 1 ? EDGE : 0,
             }}
           >
             <div
