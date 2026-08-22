@@ -359,6 +359,23 @@ Deno.serve(async (req) => {
       return await fallbackToPriorSliceOrError(`Stage 2 selection failed: ${parsed.error}`)
     }
 
+    // Denormalized per-pick display fields for the future suggestions
+    // carousel — additive only, does not change recipe_ids or any selection
+    // logic above. candidates is already in scope from Stage 1, so this is a
+    // lookup by id, not a new query.
+    const candidateById = new Map(candidates.map((c) => [c.id, c]))
+    const pickDetails = parsed.picks.map((p) => {
+      const candidate = candidateById.get(p.id)
+      return {
+        id: p.id,
+        title: p.title,
+        cuisine: candidate?.cuisine ?? null,
+        effort: candidate?.effort ?? null,
+        description: candidate?.description ?? null,
+        reason: p.reason,
+      }
+    })
+
     // WRITE — upsert on the (user_id, slice_date) unique constraint.
     const { data: upserted, error: upsertError } = await adminClient
       .from('user_recipe_slices')
@@ -369,6 +386,7 @@ Deno.serve(async (req) => {
           recipe_ids: parsed.picks.map((p) => p.id),
           selection_reason: parsed.sliceReason,
           status: 'ready',
+          pick_details: pickDetails,
         },
         { onConflict: 'user_id,slice_date' }
       )
