@@ -10,6 +10,7 @@ import {
   type Recipe,
   type RecipeSendSnapshot,
   type MenuSection,
+  type ComputeSliceResult,
 } from "./data";
 import { pickChips } from "./chips";
 import watermarkSquare from "../Logos/watermark_square.png";
@@ -94,6 +95,11 @@ export default function Home({
   // shared/lifted state; each fetch is separate on purpose. getPendingReceivedRecipes
   // already orders by created_at descending, so items[0] is the most recent.
   const [pendingSummary, setPendingSummary] = useState<{ title: string; senderName: string; count: number } | null>(null);
+  // Layer 4 carousel state. sliceResult stays null until computeMySlice
+  // resolves; sliceLoading gates the carousel region only — it never blocks
+  // the greeting/chips/received-card above/below it from rendering immediately.
+  const [sliceResult, setSliceResult] = useState<ComputeSliceResult | null>(null);
+  const [sliceLoading, setSliceLoading] = useState(true);
   // Pick 3 chips once per mount (same pool/logic Build's empty state uses)
   const displayChips = useMemo(() => pickChips(new Date()), []);
 
@@ -108,22 +114,15 @@ export default function Home({
           : null
       );
     })();
-    // Layer 3 trigger only — no shelf UI yet (Layer 4). Fire-and-log so we
-    // can confirm the compute-slice runtime fired correctly on Home mount.
+    // Layer 3/4 — mint or fetch today's slice, then hand pick_details to the
+    // carousel below. computeMySlice() itself returns null with no session
+    // (theoretical here, Home is post-auth) — sliceResult stays null in that
+    // case and the carousel renders nothing.
     (async () => {
       const result = await computeMySlice();
       if (ignore) return;
-      if (result?.slice) {
-        console.log("[compute-slice]", {
-          computed: result.computed,
-          fallback: result.fallback ?? false,
-          relaxed: result.relaxed ?? false,
-          recipe_ids: result.slice.recipe_ids,
-          picks: result.picks_with_reasons?.map((p) => p.title),
-        });
-      } else {
-        console.log("[compute-slice] no slice available", result);
-      }
+      setSliceResult(result);
+      setSliceLoading(false);
     })();
     return () => {
       ignore = true;
@@ -190,6 +189,8 @@ export default function Home({
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: 16 }}>
+        <SuggestionsCarousel loading={sliceLoading} result={sliceResult} />
+
         {pendingSummary && (
           // Same dark-green/cream identity as the received tiles on the
           // Recipes list (ReceivedTileFullWidth) — deliberately compact and
@@ -248,6 +249,205 @@ export default function Home({
             </svg>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Layer 4 — reads pick_details off the CALLER'S OWN slice row only
+// (already RLS-scoped, already violation-tested). Never reads
+// suggested_recipe_pool directly; that table stays deny-all to every client.
+// Non-interactive by design in 3a: no onClick, no cursor:pointer, no chevron
+// — visually distinct on purpose from the tappable received card below it.
+// Tap-to-detail is 3b, gated on a separate scoped read path that doesn't
+// exist yet.
+function SuggestionsCarousel({
+  loading,
+  result,
+}: {
+  loading: boolean;
+  result: ComputeSliceResult | null;
+}) {
+  const sectionLabel = (
+    <div
+      style={{
+        margin: `14px ${EDGE}px 8px`,
+        fontFamily: fontSans,
+        fontWeight: 500,
+        textTransform: "uppercase",
+        fontSize: 13,
+        letterSpacing: "0.1em",
+        color: C.text,
+      }}
+    >
+      Today's suggestions
+    </div>
+  );
+
+  if (loading) {
+    return (
+      <div>
+        {sectionLabel}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "row",
+            overflowX: "hidden",
+            padding: `0 ${EDGE}px 4px`,
+            gap: 12,
+          }}
+        >
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              style={{
+                minWidth: "80%",
+                height: 96,
+                borderRadius: 16,
+                background: "rgba(35,60,0,0.03)",
+                border: "1px solid rgba(35,60,0,0.08)",
+                flexShrink: 0,
+                padding: 16,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                justifyContent: "center",
+              }}
+            >
+              <div style={{ width: "55%", height: 10, borderRadius: 4, background: "rgba(35,60,0,0.08)" }} />
+              <div style={{ width: "35%", height: 8, borderRadius: 4, background: "rgba(35,60,0,0.06)" }} />
+              <div style={{ width: "85%", height: 8, borderRadius: 4, background: "rgba(35,60,0,0.06)" }} />
+            </div>
+          ))}
+        </div>
+        <div
+          style={{
+            margin: `4px ${EDGE}px 0`,
+            fontFamily: "Georgia, serif",
+            fontStyle: "italic",
+            fontSize: 13,
+            color: C.textLight,
+          }}
+        >
+          finding today's recipes…
+        </div>
+      </div>
+    );
+  }
+
+  // No session, or a client-side transport/unexpected failure inside
+  // computeMySlice — both collapse to null at this boundary (data.ts's
+  // catch-all also returns null), so they're indistinguishable here and
+  // deliberately both render nothing.
+  if (!result) return null;
+
+  const picks = result.slice?.pick_details;
+
+  // Edge function ran and returned JSON, but no slice at all (e.g. no prior
+  // history and today's compute failed with nothing to fall back to).
+  if (!result.slice) {
+    return (
+      <div
+        style={{
+          margin: `14px ${EDGE}px 0`,
+          fontFamily: "Georgia, serif",
+          fontStyle: "italic",
+          fontSize: 13,
+          color: C.textLight,
+        }}
+      >
+        still learning your taste — check back soon.
+      </div>
+    );
+  }
+
+  // A slice row exists but predates the pick_details migration and hasn't
+  // been recomputed since (no backfill, by design — see FEATURE_SPECS.md).
+  if (!picks || picks.length === 0) {
+    return (
+      <div>
+        {sectionLabel}
+        <div
+          style={{
+            margin: `0 ${EDGE}px`,
+            fontFamily: "Georgia, serif",
+            fontStyle: "italic",
+            fontSize: 13,
+            color: C.textLight,
+          }}
+        >
+          your suggestions are refreshing — check back soon.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {sectionLabel}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "row",
+          overflowX: "auto",
+          scrollSnapType: "x mandatory",
+          padding: `0 ${EDGE}px 4px`,
+          gap: 12,
+          WebkitOverflowScrolling: "touch",
+        }}
+      >
+        {picks.map((pick) => (
+          <div
+            key={pick.id}
+            style={{
+              minWidth: "80%",
+              scrollSnapAlign: "start",
+              borderRadius: 16,
+              background: "rgba(35,60,0,0.04)",
+              border: "1px solid rgba(35,60,0,0.1)",
+              flexShrink: 0,
+              padding: 16,
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+            }}
+          >
+            <div
+              style={{
+                fontFamily: "Lazydog, sans-serif",
+                textTransform: "uppercase",
+                fontSize: 15,
+                lineHeight: 1.2,
+                color: C.text,
+              }}
+            >
+              {pick.title}
+            </div>
+            <div
+              style={{
+                fontFamily: fontSans,
+                fontWeight: 500,
+                textTransform: "uppercase",
+                fontSize: 10,
+                letterSpacing: "0.08em",
+                color: "rgba(35,60,0,0.45)",
+              }}
+            >
+              {pick.cuisine} · {pick.effort}
+            </div>
+            <div
+              style={{
+                fontFamily: "Georgia, serif",
+                fontStyle: "italic",
+                fontSize: 13,
+                lineHeight: 1.35,
+                color: C.textLight,
+              }}
+            >
+              {pick.description}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

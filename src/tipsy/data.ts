@@ -217,6 +217,15 @@ function localDateString(): string {
   return `${year}-${month}-${day}`;
 }
 
+export type SlicePickDetail = {
+  id: string;
+  title: string;
+  cuisine: string;
+  effort: string;
+  description: string;
+  reason: string;
+};
+
 export type ComputeSliceResult = {
   slice?: {
     id: string;
@@ -226,6 +235,7 @@ export type ComputeSliceResult = {
     selection_reason: string | null;
     status: string;
     created_at: string;
+    pick_details?: SlicePickDetail[] | null;
   } | null;
   computed: boolean;
   fallback?: boolean;
