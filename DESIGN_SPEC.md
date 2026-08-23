@@ -167,6 +167,44 @@ the stack.
   the same underlying pending list (see FEATURE_SPECS.md for why the fetches were
   deliberately not shared/lifted).
 
+**Superseded 2026-08-23** — the "carousel slot reserved … not yet built" placeholder
+above is filled in; the suggestions carousel (Thread 3) shipped and merged to `main`
+on `home-screen-layer-4`. **Final Home composition, top to bottom: greeting header →
+prompt chips (unchanged) → suggestions carousel (below) → received card (unchanged,
+as above).**
+- **Suggestions carousel.** A horizontally-scrolling row of up to 3 tiles (display is
+  capped at 3 even though `compute-slice` mints 3-4 picks per slice), matched to the
+  app's existing category-tile presence rather than the received shelf's photo-tile
+  look: flat `rgba(35,60,0,0.06)` panel, `rgba(35,60,0,0.1)` border, radius 16px,
+  fixed ~42%-width/120px-tall tiles, `scroll-snap-type: x mandatory` with matching
+  scroll-padding so the first tile aligns to the same 20px edge as everything else on
+  Home. Title-forward, no photo/description/icon: recipe title in Lazydog uppercase,
+  24px, 2-line clamp, bottom-anchored in the tile, with a small uppercase meta line
+  below it ("{cuisine} · {effort}", Inter 500 10px, `rgba(35,60,0,0.45)`). Section
+  label above the row: "Today's suggestions" (Inter 500 uppercase 13px).
+  - **Five render states:** a 3-tile skeleton shimmer with "finding today's
+    recipes…" (Georgia italic, muted) while the slice is computing; the populated
+    carousel (above) once picks resolve; "your suggestions are refreshing — check
+    back soon" when a slice row exists but predates the `pick_details` backfill (no
+    backfill, by design); "still learning your taste — check back soon" when
+    compute ran but produced no slice at all; and nothing rendered on no-session or
+    an unexpected client error (both collapse to the same silent null case).
+  - **Tapping a tile** fetches the full recipe via the `get_suggested_recipe` RPC
+    (loading + a gentle inline error on that tile only, no crash) and opens a detail
+    view that mirrors the received-recipe view's presentation — full writeup in
+    "Suggested Recipes — Layer 4" in FEATURE_SPECS.md; this doc covers display only.
+- **Deliberate three-tier visual distinction, now fully in place across Home:** text
+  prompt chips (no card chrome) → light, photoless recipe tiles (the suggestions
+  carousel, above — the app's idea) → dark-green/cream received card (a
+  person-to-person event). The carousel deliberately does NOT reuse the received
+  card's dark-green treatment, and deliberately does NOT use a photo-tile look
+  either — reinforcing that a suggestion reads as the app's idea, not dressed up to
+  look like a person sent it.
+- The "finding today's recipes…" loading line is the carousel's only by-feel
+  personalization signal today — there's no other visible cue that the slice is
+  user-specific rather than generic; it's meant to read as a quiet "we're thinking
+  about you" moment rather than a plain spinner.
+
 ## Home — Received Recipe View
 - Hand-matches the Recipe Card's layout (hero photo, title, Fraunces italic description, Ingredients/Steps tabs, step-row expansion) so a received recipe looks indistinguishable from one already saved — built as its own sibling view, not by reusing `RecipeCard`.
 - Read-only: no History tab, no edit/delete/camera controls. Description area shows "inspired by {senderName}" in place of any owner-only meta.

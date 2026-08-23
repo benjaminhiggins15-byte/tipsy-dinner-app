@@ -1263,12 +1263,13 @@ a deliberate social-visibility design pass, not a fix for the send surface itsel
 
 This is the receive-side UI that Build 4 (Session a)'s save engine was built for —
 a new `Home` tab (`src/tipsy/Home.tsx`) that turns the plumbing above into an actual
-screen. Shipped across several sessions on branch `account-sharing-receive-plumbing`,
-which stays **intentionally unmerged** until the Home screen is shelf-complete (see
-the "Known issues / cleanup items" note near the end of this section — do not read
-"unmerged" as "unfinished" or "broken"). This section will fold into a proper
-account-sharing-wide split of FEATURE_SPECS.md once that phase completes; it is not
-split out on its own yet.
+screen. Shipped across several sessions on branch `account-sharing-receive-plumbing`, then
+continued to completion on `home-screen-layer-4`. **RESOLVED 2026-08-23 — merged to
+`main` (fast-forward `ac244db`→`8e6ce9c`) and live in production**, alongside the
+suggestions carousel (Layers 1-3, Layer 4/Threads 3a-3b — see below) and the Thread
+1/2 chip and receiving-relocation work. This section will fold into a proper
+account-sharing-wide split of FEATURE_SPECS.md eventually; it is not split out on
+its own yet.
 
 **Home tab and shell.** `Home` is now `TAB_ORDER`'s 1st entry and the app's launch
 tab (`activeTab` initializes to `"home"`) — moved from its original last-entry
@@ -1465,16 +1466,15 @@ teardown needed since no throwaway data was created this pass):**
 
 **Known issues / cleanup items (moved here from CLAUDE.md's Standing Cleanup / Watch
 Items):**
-- **Branch `account-sharing-receive-plumbing` has grown beyond its original scope —
-  it now also carries the unrelated suggested-recipes Layers 1–3 (pool generation,
-  taste profile, compute-slice assignment runtime; see the three sections above).**
-  Receiving (Home tab, shelf, received recipe view, note overlay, Save/Dismiss) is
-  functionally complete and data-verified; Layers 1–3 are likewise built and
-  verified end-to-end against the live DB. The branch is on track to merge to
-  `main` — it is no longer being deliberately held open, just not yet promoted. A
-  future session finding this branch unmerged should check this section and git
-  history for what's actually landed before assuming anything was left broken or
-  forgotten.
+- **RESOLVED 2026-08-23 — merged to `main` and live.** Work that started on
+  `account-sharing-receive-plumbing` (Receiving: Home tab, shelf, received recipe
+  view, note overlay, Save/Dismiss) and grew to also carry the unrelated
+  suggested-recipes Layers 1–3 continued on `home-screen-layer-4` (chips, receiving
+  relocation, the suggestions carousel — Layer 4/Threads 3a-3b, see below) and
+  merged to `main` as a clean fast-forward, triggering a production deploy. All of
+  it — Receiving, Layers 1–3, and Layer 4 — is functionally complete,
+  data/violation-verified, and live for real users. Nothing in this "Known issues"
+  list below should be read as still-pending merge; it's post-merge cleanup only.
 - `finishSaveRecipe`'s inline cache-clear never drops `'__all__'` (pre-existing gap in
   the normal save flow, not received-specific) — the received-recipe save path
   sidesteps it by calling `clearRecipeCache` directly instead.
@@ -1684,22 +1684,19 @@ into the app and not scheduled to run again automatically.
 Backend-only, no UI. Consumes the pool built in Layer 1 and the per-user
 interpretation built in Layer 2 to actually assign each user a personalized set of
 recipes: a per-user, per-day "slice" of 3-4 dinner recipes, computed on demand and
-cached for the rest of that user's local day. Nothing in the app surfaces this slice
-to a user yet — that shelf UI is Layer 4, a separate future session.
+cached for the rest of that user's local day. The slice is surfaced to the user via
+the Home suggestions carousel — see "Suggested Recipes — Layer 4 (suggestions
+carousel)" below.
 
-**Layer 4 (the suggestions carousel) is Thread 3 — NOT started as of 2026-08-20,
-blocked on a client-safe read path.** `user_recipe_slices` itself is owner-only
-readable (see its RLS shape below), but its `recipe_ids` are foreign values into
-`suggested_recipe_pool`, which is RLS deny-all/service-role-only today (see "Suggested
-Recipes Pool — Layer 1" above) — no client, anon or authenticated, can resolve those
-ids into actual recipe rows yet. Before any carousel UI can render real content,
-Thread 3 needs one of: a `SECURITY DEFINER` RPC scoped to a caller's own slice ids
-(same pattern as `get_sender_names`/`search_profiles` elsewhere in this doc), or
-denormalizing the picked recipes' display fields directly onto `user_recipe_slices`
-at compute time. Whichever path is chosen, it should also settle the open design
-question flagged in DESIGN_SPEC.md: the carousel must read as visually DISTINCT from
-the received-recipe card/pill (Thread 2) — a suggestion is the app's idea, a
-received recipe is a person's — not a shared component or look.
+**RESOLVED 2026-08-23 — Layer 4 (the suggestions carousel) is DONE and live**,
+built across two threads (3a: display-only carousel; 3b: tap-through + save) on
+`home-screen-layer-4`, merged to `main`. It shipped via a client-safe read path
+that didn't exist when this section was first written — see "Suggested Recipes —
+Layer 4 (suggestions carousel)" below for the full writeup, including the
+denormalized `pick_details` column and the `get_suggested_recipe` RPC that
+together unblocked it, and the visual-distinctness resolution (confirmed against
+DESIGN_SPEC.md's Home section: the carousel deliberately does not share the
+received card's dark-green treatment).
 
 **Two-stage picker.** Stage 1 is a deterministic Postgres filter, no AI involved:
 `meal_type = 'dinner'`, a soft season match (`season IS NULL OR season = '<current
@@ -1803,3 +1800,107 @@ immediate second call against the same account and date read the cached row with
 `computed: false` and no second AI call; and a read-only simulation of a
 hypothetical hard shellfish allergy against that day's real candidate pool
 confirmed zero shellfish rows survive the gate.
+
+---
+
+## Suggested Recipes — Layer 4 (suggestions carousel)
+
+**DONE, merged to `main`, live in production as of 2026-08-23.** Surfaces the Layer
+3 slice to the user on Home. Built across two threads on branch
+`home-screen-layer-4`: Thread 3a (display-only carousel) and Thread 3b (tap-through
+to a full recipe + save). Full visual spec for both lives in DESIGN_SPEC.md's Home
+section ("Superseded 2026-08-23" block); this section covers the data/read-path
+side.
+
+**`pick_details` denormalization (additive, live).** Rather than the `SECURITY
+DEFINER`-RPC-only approach considered earlier, Thread 3a shipped a nullable
+`pick_details jsonb` column directly on `user_recipe_slices`
+(`20260822000001_add_pick_details_to_user_recipe_slices.sql`), populated by
+`compute-slice` at slice-compute time with the display fields the carousel needs
+(`id, title, cuisine, effort, description, reason` per pick) — so the carousel can
+render straight off a row the client already has owner-only RLS access to, without
+ever reading `suggested_recipe_pool` directly. Additive and non-breaking: existing
+slice rows predating this column stay `null` with no backfill; the carousel's own
+"your suggestions are refreshing" state (see DESIGN_SPEC.md) is what a pre-existing
+row shows until its next natural recompute fills `pick_details` in.
+
+**Thread 3a — carousel display (non-interactive at first, later superseded).**
+`SuggestionsCarousel` (`Home.tsx`) reads `result.slice.pick_details` off
+`computeMySlice()`'s existing return value — no new fetch. Display is capped at 3
+tiles even though `compute-slice` mints 3-4 picks per slice (a deliberate display
+choice, not a data limitation). Five render states, all collapsing gracefully with
+no crash: (1) a 3-tile skeleton shimmer with "finding today's recipes…" while the
+slice is loading; (2) the populated carousel once picks resolve; (3) "your
+suggestions are refreshing — check back soon" when a slice exists but predates the
+`pick_details` backfill (`picks` empty/null); (4) "still learning your taste —
+check back soon" when `compute-slice` ran but produced no slice at all; (5) nothing
+rendered on no-session or an unexpected client-side error (both indistinguishable
+at this boundary, both collapse to a silent `null`). Visually matched to the app's
+existing category-tile presence (flat, light, bordered) rather than the received
+shelf's dark-green photo-tile look — see DESIGN_SPEC.md for the three-tier
+distinction this was built toward. **Originally shipped deliberately
+non-interactive** (no `onClick`, no cursor, no chevron) pending a client-safe read
+path into individual pool recipes — **superseded by Thread 3b below**, the one
+sanctioned reversal of that non-interactivity.
+
+**Read path — `get_suggested_recipe` RPC.** The client-safe read path Thread 3a
+was blocked on. `suggested_recipe_pool` stays RLS deny-all/service-role-only, exactly
+as in Layer 1 — this `SECURITY DEFINER` function
+(`20260823000001_get_suggested_recipe.sql`) is the ONLY way any client resolves a
+pool id into a full recipe row, and it does so scoped, not blanket: given a
+`p_recipe_id`, it derives the caller from `auth.uid()` only (never a request
+parameter), then requires that id to appear in `recipe_ids` on ANY slice row ever
+assigned to that caller (jsonb containment against `user_recipe_slices.recipe_ids`)
+— deliberately not date-scoped to "today's" slice only, so a suggestion tapped from
+an earlier day still resolves. No membership match → returns nothing, no error
+leaked. Mirrors `get_sender_names`'s auth pattern elsewhere in this doc. **Grants
+explicitly locked down**, closing the same default-privilege gap flagged for the
+three pre-existing `SECURITY DEFINER` functions below: Postgres grants EXECUTE to
+PUBLIC by default on function creation, and this project's `pg_default_acl`
+separately grants EXECUTE to `anon` directly (independent of the PUBLIC
+pseudo-role) — so this function explicitly revokes from BOTH `public` and `anon`
+and grants only to `authenticated`. Violation-tested 5/5 passing, including a hard
+`42501 permission denied` at the grant layer for an anonymous call (not just an
+internal guard rejection).
+
+**Thread 3b — tap-through + save (the interactivity reversal).** Tapping a
+carousel tile calls `getSuggestedRecipeDetail()` (`data.ts`, wraps the RPC above,
+same fail-quiet/null-on-error discipline as `searchProfiles`/`getMyConnections`)
+with a per-tile loading state; on success it pushes a new `suggestionDetail`
+screen (added to `App.tsx`'s `Screen` union alongside `newcategoryforsuggestion`
+for its create-category return path) rendering `SuggestionDetailView`
+(`Home.tsx`). On failure, a gentle inline "couldn't load — try again" message
+renders on that tile only — no crash, other tiles unaffected.
+- **`SuggestionDetailView` mirrors `ReceivedRecipeView`'s structure BY HAND — same
+  load-bearing pattern as `ReceivedRecipeView` mirroring `RecipeCard`.** Same
+  sticky ingredients/steps tabs, same `normalizeStep()`-routed step rows, same
+  fixed `bottom: 64` action bar. Deliberately drops what doesn't apply to a
+  suggestion: no sender byline ("inspired by X"), no note overlay, no Dismiss
+  button (a suggestion isn't "dismissed" the way a received recipe is — it simply
+  stays in the slice). Adds optional dietary badges (vegetarian/vegan/
+  gluten-free/dairy-free/contains-pork/shellfish/nuts) rendered as small pills when
+  true, sourced straight from the RPC's boolean columns.
+- **Save is CONNECTION-FREE, by design — the one deliberate divergence from the
+  receiving save path.** Tapping Save opens the same `SaveRecipeFlow` category-picker
+  tray used everywhere else in the app; picking a category calls plain
+  `saveRecipe(recipeShape, 'ai', categoryId)` — never `saveReceivedRecipe` or
+  `finish_received_recipe_save`. No `inspired_by`, no `connections` row, no
+  notification: a suggestion has no second party to attribute the save to, so none
+  of the receiving flow's connection-forming plumbing applies. The pool's
+  `ingredients`/`steps` shapes are already `{name, qty}`/`normalizeStep`-compatible
+  — no reshaping needed before handing them to `saveRecipe`, unlike the received
+  path's `quantity`→`qty` rename.
+- **Cache-clear ordering matches `ReceivedRecipeView` exactly**:
+  `clearRecipeCache(categoryKey)` is called BEFORE `finishSaveRecipe(...)` — the
+  load-bearing ordering (see CLAUDE.md's `clearRecipeCache` contract) that ensures
+  the `'__all__'` view-all cache entry is dropped too, not just the single
+  category key that `finishSaveRecipe`'s own inline clear would drop alone.
+- After save, `finishSaveRecipe` (unchanged, shared with every other save path)
+  resets the Build and Home tab stacks to root and navigates to the Recipes tab at
+  the newly-saved recipe — the saved suggestion is now an ordinary saved recipe in
+  the user's library, indistinguishable from one built via Build or received from
+  a friend.
+- **Verified:** TypeScript error count held at the pre-existing baseline (40, no
+  regressions); diffed against the chip (Thread 1) and receiving (Thread 2) code
+  paths to confirm zero incidental touches; traced tap → RPC fetch → detail view →
+  save → library end-to-end.
