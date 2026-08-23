@@ -301,7 +301,9 @@ function SuggestionsCarousel({
             <div
               key={i}
               style={{
-                minWidth: "42%",
+                width: "42%",
+                maxWidth: "42%",
+                minWidth: 0,
                 height: 120,
                 borderRadius: 16,
                 background: "rgba(35,60,0,0.03)",
@@ -397,11 +399,13 @@ function SuggestionsCarousel({
           WebkitOverflowScrolling: "touch",
         }}
       >
-        {picks.map((pick) => (
+        {picks.slice(0, 3).map((pick) => (
           <div
             key={pick.id}
             style={{
-              minWidth: "42%",
+              width: "42%",
+              maxWidth: "42%",
+              minWidth: 0,
               height: 120,
               scrollSnapAlign: "start",
               borderRadius: 16,
@@ -413,6 +417,7 @@ function SuggestionsCarousel({
               flexDirection: "column",
               justifyContent: "flex-end",
               gap: 4,
+              overflow: "hidden",
             }}
           >
             <div
@@ -422,6 +427,12 @@ function SuggestionsCarousel({
                 fontSize: 24,
                 lineHeight: 1.08,
                 color: C.text,
+                display: "-webkit-box",
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+                wordBreak: "normal",
+                overflowWrap: "break-word",
               }}
             >
               {pick.title}
