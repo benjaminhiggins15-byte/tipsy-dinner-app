@@ -280,6 +280,43 @@ export async function computeMySlice(): Promise<ComputeSliceResult | null> {
   }
 }
 
+// Pool-recipe shape returned by get_suggested_recipe (security-definer,
+// membership-gated against the caller's own user_recipe_slices — see
+// supabase/migrations/20260823000001_get_suggested_recipe.sql). Ingredients
+// are already {name, qty} and steps are already normalizeStep-compatible, so
+// no reshaping is needed before treating this like a SavedRecipe for saving.
+export type SuggestedRecipeDetail = {
+  id: string;
+  title: string;
+  description: string | null;
+  cuisine: string | null;
+  effort: string | null;
+  cook_time: number | null;
+  serves: number | null;
+  ingredients: { name: string; qty: string }[];
+  steps: RecipeStep[];
+  is_vegetarian: boolean | null;
+  is_vegan: boolean | null;
+  is_gluten_free: boolean | null;
+  is_dairy_free: boolean | null;
+  contains_pork: boolean | null;
+  contains_shellfish: boolean | null;
+  contains_nuts: boolean | null;
+};
+
+// Wraps the get_suggested_recipe security-definer RPC — same
+// fail-quiet/null-on-error discipline as searchProfiles/getMyConnections.
+export async function getSuggestedRecipeDetail(recipeId: string): Promise<SuggestedRecipeDetail | null> {
+  try {
+    const { data, error } = await supabase.rpc('get_suggested_recipe', { p_recipe_id: recipeId });
+    if (error) throw error;
+    return data?.[0] ?? null;
+  } catch (error) {
+    console.error('Error loading suggested recipe:', error);
+    return null;
+  }
+}
+
 export type Recipe = {
   title: string;
   description: string;

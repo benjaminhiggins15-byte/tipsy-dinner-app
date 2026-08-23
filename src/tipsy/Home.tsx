@@ -6,11 +6,15 @@ import {
   dismissReceivedRecipe,
   addRecipeToMenuSection,
   computeMySlice,
+  getSuggestedRecipeDetail,
+  saveRecipe,
   type PendingReceivedRecipe,
   type Recipe,
   type RecipeSendSnapshot,
   type MenuSection,
   type ComputeSliceResult,
+  type SuggestedRecipeDetail,
+  type SavedRecipe,
 } from "./data";
 import { pickChips } from "./chips";
 import watermarkSquare from "../Logos/watermark_square.png";
@@ -29,6 +33,8 @@ type HomePush = (
     | { name: "receivedPending"; items: PendingReceivedRecipe[] }
     | { name: "receivedRecipe"; item: PendingReceivedRecipe }
     | { name: "newcategoryforreceived"; item: PendingReceivedRecipe }
+    | { name: "suggestionDetail"; recipe: SuggestedRecipeDetail; newCategory?: { key: string; label: string } }
+    | { name: "newcategoryforsuggestion"; recipe: SuggestedRecipeDetail }
 ) => void;
 
 type ProfileType = {
@@ -82,10 +88,12 @@ function PlaceholderArt() {
 
 export default function Home({
   profile,
+  push,
   seedBuildFromChip,
   goToReceivedShelf,
 }: {
   profile: ProfileType | null;
+  push: HomePush;
   seedBuildFromChip: (prompt: string) => void;
   goToReceivedShelf: () => void;
 }) {
@@ -189,7 +197,7 @@ export default function Home({
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: 16 }}>
-        <SuggestionsCarousel loading={sliceLoading} result={sliceResult} />
+        <SuggestionsCarousel loading={sliceLoading} result={sliceResult} push={push} />
 
         {pendingSummary && (
           // Same dark-green/cream identity as the received tiles on the
@@ -264,10 +272,29 @@ export default function Home({
 function SuggestionsCarousel({
   loading,
   result,
+  push,
 }: {
   loading: boolean;
   result: ComputeSliceResult | null;
+  push: HomePush;
 }) {
+  // Per-tile tap state, keyed by pick id. "loading" while the RPC is in
+  // flight; "error" renders a gentle inline message on that tile only — a
+  // failed fetch never blocks or affects the other tiles.
+  const [tapState, setTapState] = useState<Record<string, "loading" | "error" | undefined>>({});
+
+  const handleTapPick = async (pickId: string) => {
+    if (tapState[pickId] === "loading") return;
+    setTapState((prev) => ({ ...prev, [pickId]: "loading" }));
+    const recipe = await getSuggestedRecipeDetail(pickId);
+    if (!recipe) {
+      setTapState((prev) => ({ ...prev, [pickId]: "error" }));
+      return;
+    }
+    setTapState((prev) => ({ ...prev, [pickId]: undefined }));
+    push({ name: "suggestionDetail", recipe });
+  };
+
   const sectionLabel = (
     <div
       style={{
@@ -399,58 +426,77 @@ function SuggestionsCarousel({
           WebkitOverflowScrolling: "touch",
         }}
       >
-        {picks.slice(0, 3).map((pick) => (
-          <div
-            key={pick.id}
-            style={{
-              width: "42%",
-              maxWidth: "42%",
-              minWidth: 0,
-              height: 120,
-              scrollSnapAlign: "start",
-              borderRadius: 16,
-              background: "rgba(35,60,0,0.06)",
-              border: "1px solid rgba(35,60,0,0.1)",
-              flexShrink: 0,
-              padding: 16,
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "flex-end",
-              gap: 4,
-              overflow: "hidden",
-            }}
-          >
+        {picks.slice(0, 3).map((pick) => {
+          const state = tapState[pick.id];
+          return (
             <div
+              key={pick.id}
+              onClick={() => handleTapPick(pick.id)}
               style={{
-                fontFamily: "Lazydog, sans-serif",
-                textTransform: "uppercase",
-                fontSize: 24,
-                lineHeight: 1.08,
-                color: C.text,
-                display: "-webkit-box",
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: "vertical",
+                width: "42%",
+                maxWidth: "42%",
+                minWidth: 0,
+                height: 120,
+                scrollSnapAlign: "start",
+                borderRadius: 16,
+                background: "rgba(35,60,0,0.06)",
+                border: "1px solid rgba(35,60,0,0.1)",
+                flexShrink: 0,
+                padding: 16,
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "flex-end",
+                gap: 4,
                 overflow: "hidden",
-                wordBreak: "normal",
-                overflowWrap: "break-word",
+                cursor: "pointer",
+                opacity: state === "loading" ? 0.6 : 1,
               }}
             >
-              {pick.title}
+              <div
+                style={{
+                  fontFamily: "Lazydog, sans-serif",
+                  textTransform: "uppercase",
+                  fontSize: 24,
+                  lineHeight: 1.08,
+                  color: C.text,
+                  display: "-webkit-box",
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden",
+                  wordBreak: "normal",
+                  overflowWrap: "break-word",
+                }}
+              >
+                {pick.title}
+              </div>
+              {state === "error" ? (
+                <div
+                  style={{
+                    fontFamily: "Georgia, serif",
+                    fontStyle: "italic",
+                    fontSize: 11,
+                    color: "rgba(184,92,92,0.9)",
+                  }}
+                >
+                  couldn't load — try again
+                </div>
+              ) : (
+                <div
+                  style={{
+                    fontFamily: fontSans,
+                    fontWeight: 500,
+                    textTransform: "uppercase",
+                    fontSize: 10,
+                    letterSpacing: "0.08em",
+                    color: "rgba(35,60,0,0.45)",
+                  }}
+                >
+                  {state === "loading" ? "loading…" : `${pick.cuisine} · ${pick.effort}`}
+                </div>
+              )}
             </div>
-            <div
-              style={{
-                fontFamily: fontSans,
-                fontWeight: 500,
-                textTransform: "uppercase",
-                fontSize: 10,
-                letterSpacing: "0.08em",
-                color: "rgba(35,60,0,0.45)",
-              }}
-            >
-              {pick.cuisine} · {pick.effort}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -1131,6 +1177,506 @@ export function ReceivedRecipeView({
             revealedReceivedNoteSendIds.add(item.sendId);
             setNoteRevealed(true);
           }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Mirrors ReceivedRecipeView's structure by hand (deliberately not shared —
+// see Load-Bearing Contracts) for a pool suggestion instead of a received
+// recipe. No sender byline, no note overlay, no Dismiss (a suggestion isn't
+// "dismissed" the way a received recipe is — it stays in the slice). Save is
+// CONNECTION-FREE: plain saveRecipe(), not saveReceivedRecipe — no
+// inspired_by, no connection, no notification.
+const DIETARY_BADGE_FIELDS: { key: keyof SuggestedRecipeDetail; label: string }[] = [
+  { key: "is_vegetarian", label: "Vegetarian" },
+  { key: "is_vegan", label: "Vegan" },
+  { key: "is_gluten_free", label: "Gluten-free" },
+  { key: "is_dairy_free", label: "Dairy-free" },
+  { key: "contains_pork", label: "Contains pork" },
+  { key: "contains_shellfish", label: "Contains shellfish" },
+  { key: "contains_nuts", label: "Contains nuts" },
+];
+
+export function SuggestionDetailView({
+  recipe,
+  newCategory,
+  back,
+  push,
+  finishSaveRecipe,
+  clearRecipeCache,
+}: {
+  recipe: SuggestedRecipeDetail;
+  newCategory?: { key: string; label: string };
+  back: () => void;
+  push: HomePush;
+  finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
+  clearRecipeCache: (categoryKey: string) => void;
+}) {
+  const [tab, setTab] = useState<ReceivedTab>("ingredients");
+  const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set());
+  const [trayOpen, setTrayOpen] = useState(!!newCategory);
+  const [saving, setSaving] = useState(false);
+
+  const toggleStep = (idx: number) => {
+    const next = new Set(expandedSteps);
+    if (next.has(idx)) {
+      next.delete(idx);
+    } else {
+      next.add(idx);
+    }
+    setExpandedSteps(next);
+  };
+
+  const badges = DIETARY_BADGE_FIELDS.filter((b) => recipe[b.key] === true);
+
+  const handlePickCategory = async (
+    catKey: string,
+    catLabel: string,
+    menuInfo?: { menuId: string; section: MenuSection }
+  ) => {
+    setTrayOpen(false);
+    setSaving(true);
+
+    const toSave: SavedRecipe = {
+      id: recipe.id,
+      title: recipe.title,
+      description: recipe.description || "",
+      category: catKey,
+      ingredients: recipe.ingredients,
+      steps: recipe.steps,
+      createdAt: new Date().toISOString(),
+    };
+
+    const savedId = await saveRecipe(toSave, "ai", catKey);
+
+    if (menuInfo) {
+      await addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, savedId);
+    }
+
+    const saved: Recipe = {
+      title: recipe.title,
+      description: recipe.description || "",
+      color: "linear-gradient(135deg, #C5DCF4 0%, #85B7EB 100%)",
+      category: catLabel.toLowerCase(),
+      ingredients: recipe.ingredients,
+      steps: recipe.steps,
+      savedId,
+      categoryKey: catKey,
+    };
+
+    clearRecipeCache(catKey);
+    finishSaveRecipe(saved, catKey, catLabel);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg, position: "relative" }}>
+      <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr auto 1fr",
+            alignItems: "center",
+            padding: "16px 24px",
+            flexShrink: 0,
+          }}
+        >
+          <button
+            onClick={back}
+            aria-label="Back"
+            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", justifySelf: "start" }}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.6)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
+          <div
+            style={{
+              fontFamily: fontSans,
+              fontSize: 13,
+              fontWeight: 500,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              color: C.text,
+              justifySelf: "center",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Suggestion
+          </div>
+          <div />
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto", paddingBottom: 96 }}>
+          <div style={{ padding: "4px 24px 20px" }}>
+            <div style={{ marginBottom: 8 }}>
+              <div
+                style={{
+                  fontFamily: "Inter, sans-serif",
+                  fontStyle: "normal",
+                  fontSize: 28,
+                  fontWeight: 700,
+                  letterSpacing: "0.04em",
+                  textTransform: "capitalize",
+                  color: "#233C00",
+                  lineHeight: 1.1,
+                }}
+              >
+                {recipe.title}
+              </div>
+            </div>
+
+            {recipe.description && (
+              <div
+                style={{
+                  fontFamily: "Fraunces, serif",
+                  fontStyle: "italic",
+                  fontWeight: 300,
+                  fontSize: 15,
+                  color: "rgba(35,60,0,0.55)",
+                  lineHeight: 1.5,
+                  marginBottom: 12,
+                }}
+              >
+                {recipe.description}
+              </div>
+            )}
+
+            <div
+              style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: 12,
+                fontWeight: 500,
+                color: "rgba(35,60,0,0.5)",
+              }}
+            >
+              {[recipe.cuisine, recipe.effort].filter(Boolean).join(" · ")}
+            </div>
+
+            {badges.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                {badges.map((b) => (
+                  <span
+                    key={b.key as string}
+                    style={{
+                      fontFamily: fontSans,
+                      fontSize: 10,
+                      fontWeight: 500,
+                      letterSpacing: "0.04em",
+                      textTransform: "uppercase",
+                      color: "rgba(35,60,0,0.6)",
+                      background: "rgba(35,60,0,0.06)",
+                      border: "1px solid rgba(35,60,0,0.1)",
+                      borderRadius: 20,
+                      padding: "4px 10px",
+                    }}
+                  >
+                    {b.label}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              padding: "20px 24px 0",
+              flexShrink: 0,
+              gap: 28,
+              borderBottom: "1px solid rgba(35,60,0,0.08)",
+              position: "sticky",
+              top: 0,
+              zIndex: 10,
+              background: "#FAF7F2",
+            }}
+          >
+            {(["ingredients", "steps"] as ReceivedTab[]).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                style={{
+                  paddingBottom: 12,
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 11,
+                  fontWeight: 500,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  color: tab === t ? "#233C00" : "rgba(35,60,0,0.3)",
+                  position: "relative",
+                  cursor: "pointer",
+                  background: "transparent",
+                  border: "none",
+                }}
+              >
+                {t === "ingredients" ? "Ingredients" : "Steps"}
+                {tab === t && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      bottom: -1,
+                      left: 0,
+                      right: 0,
+                      height: 1.5,
+                      background: "#233C00",
+                      borderRadius: 2,
+                    }}
+                  />
+                )}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ paddingTop: 4 }}>
+            <div style={{ display: tab === "ingredients" ? "block" : "none" }}>
+              {recipe.ingredients.map((ing, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    display: "flex",
+                    flexDirection: "row",
+                    alignItems: "flex-start",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    padding: "12px 24px",
+                    borderBottom: idx === recipe.ingredients.length - 1 ? "none" : "1px dotted rgba(35,60,0,0.1)",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "Inter, sans-serif",
+                      fontSize: 15,
+                      fontWeight: 400,
+                      color: "#233C00",
+                      textAlign: "left",
+                      flex: 1,
+                      maxWidth: "58%",
+                    }}
+                  >
+                    {ing.name}
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "Inter, sans-serif",
+                      fontSize: 14,
+                      fontWeight: 500,
+                      fontVariantNumeric: "tabular-nums",
+                      color: "rgba(35,60,0,0.4)",
+                      textAlign: "right",
+                      flexShrink: 0,
+                      maxWidth: "40%",
+                    }}
+                  >
+                    {ing.qty}
+                  </span>
+                </div>
+              ))}
+              {recipe.ingredients.length === 0 && (
+                <p
+                  style={{
+                    fontFamily: "Inter, sans-serif",
+                    fontSize: 13,
+                    color: "rgba(35,60,0,0.4)",
+                    padding: "20px 24px",
+                  }}
+                >
+                  No ingredients yet.
+                </p>
+              )}
+            </div>
+            <div style={{ display: tab === "steps" ? "block" : "none", padding: "20px 24px" }}>
+              {recipe.steps.some((s) => !!normalizeStep(s).title.trim()) && (
+                <div
+                  style={{
+                    fontFamily: "Fraunces, serif",
+                    fontStyle: "italic",
+                    fontWeight: 300,
+                    fontSize: 15,
+                    color: "rgba(35,60,0,0.55)",
+                    lineHeight: 1.5,
+                    marginBottom: 18,
+                  }}
+                >
+                  Tap each step for details
+                </div>
+              )}
+              {recipe.steps.map((step, idx) => {
+                const normalized = normalizeStep(step);
+                const hasTitle = !!(normalized.title && normalized.title.trim().length > 0);
+                const isExpanded = expandedSteps.has(idx);
+
+                if (!hasTitle) {
+                  return (
+                    <div
+                      key={idx}
+                      style={{
+                        display: "flex",
+                        gap: 14,
+                        alignItems: "flex-start",
+                        marginBottom: idx === recipe.steps.length - 1 ? 0 : 20,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontFamily: "Inter, sans-serif",
+                          fontSize: 18,
+                          fontWeight: 500,
+                          color: "rgba(35,60,0,0.3)",
+                          flexShrink: 0,
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        {idx + 1}
+                      </span>
+                      <p
+                        style={{
+                          fontFamily: "Inter, sans-serif",
+                          fontSize: 14,
+                          color: "#233C00",
+                          lineHeight: 1.6,
+                          margin: 0,
+                        }}
+                      >
+                        {normalized.instruction}
+                      </p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div key={idx} style={{ marginBottom: idx === recipe.steps.length - 1 ? 0 : 10 }}>
+                    <button
+                      onClick={() => toggleStep(idx)}
+                      style={{
+                        width: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 10,
+                        padding: "12px 14px",
+                        background: "rgba(35,60,0,0.03)",
+                        border: "1px solid rgba(35,60,0,0.08)",
+                        borderRadius: isExpanded ? "10px 10px 0 0" : 10,
+                        borderBottom: isExpanded ? "none" : "1px solid rgba(35,60,0,0.08)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontFamily: "Inter, sans-serif",
+                          fontSize: 14,
+                          fontWeight: 500,
+                          color: "#233C00",
+                          textAlign: "left",
+                        }}
+                      >
+                        {idx + 1}) {normalized.title}
+                      </span>
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="rgba(35,60,0,0.25)"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        style={{
+                          transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                          transition: "transform 200ms ease",
+                          flexShrink: 0,
+                        }}
+                      >
+                        <polyline points="9 18 15 12 9 6" />
+                      </svg>
+                    </button>
+                    {isExpanded && (
+                      <div
+                        style={{
+                          background: "rgba(35,60,0,0.03)",
+                          border: "1px solid rgba(35,60,0,0.08)",
+                          borderTop: "none",
+                          borderRadius: "0 0 10px 10px",
+                          padding: "12px 14px",
+                        }}
+                      >
+                        <p
+                          style={{
+                            fontFamily: "Inter, sans-serif",
+                            fontSize: 14,
+                            color: "#233C00",
+                            lineHeight: 1.6,
+                            margin: 0,
+                          }}
+                        >
+                          {normalized.instruction}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {recipe.steps.length === 0 && (
+                <p
+                  style={{
+                    fontFamily: "Inter, sans-serif",
+                    fontSize: 13,
+                    color: "rgba(35,60,0,0.4)",
+                  }}
+                >
+                  No steps yet.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div
+        style={{
+          position: "fixed",
+          bottom: 64,
+          left: 0,
+          right: 0,
+          display: "flex",
+          gap: 12,
+          padding: `12px ${EDGE}px`,
+          background: C.bg,
+          borderTop: "1px solid rgba(35,60,0,0.08)",
+          zIndex: 70,
+        }}
+      >
+        <button
+          onClick={() => setTrayOpen(true)}
+          disabled={saving}
+          style={{
+            flex: 1,
+            fontFamily: fontSans,
+            fontSize: 14,
+            fontWeight: 600,
+            color: "#FEE7C0",
+            background: "#233C00",
+            border: "none",
+            borderRadius: 14,
+            padding: "14px 0",
+            cursor: saving ? "default" : "pointer",
+            opacity: saving ? 0.5 : 1,
+          }}
+        >
+          {saving ? "Saving…" : "Save to my library"}
+        </button>
+      </div>
+
+      {trayOpen && (
+        <SaveRecipeFlow
+          onClose={() => setTrayOpen(false)}
+          onPick={handlePickCategory}
+          onNew={() => {
+            setTrayOpen(false);
+            push({ name: "newcategoryforsuggestion", recipe });
+          }}
+          initialSelectedCategory={newCategory || null}
         />
       )}
     </div>
