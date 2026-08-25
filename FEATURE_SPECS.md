@@ -377,44 +377,110 @@ step-write path must preserve the `{ title, instruction }` shape.
 
 ## Build Home-Screen Suggestion Chips
 
-Home-screen chips are data + a deterministic picker, not hardcoded JSX. Defined in
-`src/tipsy/chips.ts`, rendered via `.map()` in App.tsx. `pickChips(new Date())`
-returns exactly 3 (active time-aware chips fill first, rest from an evergreen pool,
-varied by type), picked once per mount via `useMemo` — stable within a session,
-varied across. Chips route through the unchanged `handleChipClick` (functionally
-identical to a typed message).
+Home-screen chips are data + a moment-aware selection engine, not hardcoded JSX.
+Defined in `src/tipsy/chips.ts`, rendered via `.map()` in both `Home.tsx` and Cook's
+empty-state row in `App.tsx`. Selection runs through `selectDailyChips({ today,
+userId, tasteProfile, recentlyShownIds })`, which always returns exactly 3 chips.
+Chips still route through the unchanged `handleChipClick` (Cook) /
+`seedBuildFromChip` (Home) tap contract described below — the chip-picking logic
+changed, the tap behavior did not.
+
+**The old picker, `pickChips`, is deleted.** It filled from active time-aware chips
+first, then an evergreen pool, and — critically — was picked exactly once per mount
+via a `useMemo` with an empty dependency array, so a given browser session saw the
+same 3 chips until the app was fully reloaded. In production this meant real users
+saw the same 3 chips for months. `selectDailyChips` replaces it outright: no callers
+of `pickChips` remain anywhere in the app.
 
 Each chip: `header`, `body`, `prompt` (fired text), `type` (build/brainstorm/help),
-optional `timing`. Five timing shapes: `seasonal`, `fixedHoliday`, `floatingHoliday`,
-`recurringWeekly` (supports a season wrapping the New Year, e.g. football Sep–Feb),
-`oneOff`. `isChipActive(chip, today)` resolves liveness. At least one time-aware chip
-is present every session (seasons act as an always-on baseline).
+plus the cultural-calendar tags below.
 
-**Adding chips is data-only** — add to `evergreenChips` / `timeAwareChips`; no need to
-touch `isChipActive`, `pickChips`, or any logic. Schema was designed for the full
-future cultural calendar, so expanding it is data-entry, not engineering.
+**Cultural-calendar taxonomy.** Every chip can carry up to three independent tag
+axes, plus a light dietary tag, all optional:
+- `dayType` — `weeknight | friday | weekend | sunday`, matched against today's
+  day-of-week.
+- `season` — `spring | summer | fall | winter`, matched against today's
+  meteorological season.
+- `occasion` — a free-string id (e.g. `thanksgiving-week`, `first-cold-snap`,
+  `gameday-football`) paired with a `timing` window and a `priority` tier:
+  **tentpole = 2** (Thanksgiving, Christmas, July 4th, New Year's Eve — the
+  can't-miss calendar days), **occasion = 1** (Valentine's, Halloween, Easter,
+  gameday, Cinco de Mayo — real but lower-stakes), **ambient = 0** (first cold
+  snap, tomato season, soup season, spring produce — food-calendar moments with no
+  single calendar day). A chip with an `occasion` is classified by occasion only,
+  regardless of any `dayType`/`season` it also carries.
+- `dietary` — light flags (`contains-meat`, `contains-pork`, `contains-shellfish`,
+  `vegetarian-friendly`), used only for the dietary filter below, never for
+  selection ordering.
 
-**CRITICAL date convention: LOCAL-midnight throughout `chips.ts`.** Production calls
-`pickChips(new Date())` (local), and users think in local days. **Never use `new
+Holiday windows are deliberately asymmetric: the lead-in is long (days to weeks
+before the day, so the chip has time to be useful), and the window ends on or just
+after the day itself — nobody wants a Christmas-dinner chip on December 26th, but
+everyone wants one two weeks out. December is deliberately split into two separate
+occasions rather than one: `christmas-baking` is wide and early (the cookie/gift-
+baking stretch), `christmas` is the feast itself, narrower and closer to the day.
+
+Five `timing` shapes carry these windows, unchanged from before this rebuild:
+`seasonal`, `fixedHoliday`, `floatingHoliday`, `recurringWeekly` (supports a season
+wrapping the New Year, e.g. football Sep–Feb), `oneOff`. `isChipActive(chip, today)`
+resolves liveness for any shape.
+
+**Selection behavior (`selectDailyChips`).** Moment-first, in four tiers: active
+occasion (ordered by priority — a tentpole beats an ambient occasion even when both
+are active the same day) → `dayType` match → `season` match → untagged evergreen
+baseline. The highest non-empty tier fills up to 2 of the 3 slots; the remaining
+slot(s) are pulled from lower tiers first — a deliberate "spark of variety" so a
+strong moment (e.g. Thanksgiving week) doesn't crowd out all 3 slots. A light
+client-side dietary filter reads `profile.taste_profile` (freeform prose,
+keyword-matched for vegetarian/vegan/no-pork/shellfish-allergic) and drops matching
+chips from the candidate pool — drop-only (never narrows toward blandness) and
+always falls back to the unfiltered pool rather than letting filtering starve the
+result below 3. Per-user variety comes from a seed hashed from `userId + local
+date`: it rotates candidates *within* a tier only, never across tiers, so the
+priority/moment ordering can never be crossed by rotation — the same user sees the
+same 3 chips all day, different users can see different chips within the same
+moment, and a new local day reseeds everything. A ~14-day localStorage "recently
+shown" memory (`getRecentlyShownChipIds` / `recordShownChipIds`, keyed per user)
+excludes chips shown on a prior day, with floor-relaxation: if exclusion would drop
+the candidate pool below 3, the oldest excluded ids are progressively re-admitted
+until 3 can be filled again — the result never starves below 3 chips.
+
+**Pool size and growth.** The full pool (`allChips` in `chips.ts`) is 95 chips
+across evergreen, day-type, seasonal, occasion, and dietary-focus groups. Growing it
+is data-entry into the existing schema — add a chip literal with the right tags — not
+engineering; no change to `selectDailyChips`, `isChipActive`, or any selection logic
+is needed to add more chips, occasions, or calendar moments.
+
+**Adding chips is data-only** — add to the relevant pool array (`evergreenChips`,
+`dayTypeChips`, `seasonalMomentChips`, `occasionChips`, `dietaryFocusChips`); no need
+to touch `isChipActive`, `selectDailyChips`, or any selection logic.
+
+**CRITICAL date convention: LOCAL-midnight throughout `chips.ts`.** Both call sites
+pass `new Date()` (local), and users think in local days. **Never use `new
 Date("YYYY-MM-DD")`** — it parses as UTC midnight and shifts windows a day west of UTC
 (this was a real bug: July 4th opened/closed a day late). Use the local-parse helpers
 `parseLocalDate`, `parseMonthDayWithYear`, `toLocalStartOfDay`. Do not reintroduce
 UTC string-parsing.
 
-**Standing test: `src/tipsy/chips.test.ts`** (`bun run src/tipsy/chips.test.ts`) — 29
-cases across all timing shapes at their tight window edges; imports the real chip
-defs. Re-run whenever timing logic or calendar entries change.
+**Standing test: `src/tipsy/chips.test.ts`** (`bun run src/tipsy/chips.test.ts`) — 42
+cases: the original 29 timing-boundary cases against `isChipActive` (unchanged,
+still the real chip defs), plus 13 cases against `selectDailyChips` covering
+moment-first ordering, tentpole-vs-ambient priority tie-breaking, the dietary
+filter, don't-repeat/floor-relaxation, and per-user variation. Re-run whenever
+timing logic, selection logic, or calendar entries change.
 
-**Home also renders these same three chips (2026-08-20), via a second, separate
-consumption path.** `Home.tsx` calls the identical `pickChips(new Date())` (its own
-`useMemo`, own 3-chip row, same visual styling as Cook's chip row) but wires taps to
-a new App-root function, `seedBuildFromChip(prompt)`, instead of `handleChipClick`.
-Where `handleChipClick` types the prompt into an already-open Build conversation,
-`seedBuildFromChip` seeds a **fresh** one-message Build conversation (clearing any
-prior `buildCurrentRecipe`/history) and switches straight to the Build tab, auto-firing
+**Home also renders these same three chips, via a second, separate consumption
+path.** `Home.tsx` calls the same `selectDailyChips`, threading its own `profile.id`
+as `userId` and `profile.taste_profile` (its own `useMemo`, own 3-chip row, same
+visual styling as Cook's chip row) but wires taps to a separate App-root function,
+`seedBuildFromChip(prompt)`, instead of `handleChipClick`. Where `handleChipClick`
+types the prompt into an already-open Build conversation, `seedBuildFromChip` seeds
+a **fresh** one-message Build conversation (clearing any prior
+`buildCurrentRecipe`/history) and switches straight to the Build tab, auto-firing
 the AI on arrival — a live, already-talking session, not a pre-filled input box.
 `sendMessage`/`fireAICall`/`handleChipClick`, `buildSystemPrompt`, and the `ai-chat`
-edge function itself were not touched.
+edge function itself were not touched by either the original chip-seeding work or
+this rebuild.
 
 **Auto-fire re-arm (`buildSeedTick`).** Implementing the chip-seed path surfaced a
 pre-existing, previously-undocumented bug in Cook's auto-fire guard: it was a plain
