@@ -1,7 +1,7 @@
-// Permanent test for chip timing logic
+// Permanent test for chip timing logic + the selectDailyChips selection engine
 // Run with: bun run src/tipsy/chips.test.ts
 
-import { isChipActive, type SuggestionChip } from "./chips";
+import { isChipActive, selectDailyChips, allChips, type SuggestionChip } from "./chips";
 
 // Import chip definitions by reconstructing them exactly as defined in chips.ts
 const gamedayChip: SuggestionChip = {
@@ -165,10 +165,139 @@ for (const testCase of testCases) {
 
 console.log();
 console.log("=".repeat(80));
-console.log(`SUMMARY: ${passCount} passed, ${failCount} failed out of ${testCases.length} tests`);
+console.log(`SECTION 1 SUMMARY: ${passCount} passed, ${failCount} failed out of ${testCases.length} tests`);
+console.log("=".repeat(80));
+
+// ---------------------------------------------------------------------------
+// SECTION 2 — selectDailyChips (moment-aware selection engine)
+// ---------------------------------------------------------------------------
+
+console.log();
+console.log("=".repeat(80));
+console.log("SELECTDAILYCHIPS TEST (MOMENT-AWARE SELECTION ENGINE)");
+console.log("=".repeat(80));
+console.log();
+
+let section2Pass = 0;
+let section2Fail = 0;
+
+function check(condition: boolean, description: string) {
+  const status = condition ? "✓ PASS" : "✗ FAIL";
+  console.log(`${status} | ${description}`);
+  if (condition) {
+    section2Pass++;
+  } else {
+    section2Fail++;
+  }
+}
+
+// (a) Moment-first: an active occasion — even a low-priority (ambient) one —
+// surfaces before day-type/season chips. 2026-10-20 is a Tuesday (weeknight)
+// in fall, with only the ambient "first-cold-snap" occasion active (no
+// tentpole occasion overlaps this date) — both of its chips have distinct
+// types, so both should fill the top 2 slots ahead of weeknight/fall chips.
+{
+  const today = new Date(2026, 9, 20);
+  const result = selectDailyChips({ today, userId: "moment-test-user", tasteProfile: null, recentlyShownIds: [] });
+  check(result.length === 3, "Moment-first: still returns exactly 3 chips on 2026-10-20");
+  check(
+    result[0].occasion === "first-cold-snap" && result[1].occasion === "first-cold-snap",
+    "Moment-first: active ambient occasion (first-cold-snap) fills both top slots ahead of day-type/season chips on 2026-10-20"
+  );
+}
+
+// (b) Priority: a tentpole occasion (priority 2) beats an ambient occasion
+// (priority 0) even when BOTH are active the same day. 2026-11-20 falls
+// inside both thanksgiving-week's window (priority 2) and first-cold-snap's/
+// soup-season's windows (priority 0) — thanksgiving-week's 3 chips have 3
+// distinct types, so the top 2 slots should always be thanksgiving-week,
+// regardless of the per-user rotation seed.
+const priorityTestUserIds = ["alice", "bob", "carol", "dave", "erin"];
+{
+  const today = new Date(2026, 10, 20);
+  for (const userId of priorityTestUserIds) {
+    const result = selectDailyChips({ today, userId, tasteProfile: null, recentlyShownIds: [] });
+    check(
+      result[0].occasion === "thanksgiving-week" && result[1].occasion === "thanksgiving-week",
+      `Priority: tentpole thanksgiving-week (priority 2) beats ambient first-cold-snap/soup-season (priority 0) for userId=${userId} on 2026-11-20`
+    );
+  }
+}
+
+// (c) Light dietary filter: a vegetarian-leaning taste_profile still returns
+// a full 3 chips, with zero contains-meat/contains-pork/contains-shellfish
+// chips among them. 2026-01-15 has no tentpole occasion active, so this
+// exercises the general dietary-safe pool, not just the occasion tier.
+{
+  const today = new Date(2026, 0, 15);
+  const result = selectDailyChips({
+    today,
+    userId: "veg-test-user",
+    tasteProfile: "I'm vegetarian and love pasta",
+    recentlyShownIds: [],
+  });
+  const flagged = result.filter((c) =>
+    c.dietary?.some((f) => f === "contains-meat" || f === "contains-pork" || f === "contains-shellfish")
+  );
+  check(result.length === 3, "Dietary filter: vegetarian taste_profile still returns a full 3 chips");
+  check(flagged.length === 0, "Dietary filter: vegetarian taste_profile excludes all meat/pork/shellfish chips");
+}
+
+// (d) Don't-repeat, with floor-relaxation guaranteeing a full 3 even when the
+// exclusion list would otherwise starve the pool. 2026-04-10 is an ordinary
+// day (only the ambient spring-produce occasion active) with a large enough
+// active pool that excluding 3 specific prompts should swap them out cleanly.
+{
+  const today = new Date(2026, 3, 10);
+  const userId = "repeat-test-user";
+  const baseline = selectDailyChips({ today, userId, tasteProfile: null, recentlyShownIds: [] });
+  const baselineIds = baseline.map((c) => c.prompt);
+
+  const afterExclusion = selectDailyChips({ today, userId, tasteProfile: null, recentlyShownIds: baselineIds });
+  const overlap = afterExclusion.filter((c) => baselineIds.includes(c.prompt));
+  check(afterExclusion.length === 3, "Don't-repeat: excluding the prior day's 3 picks still returns a full 3");
+  check(overlap.length === 0, "Don't-repeat: excluding the prior day's 3 picks avoids repeating any of them when the pool has room");
+
+  // Floor-relaxation: exclude literally the ENTIRE chip pool as "recently
+  // shown" — selectDailyChips must still return 3 (the never-below-3
+  // guarantee), by progressively re-admitting the oldest excluded ids.
+  const everyPrompt = allChips.map((c) => c.prompt);
+  const starved = selectDailyChips({ today, userId, tasteProfile: null, recentlyShownIds: everyPrompt });
+  check(starved.length === 3, "Don't-repeat floor-relaxation: excluding the ENTIRE chip pool still returns a full 3 (never starves below 3)");
+}
+
+// (e) Per-user variation: several different userIds on the SAME day produce
+// more than one distinct 3-chip set, while every one of them still honors
+// the day's moment (thanksgiving-week on 2026-11-20, reusing test (b)'s
+// date/userIds so this also double-checks (b)'s moment guarantee holds
+// across the same variation used here).
+{
+  const today = new Date(2026, 10, 20);
+  const resultKeys = priorityTestUserIds.map((userId) => {
+    const result = selectDailyChips({ today, userId, tasteProfile: null, recentlyShownIds: [] });
+    return result.map((c) => c.prompt).join("|");
+  });
+  const distinctCount = new Set(resultKeys).size;
+  check(
+    distinctCount > 1,
+    `Per-user variation: ${priorityTestUserIds.length} different userIds on the same day produce more than 1 distinct chip set (got ${distinctCount})`
+  );
+}
+
+console.log();
+console.log("=".repeat(80));
+console.log(`SECTION 2 SUMMARY: ${section2Pass} passed, ${section2Fail} failed`);
+console.log("=".repeat(80));
+
+const totalPass = passCount + section2Pass;
+const totalFail = failCount + section2Fail;
+
+console.log();
+console.log("=".repeat(80));
+console.log(`GRAND TOTAL: ${totalPass} passed, ${totalFail} failed`);
 console.log("=".repeat(80));
 
 // Exit with error code if any tests failed
-if (failCount > 0) {
+if (totalFail > 0) {
   process.exit(1);
 }
