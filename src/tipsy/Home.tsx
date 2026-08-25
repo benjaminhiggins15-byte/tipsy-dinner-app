@@ -16,7 +16,7 @@ import {
   type SuggestedRecipeDetail,
   type SavedRecipe,
 } from "./data";
-import { pickChips } from "./chips";
+import { selectDailyChips, getRecentlyShownChipIds, recordShownChipIds } from "./chips";
 import watermarkSquare from "../Logos/watermark_square.png";
 import watermarkCircle from "../Logos/watermark_circle.png";
 import SaveRecipeFlow from "./SaveRecipeFlow";
@@ -45,6 +45,7 @@ type ProfileType = {
   display_name: string;
   handle: string;
   onboarding_complete: boolean;
+  taste_profile: string | null;
 };
 
 const C = {
@@ -108,8 +109,29 @@ export default function Home({
   // the greeting/chips/received-card above/below it from rendering immediately.
   const [sliceResult, setSliceResult] = useState<ComputeSliceResult | null>(null);
   const [sliceLoading, setSliceLoading] = useState(true);
-  // Pick 3 chips once per mount (same pool/logic Build's empty state uses)
-  const displayChips = useMemo(() => pickChips(new Date()), []);
+  // Moment-aware daily chips (same selection Build's empty state uses).
+  // Deterministic per (userId, local date) so it's stable all day but
+  // recomputes across days/users instead of freezing at first mount.
+  const userId = profile?.id ?? "anonymous";
+  const todayDateKey = new Date().toDateString();
+  const displayChips = useMemo(() => {
+    const today = new Date();
+    return selectDailyChips({
+      today,
+      userId,
+      tasteProfile: profile?.taste_profile ?? null,
+      recentlyShownIds: getRecentlyShownChipIds(userId, today),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, todayDateKey, profile?.taste_profile]);
+
+  // Record today's picks into the ~14-day don't-repeat memory once per
+  // (user, day) — this effect only reruns when its deps change, not on every
+  // remount, so a same-day remount doesn't re-stack or corrupt the window.
+  useEffect(() => {
+    recordShownChipIds(userId, displayChips.map((c) => c.prompt));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, todayDateKey]);
 
   useEffect(() => {
     let ignore = false;

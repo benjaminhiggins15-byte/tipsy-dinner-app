@@ -28,7 +28,7 @@ import {
   IconLink,
   IconCheck,
 } from "@tabler/icons-react";
-import { pickChips } from "./chips";
+import { selectDailyChips, getRecentlyShownChipIds, recordShownChipIds } from "./chips";
 
 type RecipeDraft = {
   title: string;
@@ -58,6 +58,7 @@ type ProfileType = {
   display_name: string;
   handle: string;
   onboarding_complete: boolean;
+  taste_profile: string | null;
 };
 
 // Helper: Convert recipe to XML format for AI context (used in App and Cook components)
@@ -5233,8 +5234,29 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
   const [bottomBarHeight, setBottomBarHeight] = useState(0);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Pick 3 chips once per mount (stable within session, varied across sessions)
-  const displayChips = useMemo(() => pickChips(new Date()), []);
+  // Moment-aware daily chips (same selection Home uses). Deterministic per
+  // (userId, local date) so it's stable all day but recomputes across
+  // days/users instead of freezing at first mount.
+  const chipUserId = profile?.id ?? "anonymous";
+  const chipTodayDateKey = new Date().toDateString();
+  const displayChips = useMemo(() => {
+    const today = new Date();
+    return selectDailyChips({
+      today,
+      userId: chipUserId,
+      tasteProfile: profile?.taste_profile ?? null,
+      recentlyShownIds: getRecentlyShownChipIds(chipUserId, today),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chipUserId, chipTodayDateKey, profile?.taste_profile]);
+
+  // Record today's picks into the ~14-day don't-repeat memory once per
+  // (user, day) — this effect only reruns when its deps change, not on every
+  // remount, so a same-day remount doesn't re-stack or corrupt the window.
+  useEffect(() => {
+    recordShownChipIds(chipUserId, displayChips.map((c) => c.prompt));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chipUserId, chipTodayDateKey]);
 
   useEffect(() => {
     const measure = () => {
