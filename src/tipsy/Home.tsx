@@ -180,6 +180,20 @@ export default function Home({
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: 16 }}>
         <div
           style={{
+            margin: `14px ${EDGE}px 8px`,
+            fontFamily: fontSans,
+            fontWeight: 500,
+            textTransform: "uppercase",
+            fontSize: 13,
+            letterSpacing: "0.1em",
+            color: C.text,
+          }}
+        >
+          Jump in
+        </div>
+
+        <div
+          style={{
             display: "flex",
             flexDirection: "row",
             overflowX: "auto",
@@ -219,6 +233,22 @@ export default function Home({
         </div>
 
         <SuggestionsCarousel loading={sliceLoading} result={sliceResult} push={push} />
+
+        {pendingSummary && (
+          <div
+            style={{
+              margin: `14px ${EDGE}px 8px`,
+              fontFamily: fontSans,
+              fontWeight: 500,
+              textTransform: "uppercase",
+              fontSize: 13,
+              letterSpacing: "0.1em",
+              color: C.text,
+            }}
+          >
+            Sent to you
+          </div>
+        )}
 
         {pendingSummary && (
           // Same dark-green/cream identity as the received tiles on the
@@ -328,7 +358,7 @@ function SuggestionsCarousel({
         color: C.text,
       }}
     >
-      Today's suggestions
+      Thought starters
     </div>
   );
 
@@ -378,7 +408,7 @@ function SuggestionsCarousel({
             color: C.textLight,
           }}
         >
-          finding today's recipes…
+          Loading thought starters
         </div>
       </div>
     );
