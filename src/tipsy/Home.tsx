@@ -92,11 +92,13 @@ export default function Home({
   push,
   seedBuildFromChip,
   goToReceivedShelf,
+  switchToTab,
 }: {
   profile: ProfileType | null;
   push: HomePush;
   seedBuildFromChip: (prompt: string) => void;
   goToReceivedShelf: () => void;
+  switchToTab: (tab: "build" | "recipes" | "grocery" | "profile" | "home") => void;
 }) {
   // Slim summary only (most recent title + sender + count) — the actual
   // shelf/list (full tile data) lives on the Recipes tab, which runs its own
@@ -279,6 +281,40 @@ export default function Home({
             </svg>
           </div>
         )}
+
+        {/* Quiet fourth tier, deliberately plain — no fill, no rounded
+            card wrapper — so it reads as a lightweight index below the
+            suggestion tiles and the received card, not a peer of either. */}
+        <div style={{ margin: `14px ${EDGE}px 8px`, fontFamily: fontSans, fontWeight: 500, textTransform: "uppercase", fontSize: 13, letterSpacing: "0.1em", color: C.text }}>
+          Explore
+        </div>
+        <div style={{ margin: `0 ${EDGE}px`, borderTop: "0.5px solid rgba(35,60,0,0.08)" }}>
+          {[
+            { label: "Cook up something new", tab: "build" as const },
+            { label: "Browse your recipes", tab: "recipes" as const },
+            { label: "Check your grocery list", tab: "grocery" as const },
+          ].map((row) => (
+            <div
+              key={row.tab}
+              onClick={() => switchToTab(row.tab)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "15px 0",
+                borderBottom: "0.5px solid rgba(35,60,0,0.08)",
+                cursor: "pointer",
+              }}
+            >
+              <div style={{ fontFamily: fontSans, fontSize: 16, color: C.text }}>
+                {row.label}
+              </div>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.25)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
