@@ -458,7 +458,7 @@ function SuggestionsCarousel({
                 width: "42%",
                 maxWidth: "42%",
                 minWidth: 0,
-                height: 120,
+                height: 100,
                 scrollSnapAlign: "start",
                 borderRadius: 16,
                 background: "rgba(35,60,0,0.06)",
