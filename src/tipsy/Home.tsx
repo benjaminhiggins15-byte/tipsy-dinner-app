@@ -285,7 +285,7 @@ export default function Home({
         {/* Quiet fourth tier, deliberately plain — no fill, no rounded
             card wrapper — so it reads as a lightweight index below the
             suggestion tiles and the received card, not a peer of either. */}
-        <div style={{ margin: `14px ${EDGE}px 8px`, fontFamily: fontSans, fontWeight: 500, textTransform: "uppercase", fontSize: 13, letterSpacing: "0.1em", color: C.text }}>
+        <div style={{ margin: `32px ${EDGE}px 8px`, fontFamily: fontSans, fontWeight: 500, textTransform: "uppercase", fontSize: 13, letterSpacing: "0.1em", color: C.text }}>
           Explore
         </div>
         <div style={{ margin: `0 ${EDGE}px`, borderTop: "0.5px solid rgba(35,60,0,0.08)" }}>
