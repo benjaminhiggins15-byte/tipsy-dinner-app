@@ -477,9 +477,8 @@ function SuggestionsCarousel({
               <div
                 style={{
                   fontFamily: "Lazydog, sans-serif",
-                  textTransform: "uppercase",
-                  fontSize: 24,
-                  lineHeight: 1.08,
+                  fontSize: 20,
+                  lineHeight: 1.15,
                   color: C.text,
                   display: "-webkit-box",
                   WebkitLineClamp: 2,
