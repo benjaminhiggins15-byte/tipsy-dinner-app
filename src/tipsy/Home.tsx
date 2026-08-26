@@ -353,7 +353,7 @@ function SuggestionsCarousel({
                 width: "42%",
                 maxWidth: "42%",
                 minWidth: 0,
-                height: 120,
+                height: 100,
                 borderRadius: 16,
                 background: "rgba(35,60,0,0.03)",
                 border: "1px solid rgba(35,60,0,0.08)",
