@@ -306,7 +306,7 @@ export default function Home({
                 cursor: "pointer",
               }}
             >
-              <div style={{ fontFamily: fontSans, fontSize: 16, color: C.text }}>
+              <div style={{ fontFamily: fontSans, fontSize: 14, color: C.textLight }}>
                 {row.label}
               </div>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.25)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
