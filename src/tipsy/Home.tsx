@@ -542,7 +542,7 @@ function SuggestionsCarousel({
                 padding: 16,
                 display: "flex",
                 flexDirection: "column",
-                justifyContent: "flex-end",
+                justifyContent: "space-between",
                 gap: 4,
                 overflow: "hidden",
                 cursor: "pointer",
