@@ -181,10 +181,11 @@ export default function Home({
         <div
           style={{
             margin: `14px ${EDGE}px 8px`,
-            fontFamily: fontDisplay,
-            fontStyle: "italic",
+            fontFamily: fontSans,
             fontWeight: 500,
-            fontSize: 16,
+            textTransform: "uppercase",
+            fontSize: 13,
+            letterSpacing: "0.1em",
             color: C.text,
           }}
         >
@@ -237,10 +238,11 @@ export default function Home({
           <div
             style={{
               margin: `14px ${EDGE}px 8px`,
-              fontFamily: fontDisplay,
-              fontStyle: "italic",
+              fontFamily: fontSans,
               fontWeight: 500,
-              fontSize: 16,
+              textTransform: "uppercase",
+              fontSize: 13,
+              letterSpacing: "0.1em",
               color: C.text,
             }}
           >
@@ -348,10 +350,11 @@ function SuggestionsCarousel({
     <div
       style={{
         margin: `14px ${EDGE}px 8px`,
-        fontFamily: fontDisplay,
-        fontStyle: "italic",
+        fontFamily: fontSans,
         fontWeight: 500,
-        fontSize: 16,
+        textTransform: "uppercase",
+        fontSize: 13,
+        letterSpacing: "0.1em",
         color: C.text,
       }}
     >
