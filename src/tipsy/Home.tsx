@@ -561,6 +561,7 @@ function SuggestionsCarousel({
                   overflow: "hidden",
                   wordBreak: "normal",
                   overflowWrap: "break-word",
+                  flexShrink: 0,
                 }}
               >
                 {pick.title}
@@ -585,6 +586,7 @@ function SuggestionsCarousel({
                     fontSize: 10,
                     letterSpacing: "0.08em",
                     color: "rgba(35,60,0,0.45)",
+                    flexShrink: 0,
                   }}
                 >
                   {state === "loading" ? "loading…" : `${pick.cuisine} · ${pick.effort}`}
