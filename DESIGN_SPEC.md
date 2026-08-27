@@ -200,10 +200,36 @@ as above).**
   card's dark-green treatment, and deliberately does NOT use a photo-tile look
   either — reinforcing that a suggestion reads as the app's idea, not dressed up to
   look like a person sent it.
-- The "finding today's recipes…" loading line is the carousel's only by-feel
-  personalization signal today — there's no other visible cue that the slice is
-  user-specific rather than generic; it's meant to read as a quiet "we're thinking
-  about you" moment rather than a plain spinner.
+- The "Loading thought starters" loading line (renamed from "finding today's
+  recipes…", see below) is the carousel's only by-feel personalization signal
+  today — there's no other visible cue that the slice is user-specific rather
+  than generic; it's meant to read as a quiet "we're thinking about you" moment
+  rather than a plain spinner.
+
+**Superseded 2026-08-27** — Home is now a single continuous vertical scroll and
+gained a fourth section; final current state:
+- Suggestion tile titles are proper-case, not uppercased: Lazydog 20px, line-height
+  1.15, 2-line clamp, `#233C00`. Tile height compressed 120px → 100px, with the
+  loading skeleton matched to the same 100px so there's no height shift on load.
+- Only the greeting header stays pinned; the chips row (previously fixed below it)
+  now lives inside the scroll column as its first element, directly above the
+  suggestions carousel — the whole rest of the screen scrolls as one column.
+- Four section titles now organize the column as labeled shelves, all sharing one
+  style (Inter 500, uppercase, 13px, letter-spacing 0.1em, `#233C00`): "Jump in"
+  (above chips), "Thought starters" (renamed from "Today's suggestions", above the
+  carousel — its loading copy is now "Loading thought starters"), "Sent to you"
+  (above the received card, same conditional as the card), and "Explore" (last in
+  the column). Each carries the same section-break rhythm: 36px margin above
+  (separation from the section before) / 8px margin below (a tight hug to its own
+  cards) — small-below/large-above throughout, so each title reads as attached to
+  what's under it, not what's above it.
+- **Explore** (new): three plain tappable rows below the received card — "Cook up
+  something new" / "Browse your recipes" / "Check your grocery list" — 14px Inter,
+  muted green (`rgba(35,60,0,0.6)`), each with a 14px chevron-right
+  (`rgba(35,60,0,0.25)` stroke) and hairline `0.5px` dividers above the block and
+  between rows. Deliberately the quietest tier on the screen: no card chrome, no
+  fill. Tapping a row navigates via `switchToTab` to `build`/`recipes`/`grocery`
+  respectively — plain navigation only, no seeding, no data change.
 
 ## Home — Received Recipe View
 - Hand-matches the Recipe Card's layout (hero photo, title, Fraunces italic description, Ingredients/Steps tabs, step-row expansion) so a received recipe looks indistinguishable from one already saved — built as its own sibling view, not by reusing `RecipeCard`.

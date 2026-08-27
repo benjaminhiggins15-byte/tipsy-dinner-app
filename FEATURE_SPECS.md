@@ -1530,6 +1530,19 @@ teardown needed since no throwaway data was created this pass):**
   genuinely two objects, byte-identical (matching etag and size) rather than a
   reference, confirming the copy is real and independently deletable.
 
+**Superseded 2026-08-27 — Home gained a fourth, quiet navigation tier ("Explore").**
+Below the received card, three plain rows — "Cook up something new" / "Browse your
+recipes" / "Check your grocery list" — call the existing `switchToTab(tab)` primitive
+(the same function reference `BottomTabBar` already uses) with `"build"`,
+`"recipes"`, and `"grocery"` respectively. Plain bare navigation only: no seeding, no
+state change, no data read — `switchToTab` was threaded into `Home` as a prop the
+same way `goToReceivedShelf`/`seedBuildFromChip` already are. Visual/layout detail
+(styling, spacing, section-title treatment) lives in DESIGN_SPEC.md's Home section,
+not here. Unrelated in this same pass: the prompt-chip row moved from a fixed
+position below the greeting into the scrollable content column (now Home's first
+scrolling element) — a pure layout change, no change to chip selection, tap
+behavior, or `seedBuildFromChip` itself.
+
 **Known issues / cleanup items (moved here from CLAUDE.md's Standing Cleanup / Watch
 Items):**
 - **RESOLVED 2026-08-23 — merged to `main` and live.** Work that started on
