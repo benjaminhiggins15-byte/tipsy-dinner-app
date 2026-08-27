@@ -180,7 +180,7 @@ export default function Home({
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: 16 }}>
         <div
           style={{
-            margin: `14px ${EDGE}px 8px`,
+            margin: `28px ${EDGE}px 8px`,
             fontFamily: fontSans,
             fontWeight: 500,
             textTransform: "uppercase",
@@ -197,7 +197,7 @@ export default function Home({
             display: "flex",
             flexDirection: "row",
             overflowX: "auto",
-            padding: `12px ${EDGE}px 4px`,
+            padding: `4px ${EDGE}px 4px`,
             gap: 12,
             WebkitOverflowScrolling: "touch",
           }}
@@ -237,7 +237,7 @@ export default function Home({
         {pendingSummary && (
           <div
             style={{
-              margin: `14px ${EDGE}px 8px`,
+              margin: `28px ${EDGE}px 8px`,
               fontFamily: fontSans,
               fontWeight: 500,
               textTransform: "uppercase",
@@ -260,7 +260,7 @@ export default function Home({
           <div
             onClick={goToReceivedShelf}
             style={{
-              margin: `14px ${EDGE}px 0`,
+              margin: `0 ${EDGE}px 0`,
               padding: "10px 14px",
               borderRadius: 14,
               background: "#2E4E08",
@@ -349,7 +349,7 @@ function SuggestionsCarousel({
   const sectionLabel = (
     <div
       style={{
-        margin: `14px ${EDGE}px 8px`,
+        margin: `28px ${EDGE}px 8px`,
         fontFamily: fontSans,
         fontWeight: 500,
         textTransform: "uppercase",
