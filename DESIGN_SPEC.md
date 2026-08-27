@@ -209,8 +209,13 @@ as above).**
 **Superseded 2026-08-27** — Home is now a single continuous vertical scroll and
 gained a fourth section; final current state:
 - Suggestion tile titles are proper-case, not uppercased: Lazydog 20px, line-height
-  1.15, 2-line clamp, `#233C00`. Tile height compressed 120px → 100px, with the
-  loading skeleton matched to the same 100px so there's no height shift on load.
+  1.15, 3-line clamp (raised from 2, to fix long-title clipping), `#233C00`; title and
+  descriptor both use `flexShrink: 0` so the clamp's ellipsis renders cleanly instead
+  of a mid-word chop. Tile height 126px (raised from 100px for the 3-line clamp),
+  with the loading skeleton matched to the same 126px so there's no height shift on
+  load. Container uses `justifyContent: space-between` (title top-anchored, descriptor
+  bottom-anchored) so titles share a common top baseline across the row regardless of
+  line count.
 - Only the greeting header stays pinned; the chips row (previously fixed below it)
   now lives inside the scroll column as its first element, directly above the
   suggestions carousel — the whole rest of the screen scrolls as one column.
