@@ -182,8 +182,9 @@ export default function Home({
           style={{
             margin: `14px ${EDGE}px 8px`,
             fontFamily: fontDisplay,
+            fontStyle: "italic",
             fontWeight: 500,
-            fontSize: 13,
+            fontSize: 16,
             color: C.text,
           }}
         >
@@ -237,8 +238,9 @@ export default function Home({
             style={{
               margin: `14px ${EDGE}px 8px`,
               fontFamily: fontDisplay,
+              fontStyle: "italic",
               fontWeight: 500,
-              fontSize: 13,
+              fontSize: 16,
               color: C.text,
             }}
           >
@@ -347,8 +349,9 @@ function SuggestionsCarousel({
       style={{
         margin: `14px ${EDGE}px 8px`,
         fontFamily: fontDisplay,
+        fontStyle: "italic",
         fontWeight: 500,
-        fontSize: 13,
+        fontSize: 16,
         color: C.text,
       }}
     >
