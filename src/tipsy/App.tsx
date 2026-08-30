@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
 import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName, sendRecipeToFriends, searchProfiles, getMyConnections, type ProfileSearchResult, type PendingReceivedRecipe, getPendingReceivedRecipes, type SuggestedRecipeDetail, getSuggestedRecipeDetail } from "./data";
-import { type CropRect } from "./image";
+import { compressImageFile, type CropRect } from "./image";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
@@ -27,6 +27,8 @@ import {
   IconMessageCircle,
   IconLink,
   IconCheck,
+  IconPhoto,
+  IconX,
 } from "@tabler/icons-react";
 import { selectDailyChips, getRecentlyShownChipIds, recordShownChipIds } from "./chips";
 
@@ -45,10 +47,32 @@ type BuildMessage = {
   text: string;
 };
 
+// Anthropic Messages API content-block shapes we currently need — text and
+// base64 image. content stays a plain string for every existing text-only
+// call site; only a future image-carrying turn needs the array form.
+type ContentBlock =
+  | { type: "text"; text: string }
+  | { type: "image"; source: { type: "base64"; media_type: string; data: string } };
+
 type ConversationMessage = {
   role: "user" | "assistant";
-  content: string;
+  content: string | ContentBlock[];
 };
+
+// Converts a compressed JPEG Blob (compressImageFile in image.ts — 1200px max
+// edge, q0.8) into an Anthropic image content block. FileReader's data URL is
+// already base64; only the "data:image/jpeg;base64," prefix needs stripping.
+// Not wired into any call site yet.
+async function blobToImageContentBlock(blob: Blob): Promise<ContentBlock> {
+  const dataUrl: string = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+  const data = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  return { type: "image", source: { type: "base64", media_type: "image/jpeg", data } };
+}
 
 type ProfileType = {
   id: string;
@@ -5232,6 +5256,10 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
   const [generatingRecipe, setGeneratingRecipe] = useState(false);
   const [recipePulse, setRecipePulse] = useState(false);
   const [showRefreshConfirm, setShowRefreshConfirm] = useState(false);
+  const [attachedImageBlob, setAttachedImageBlob] = useState<Blob | null>(null);
+  const [attachedImagePreviewUrl, setAttachedImagePreviewUrl] = useState<string | null>(null);
+  const [attachCropFile, setAttachCropFile] = useState<File | null>(null);
+  const attachInputRef = useRef<HTMLInputElement>(null);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomBarRef = useRef<HTMLDivElement | null>(null);
@@ -5270,6 +5298,14 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
   }, [recipeRevealed]);
+
+  // Revokes the previous attachment preview URL whenever it's replaced or on
+  // unmount — cleanup runs before the next effect fires, so this covers both.
+  useEffect(() => {
+    return () => {
+      if (attachedImagePreviewUrl) URL.revokeObjectURL(attachedImagePreviewUrl);
+    };
+  }, [attachedImagePreviewUrl]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -5442,7 +5478,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
   };
 
   const sendMessage = async () => {
-    if (!input.trim() || typing) return;
+    if ((!input.trim() && !attachedImageBlob) || typing) return;
 
     // Collapse expanded recipe card if open
     if (expanded) {
@@ -5456,8 +5492,18 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
     setTyping(true);
     setGeneratingRecipe(false);
 
+    // Assemble the outgoing turn as ContentBlock[] (image first, then text)
+    // only when an image is attached; text-only sends stay a bare string,
+    // exactly as before. Clear the held attachment now that it's captured.
+    const imageBlock = attachedImageBlob ? await blobToImageContentBlock(attachedImageBlob) : null;
+    const outgoingContent: ConversationMessage["content"] = imageBlock
+      ? [imageBlock, ...(userText ? [{ type: "text", text: userText } as ContentBlock] : [])]
+      : userText;
+    setAttachedImageBlob(null);
+    setAttachedImagePreviewUrl(null);
+
     // Add user message to conversation history
-    const updatedHistory = [...conversationHistory, { role: "user" as const, content: userText }];
+    const updatedHistory = [...conversationHistory, { role: "user" as const, content: outgoingContent }];
     setConversationHistory(updatedHistory);
 
     // Load user profile from state
@@ -5711,6 +5757,37 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
       returnTo: "cook",
     });
   };
+
+  // Reuses the existing file-input -> crop -> compressImageFile pipeline (see
+  // RecipeCard's photo flow) but holds the compressed Blob in local Build
+  // state for the next send, instead of calling uploadRecipePhoto/Storage.
+  function handleAttachClick() {
+    attachInputRef.current?.click();
+  }
+
+  function handleAttachFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) setAttachCropFile(file);
+  }
+
+  function handleAttachCropCancel() {
+    setAttachCropFile(null);
+  }
+
+  async function handleAttachCropConfirm(cropRect: CropRect) {
+    const file = attachCropFile;
+    setAttachCropFile(null);
+    if (!file) return;
+    const blob = await compressImageFile(file, cropRect);
+    setAttachedImageBlob(blob);
+    setAttachedImagePreviewUrl(URL.createObjectURL(blob));
+  }
+
+  function handleRemoveAttachedImage() {
+    setAttachedImageBlob(null);
+    setAttachedImagePreviewUrl(null);
+  }
 
   const isEmpty = messages.length === 0;
   const placeholder = "ask anything";
@@ -6068,12 +6145,22 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
           }
         `}</style>
 
+        <input
+          ref={attachInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleAttachFileInputChange}
+          style={{ display: "none" }}
+        />
         <CookInputBar
           value={input}
           onChange={setInput}
           onSend={sendMessage}
           placeholder={placeholder}
           disabled={typing}
+          attachedImagePreviewUrl={attachedImagePreviewUrl}
+          onAttachClick={handleAttachClick}
+          onRemoveAttachedImage={handleRemoveAttachedImage}
         />
       </div>
 
@@ -6475,6 +6562,8 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
           </div>
         </div>
       )}
+
+      <PhotoCropOverlay file={attachCropFile} onCancel={handleAttachCropCancel} onConfirm={handleAttachCropConfirm} />
     </div>
   );
 }
@@ -6621,10 +6710,12 @@ function RecipeGeneratingIndicator() {
   );
 }
 
-function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
+function CookInputBar({ value, onChange, onSend, placeholder, disabled, attachedImagePreviewUrl, onAttachClick, onRemoveAttachedImage }: {
   value: string; onChange: (v: string) => void; onSend: () => void; placeholder: string; disabled?: boolean;
+  attachedImagePreviewUrl?: string | null; onAttachClick?: () => void; onRemoveAttachedImage?: () => void;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const hasContent = !!value.trim() || !!attachedImagePreviewUrl;
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -6638,6 +6729,33 @@ function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
 
   return (
     <div style={{ padding: "8px 16px 12px", flexShrink: 0, background: "#FAF7F2", borderTop: "1px solid rgba(35,60,0,0.08)", position: "relative", zIndex: 1, margin: 0, boxShadow: "none" }}>
+      {attachedImagePreviewUrl && (
+        <div style={{ display: "flex", marginBottom: 8 }}>
+          <div style={{ position: "relative", width: 48, height: 48, borderRadius: 10, overflow: "hidden", border: "1px solid rgba(35,60,0,0.15)", flexShrink: 0 }}>
+            <img src={attachedImagePreviewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+            <button
+              onClick={onRemoveAttachedImage}
+              aria-label="Remove attached photo"
+              style={{
+                position: "absolute",
+                top: -6,
+                right: -6,
+                width: 20,
+                height: 20,
+                borderRadius: "50%",
+                background: "#233C00",
+                border: "none",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <IconX size={12} stroke={2.5} color="#FEE7C0" />
+            </button>
+          </div>
+        </div>
+      )}
       <div style={{
         display: "flex",
         alignItems: "center",
@@ -6647,6 +6765,15 @@ function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
         padding: "10px 16px",
         gap: 10,
       }}>
+        {onAttachClick && (
+          <button
+            onClick={onAttachClick}
+            aria-label="Attach a photo"
+            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", flexShrink: 0 }}
+          >
+            <IconPhoto size={20} stroke={1.5} color="rgba(35,60,0,0.5)" />
+          </button>
+        )}
         <textarea
           ref={textareaRef}
           value={value}
@@ -6688,7 +6815,7 @@ function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
             width: 32,
             height: 32,
             borderRadius: "50%",
-            background: value.trim() ? "#1E3A42" : "rgba(35,60,0,0.08)",
+            background: hasContent ? "#1E3A42" : "rgba(35,60,0,0.08)",
             border: "none",
             cursor: disabled ? "default" : "pointer",
             display: "flex",
@@ -6698,7 +6825,7 @@ function CookInputBar({ value, onChange, onSend, placeholder, disabled }: {
             opacity: disabled ? 0.5 : 1,
           }}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill={value.trim() ? "#FEE7C0" : "rgba(35,60,0,0.3)"} stroke="none">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill={hasContent ? "#FEE7C0" : "rgba(35,60,0,0.3)"} stroke="none">
             <path d="M2 12L22 2L15 22L11 13L2 12Z" />
           </svg>
         </button>
