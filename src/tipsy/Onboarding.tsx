@@ -166,7 +166,7 @@ function OnboardingChat({
     (async () => {
       await sayAI(
         firstName
-          ? `Hey ${firstName} — welcome to Tipsy Dinner, excited to cook together. Before we get going, I want to learn your taste a little. Three quick things, then I'll set up your kitchen around them.`
+          ? `Hey ${firstName}! Welcome to Tipsy Dinner, excited to cook together. Before we get going, I want to learn your taste a little. Three quick things, then I'll set up your kitchen around them.`
           : "Hey — welcome to Tipsy Dinner, excited to cook together. Before we get going, I want to learn your taste a little. Three quick things, then I'll set up your kitchen around them."
       );
       await sayAI("So: what makes your cooking yours? Cuisines you keep coming back to, flavors you lean on, the way you like to cook.");
