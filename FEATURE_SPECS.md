@@ -2149,6 +2149,21 @@ model call anywhere in `OnboardingChat`; each AI-side line is a fixed string
 advanced by a small `stage` state machine (`palate → inspiration →
 constraints → done`), paced with `TypingBubble` for a natural feel.
 
+**Reveal cadence matches Build, presentationally only.** Build's real AI text
+reveals progressively because it's driven by actual token arrival over the
+`ai-chat` SSE stream — there is no timing constant in Build to reuse, since it
+never artificially paces text. Because onboarding's lines are hard-coded, a
+brief on-phone check surfaced the intro line snapping in as a full block
+instead of matching that feel, most visible before the natural pauses of a
+back-and-forth conversation mask it. `sayAI()`'s reveal step was changed from
+an instant full-text push to a synthetic word-by-word reveal driven by one
+named constant, `SCRIPTED_REVEAL_MS_PER_WORD` (default 40ms/word). This is
+strictly cosmetic: the profile write for a given answer (`safeUpdate(...)`)
+always fires before the following `sayAI(...)` acknowledgment is even called,
+so the reveal timer never gates a write, and any failure inside the reveal
+loop degrades straight to showing the full line rather than leaving a stuck
+partial one.
+
 **Write contract — unchanged, byte-identical.** Every write goes through the
 exact same setters the old three-textbox flow used:
 - `onUpdate({ palate: val })`, `onUpdate({ inspiration: val })`,

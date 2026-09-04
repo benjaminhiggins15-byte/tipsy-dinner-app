@@ -64,6 +64,14 @@ async function waitForTasteProfile(profileId: string, maxWaitMs: number, interva
 type ChatMessage = { id: number; role: "user" | "ai"; text: string };
 type Stage = "palate" | "inspiration" | "constraints" | "done";
 
+// Build's AI text reveal (App.tsx's fireAICall/sendMessage) is driven by real
+// token arrival over the ai-chat SSE stream — there's no timing constant to
+// borrow from it, since Build never artificially paces text; it just renders
+// whatever has arrived so far on every chunk. Onboarding's lines are
+// hard-coded, so this constant drives a synthetic word-by-word reveal tuned
+// to feel like that same progressive-arrival pace. Trivially tunable.
+const SCRIPTED_REVEAL_MS_PER_WORD = 40;
+
 // Scripted conversational onboarding. Reuses Build's chat presentation
 // (ChatBubble, the messages[] list shape, the input bar, typing indicator)
 // as a visual shell around a hard-wired script — NOT the Build engine
@@ -88,13 +96,49 @@ function OnboardingChat({
     setMessages((prev) => [...prev, { id: idRef.current, role, text }]);
   };
 
+  // Presentational only — mirrors Build's typing-indicator-then-reveal feel
+  // (ChatBubble/TypingBubble from ChatUI.tsx) with a synthetic word-by-word
+  // reveal in place of Build's real token stream. Never affects what gets
+  // written to `profiles` or when — callers already write via safeUpdate
+  // before awaiting this. Fail-soft: any reveal error snaps straight to the
+  // full line rather than leaving a stuck partial one.
   const sayAI = (text: string, pauseMs = 550) =>
     new Promise<void>((resolve) => {
       setTyping(true);
       setTimeout(() => {
         setTyping(false);
-        pushMessage("ai", text);
-        resolve();
+        idRef.current += 1;
+        const id = idRef.current;
+        setMessages((prev) => [...prev, { id, role: "ai", text: "" }]);
+
+        const showFull = () => {
+          setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, text } : m)));
+          resolve();
+        };
+
+        try {
+          const words = text.split(" ");
+          let revealed = 0;
+          const revealNext = () => {
+            try {
+              revealed += 1;
+              const partial = words.slice(0, revealed).join(" ");
+              setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, text: partial } : m)));
+              if (revealed < words.length) {
+                setTimeout(revealNext, SCRIPTED_REVEAL_MS_PER_WORD);
+              } else {
+                resolve();
+              }
+            } catch (err) {
+              console.error("Scripted reveal step failed, showing full line:", err);
+              showFull();
+            }
+          };
+          revealNext();
+        } catch (err) {
+          console.error("Scripted reveal setup failed, showing full line:", err);
+          showFull();
+        }
       }, pauseMs);
     });
 
