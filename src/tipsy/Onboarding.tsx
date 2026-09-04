@@ -72,6 +72,13 @@ type Stage = "palate" | "inspiration" | "constraints" | "done";
 // to feel like that same progressive-arrival pace. Trivially tunable.
 const SCRIPTED_REVEAL_MS_PER_WORD = 40;
 
+// Duration of the typing-indicator dots shown before each scripted friend-
+// message starts its word-by-word reveal. Deliberately longer than a real
+// network-wait pause would be — on-phone testing found a short flash of dots
+// register as rushed rather than a message clearly on its way. Tunable
+// on-phone; does not affect SCRIPTED_REVEAL_MS_PER_WORD above.
+const SCRIPTED_TYPING_INDICATOR_MS = 2000;
+
 // Scripted conversational onboarding. Reuses Build's chat presentation
 // (ChatBubble, the messages[] list shape, the input bar, typing indicator)
 // as a visual shell around a hard-wired script — NOT the Build engine
@@ -102,7 +109,7 @@ function OnboardingChat({
   // written to `profiles` or when — callers already write via safeUpdate
   // before awaiting this. Fail-soft: any reveal error snaps straight to the
   // full line rather than leaving a stuck partial one.
-  const sayAI = (text: string, pauseMs = 550) =>
+  const sayAI = (text: string, pauseMs = SCRIPTED_TYPING_INDICATOR_MS) =>
     new Promise<void>((resolve) => {
       setTyping(true);
       setTimeout(() => {
@@ -160,8 +167,7 @@ function OnboardingChat({
       await sayAI(
         firstName
           ? `Hey ${firstName} — welcome to Tipsy Dinner, excited to cook together. Before we get going, I want to learn your taste a little. Three quick things, then I'll set up your kitchen around them.`
-          : "Hey — welcome to Tipsy Dinner, excited to cook together. Before we get going, I want to learn your taste a little. Three quick things, then I'll set up your kitchen around them.",
-        250
+          : "Hey — welcome to Tipsy Dinner, excited to cook together. Before we get going, I want to learn your taste a little. Three quick things, then I'll set up your kitchen around them."
       );
       await sayAI("So: what makes your cooking yours? Cuisines you keep coming back to, flavors you lean on, the way you like to cook.");
       setAwaitingInput(true);
