@@ -146,10 +146,26 @@ export default function Home({
           : null
       );
     })();
-    // Layer 3/4 — mint or fetch today's slice, then hand pick_details to the
-    // carousel below. computeMySlice() itself returns null with no session
-    // (theoretical here, Home is post-auth) — sliceResult stays null in that
-    // case and the carousel renders nothing.
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  // Layer 3/4 — mint or fetch today's slice, then hand pick_details to the
+  // carousel below. computeMySlice() itself returns null with no session
+  // (theoretical here, Home is post-auth) — sliceResult stays null in that
+  // case and the carousel renders nothing. Split into its own effect (rather
+  // than bundled with the pending-recipes fetch above) and keyed on
+  // profile?.taste_profile so a brand-new user's slice — potentially computed
+  // against a still-blank taste_profile if onboarding's handoff timeout was
+  // hit — re-fetches once taste_profile lands. NOTE: compute-slice currently
+  // short-circuits to the already-persisted slice for today once one exists
+  // (see supabase/functions/compute-slice/index.ts), so this re-fetch is only
+  // effective for a user whose very first slice hasn't been minted yet; it is
+  // not, by itself, a guarantee that today's carousel content updates after a
+  // timeout-driven blank-profile first slice — see build report.
+  useEffect(() => {
+    let ignore = false;
     (async () => {
       const result = await computeMySlice();
       if (ignore) return;
@@ -159,7 +175,7 @@ export default function Home({
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [profile?.taste_profile]);
 
   const firstName = profile?.display_name?.split(" ")[0] || profile?.display_name || "";
 

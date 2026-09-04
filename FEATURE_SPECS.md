@@ -1624,18 +1624,41 @@ app, that fills the pool cell by cell.
   parses that block with its own regex-based reader, independent of
   `parseRecipeFromAIResponse`.
 - **Matrix definition and additive shortfall logic.** The matrix is cuisine ×
-  meal_type, with cuisines grouped into three tiers and a per-tier, per-meal-type
-  target depth (dinner/lunch use the tier's depth directly; breakfast only gets the
-  full depth for Tier 1, else a shallower depth; dessert/snack are shallow for every
-  tier). Before generating anything for a cell, the script counts existing
-  `suggested_recipe_pool` rows for that `(cuisine, meal_type)` pair and computes
-  `shortfall = max(0, target − existing)` — it only ever generates the gap, never
-  regenerates or duplicates what's already there. This makes the table itself the
-  resume state: the script can be interrupted at any point and re-run safely, and can
-  be re-run later to top up a cell (e.g. after a tier promotion, or to backfill a
-  cell that failed in an earlier run) without any separate tracking file. A
-  `--recheck-only` mode runs the dietary checker against existing rows without
-  generating anything new.
+  meal_type, with cuisines grouped into three tiers and an explicit, weighted
+  per-tier, per-meal-type depth target (`TIER_TARGETS` in the script) — dinner and
+  lunch get the deepest coverage, dessert/snack stay shallow, at every tier:
+  Tier 1 (mainstream cuisines): dinner 50, lunch 28, breakfast 14, dessert 8, snack 8.
+  Tier 2: dinner 30, lunch 20, breakfast 8, dessert 6, snack 6.
+  Tier 3 (thinner/niche cuisines): dinner 14, lunch 10, breakfast 6, dessert 5, snack 5.
+  The tier itself IS the thin-cuisine ceiling — a Tier 3 cuisine is deliberately never
+  asked to reach Tier 1 depth. Before generating anything for a cell, the script
+  counts existing `suggested_recipe_pool` rows for that `(cuisine, meal_type)` pair
+  and computes `shortfall = max(0, target − existing)` — it only ever generates the
+  gap, never regenerates or duplicates what's already there. This makes the table
+  itself the resume state: the script can be interrupted at any point and re-run
+  safely, and can be re-run later to top up a cell (e.g. after a tier promotion, or
+  to backfill a cell that failed in an earlier run) without any separate tracking
+  file. A `--recheck-only` mode runs the dietary checker against existing rows
+  without generating anything new (see the dietary vetting policies below — several
+  rows are EXPECTED to re-flag on this rerun, by design).
+- **Duplicate guard is per-cell, not per-cuisine — a deliberate, accepted scope.**
+  Before generating a cell's shortfall, the script feeds the AI only that cell's own
+  existing titles (`existingTitles`, keyed by the exact `cuisine:meal_type` pair) as
+  the "don't repeat these" list. It does NOT see titles from the same cuisine's other
+  meal-type cells. Consequence, observed and accepted in practice: the same dish name
+  can legitimately appear in two different meal-type cells of the same cuisine (e.g.
+  an Italian dish generated for both `dinner` and `lunch` with an identical title).
+  This is existing, unchanged pipeline behavior, not a regression — cross-cell title
+  overlap within a cuisine is accepted, not deduped.
+- **PAGINATION ON THE EXISTING-ROWS FETCH IS LOAD-BEARING.** The fetch that counts
+  existing rows for the shortfall math above pages through the full table in
+  1,000-row chunks (`.range()` loop), because a single unpaginated `.select()` is
+  silently capped by PostgREST's default max-rows (~1,000). Once the pool crossed
+  that size, an earlier version of this fetch undercounted existing rows and would
+  have computed wildly inflated shortfalls — hundreds of duplicate-generating
+  targets — for every cell. **Do not remove or "simplify" this pagination**; above
+  1,000 total rows, the additive/no-duplicate guarantee described above silently
+  breaks without it.
 - **Deterministic dietary checker (flag-for-review, not auto-correct).** After
   parsing the AI's dietary tags, the script independently scans the parsed
   ingredient list (matched per-ingredient-item, not as one joined blob of text) for
@@ -1674,11 +1697,56 @@ without changing its cuisine slug (`'greek'`) — done deliberately so a small n
 of rows already generated under that same slug in an earlier proof run counted toward
 the same cell rather than becoming an orphaned duplicate set.
 
-**Current state (as of this pipeline's most recent full run):** 342 rows in
-`suggested_recipe_pool`, every matrix cell at its target depth (shortfall of 0
-everywhere), 27 rows sitting at `dietary_check_status = 'flagged'` and
-`vetting_status = 'pending'`, awaiting a future human-review pass before any are
-eligible to surface to real users.
+**Dietary vetting policies (standing, apply to every batch, not just batch-02).**
+Established during a full-pool flag-resolution pass and binding on any future
+triage of checker-flagged rows:
+- **Squid counts as shellfish.** `contains_shellfish = true` for any squid/calamari
+  dish, regardless of the AI's own claimed tag — a deliberate allergy-safety policy
+  decision (squid is a cephalopod, not a crustacean, but is treated as shellfish for
+  this app's purposes), not a checker bug fix.
+- **Uniform swap policy.** If a recipe's own ingredient line surfaces a compliant
+  alternative in the same line (e.g. "lard or additional butter", "chicken or
+  vegetable stock", "ghee or neutral oil"), the compliant tag STANDS as claimed —
+  including `contains_pork`/`is_vegetarian`/`is_dairy_free`, not just the obvious
+  vegan/vegetarian cases. The policy depends on that full ingredient line (base
+  ingredient + the "or <compliant alternative>") staying intact and visible
+  wherever the recipe is displayed — do not truncate or summarize ingredient text in
+  a way that could drop the alternative half of the line.
+- **Correct the tag, never silence the checker.** A genuine contradiction (no
+  compliant alternative offered — e.g. plain "soy sauce" claimed gluten-free, or
+  "oyster sauce" claimed shellfish-free) gets its specific tag flipped to match the
+  actual ingredient, then `dietary_check_status` set to `'clean'`. The checker's
+  term lists/logic are never weakened or narrowed to make a real contradiction stop
+  firing.
+- **Consequence: accepted swap-policy and false-positive rows RE-FLAG on every
+  fresh `--recheck-only` run, by design.** The checker has no memory of a prior
+  human judgment call — it re-evaluates raw ingredient text every time, so any row
+  the swap policy or a false-cognate call (e.g. "oyster mushroom", "coconut cream")
+  cleared will flip back to `dietary_check_status = 'flagged'` on the next recheck.
+  This is expected and is NOT a bug to "re-fix" — verify by checking whether a
+  re-flagged row's title/cell is already a known accepted case before touching it
+  again.
+
+**Season semantics.** `season` is nullable and null is the CORRECT, default value
+for most rows — it means "eligible year-round," not "unknown" or "needs backfill."
+Only genuinely seasonal dishes (a specific produce window, a weather-dependent
+cooking style) should carry a non-null season; backfilling a season onto a
+year-round dish is a regression, since it hides that dish for 9 months of the year
+instead of surfacing it. The one deliberate, narrow exception: the Super
+Bowl/Valentine's occasion rows (see "Occasion-Aware Suggestions" below) were
+generated with `season = null` (a real leak — both are firmly winter-timed
+occasions) and were backfilled to `season = 'winter'` in a targeted, title+occasion
+-matched fix, exact-scoped to those 10 rows only. The other three tentpole
+occasions (`christmas`/`thanksgiving-week`/`fourth-of-july`) got a correct
+non-null season at generation time and were never touched.
+
+**Current state (as of the most recent scale-up + top-up runs):** 1,828 rows in
+`suggested_recipe_pool` across every matrix cell at its (tiered) target depth plus
+the 25 occasion rows, 41 rows sitting at `dietary_check_status = 'flagged'` — all
+41 are known, already-triaged accepted cases (uniform-swap-policy or false-cognate
+rows that re-flag by design, per the policies above), not unreviewed contradictions
+— and `vetting_status = 'pending'` on all rows, awaiting a future human-review pass
+before any are eligible to surface to real users.
 
 ## Suggested Recipes — Layer 2 (taste profile)
 
@@ -1983,3 +2051,174 @@ renders on that tile only — no crash, other tiles unaffected.
   regressions); diffed against the chip (Thread 1) and receiving (Thread 2) code
   paths to confirm zero incidental touches; traced tap → RPC fetch → detail view →
   save → library end-to-end.
+
+---
+
+## Occasion-Aware Suggestions
+
+**DONE, deployed to production 2026-08-28 (`compute-slice` v3).** Extends the Layer
+1-4 suggestions pipeline above so the daily slice can guarantee a seat for a
+recipe matching an active cultural-calendar occasion (Christmas, Thanksgiving,
+etc.), reusing the exact same pool/gate/picker infrastructure rather than a
+parallel system.
+
+**`suggested_recipe_pool.occasion` column.** Text, nullable. CHECK-constrained
+(`suggested_recipe_pool_occasion_check`) to the 21 slugs defined in
+`src/tipsy/chips.ts`'s cultural-calendar taxonomy (`gameday-football`,
+`super-bowl`, `thanksgiving-week`, `christmas-baking`, `christmas`,
+`new-years-eve`, `fourth-of-july`, `summer-grilling`, `first-cold-snap`,
+`cinco-de-mayo`, `valentines`, `mothers-day`, `fathers-day`, `halloween`,
+`easter`, `st-patricks-day`, `spring-produce`, `tomato-season`,
+`stone-fruit-season`, `citrus-winter`, `soup-season`) plus `NULL`. A partial
+btree index (`suggested_recipe_pool_occasion_idx`, `WHERE occasion IS NOT NULL`)
+supports the occasion-scoped query below without indexing the (majority) rows
+that don't carry one. **This CHECK couples the pool schema to the chips
+taxonomy** — adding a new occasion chip in `chips.ts` later requires a matching
+migration to widen this constraint before any pool row can use the new slug.
+
+**The 25 occasion recipes.** Five tentpole occasions — `christmas`,
+`thanksgiving-week`, `super-bowl`, `fourth-of-july`, `valentines` — each with 5
+recipes (batch ids `occasion-<slug>-01`), generated **occasion-framed** rather
+than matrix-cell-framed: prompts name a category appropriate to the occasion's
+cooking character (e.g. "a centerpiece main," "a required vegetarian option")
+without ever naming a specific dish, and the model self-reports `meal_type`/
+`cuisine` via the same tagging-instruction pattern as the Layer 1 matrix
+pipeline (there being no predetermined matrix cell to source those tags from
+for an occasion row). Every occasion has **at least one verified genuinely
+vegetarian option** (confirmed against actual ingredient text, not just the
+claimed tag). All 25 rows passed the same deterministic dietary-contradiction
+checker used by the Layer 1 pipeline with `dietary_check_status = 'clean'` —
+zero flagged rows across the batch.
+
+**`compute-slice` picker change — the occasion guarantee.** Near a tentpole
+occasion's window, the picker tries to reserve one extra seat on the shelf for
+an occasion-matching recipe, on top of the normal 3-4 AI-selected picks:
+- **Timing** is duplicated (copied, not imported) from `chips.ts` into
+  `compute-slice` as a small self-contained block — see the CLAUDE.md pointer
+  for why this is a cross-cutting maintenance trap, not an oversight.
+- **Occasion query** runs alongside the normal Stage 1 query, filtered to the
+  active occasion slug, applying the exact same dietary gates the normal shelf
+  uses — but deliberately **not** gated on `meal_type = 'dinner'` (an occasion
+  seat may be a side, dessert, or snack) and **not** season-gated (the occasion
+  itself already implies the timing).
+- **Don't-repeat wins.** The occasion candidate must be unseen in the user's
+  last-30-slice history, using the same (unrelaxed) seen-set the normal shelf
+  computes — no separate relaxation logic for this seat. If nothing qualifies,
+  the guarantee simply lapses.
+- **ADD, don't replace.** A qualifying occasion pick is spliced in as a 5th
+  seat, after the normal shelf's own "≥3 valid picks or fallback" safety check
+  has already succeeded independently — never in place of one of the AI's own
+  picks. Chosen over replacement because `user_recipe_slices` has no live shelf
+  UI yet (see Data Layer in CLAUDE.md), so nothing assumes a fixed 3-4 card
+  count.
+- **Fail-silent by design.** The entire occasion path (query, timing check,
+  unseen filter) is wrapped in its own try/catch that only logs — it can never
+  trigger the normal shelf's `fallbackToPriorSliceOrError` and can never throw
+  into the outer handler. Its only failure mode is "no bonus seat," never a
+  degraded or stale shelf.
+- **Response shape.** The JSON response gained an `occasion_bonus` field
+  (`{id, title, occasion}` or `null`) alongside the existing `picks_with_reasons`
+  (now includes the bonus pick, if any) — additive only, no existing field
+  changed shape.
+
+**Verified end-to-end before deploy**, against the real linked project (throwaway
+test users, cleaned up after): an unrestricted user near Christmas got a normal
+shelf plus a guaranteed Christmas pick; a user with a hard vegetarian
+restriction got a guaranteed Christmas pick that was itself vegetarian (proving
+the dietary gates apply to the occasion query, not just the normal shelf); a
+user who'd already seen all 5 Christmas pool rows got no bonus seat (proving
+don't-repeat wins over the guarantee); a non-holiday date produced an
+unchanged normal shelf with `occasion_bonus: null`; and a Super Bowl-window
+date produced a `meal_type: 'snack'` bonus pick (proving the seat isn't
+dinner-restricted). Post-deploy, a production smoke test against the live
+endpoint with today's (non-holiday) date confirmed the everyday path is
+unchanged (`occasion_bonus: null`, normal 4-pick shelf) and that `ai-chat`/
+`copy-received-recipe-photo` were unaffected by the deploy.
+
+---
+
+## Onboarding — Conversational Flow
+
+**What changed.** The three-blank-textbox `QuestionScreen` flow in
+`Onboarding.tsx` was replaced with a scripted chat conversation, reusing Build's
+presentational chat shell (`ChatBubble`, `TypingBubble`, `CookInputBar` — now
+extracted to a shared `src/tipsy/ChatUI.tsx` module so both Build's live AI
+engine and this hard-wired script can render through the same components
+unchanged). This is a **script, not a second AI engine** — there is no live
+model call anywhere in `OnboardingChat`; each AI-side line is a fixed string
+advanced by a small `stage` state machine (`palate → inspiration →
+constraints → done`), paced with `TypingBubble` for a natural feel.
+
+**Write contract — unchanged, byte-identical.** Every write goes through the
+exact same setters the old three-textbox flow used:
+- `onUpdate({ palate: val })`, `onUpdate({ inspiration: val })`,
+  `onUpdate({ constraints: val })` — raw user text, no parsing or
+  restructuring applied at this step.
+- `onUpdate({ onboarding_complete: true })` at handoff, from the same `Loader`
+  component as before.
+- `generateTasteProfile(profile.id, { palate, inspiration, constraints })`
+  fired from the same intent site as before (inside `Loader`, never routed
+  through a generic `updateProfile`).
+
+No `profiles` schema changes were made or needed for this step.
+
+**Placeholder acknowledgments, marked for a later prompt.** After each answer,
+the script currently replies with a flat "Got it." rather than a reactive
+reflection of what the user said, and no allergy/dislike structuring is
+applied to the `constraints` answer — it is stored as the same free-text blob
+`onUpdate({ constraints: val })` always wrote. Both gaps are intentional and
+marked in `OnboardingChat` with `// SEAM:` comments at the exact two spots a
+future prompt will slot in (1) reactive reflect-back copy and (2) an
+allergy/dislike parser — out of scope for this build.
+
+**Handoff race fix.** Two follow-on read-pass diagnostics (not part of this
+build) had established that a brand-new user's first suggested-recipe slice
+could compute against a stale/empty `taste_profile`, because the old `Loader`
+fired `generateTasteProfile` without awaiting it and handed off to Home on a
+flat timer. The new `Loader` instead:
+1. Writes `onboarding_complete: true` (fail-soft — logs and continues on
+   error, never blocks).
+2. Kicks off `generateTasteProfile(...)`, and races it against a bounded
+   timeout using `Promise.race` — whichever settles first releases the
+   handoff. The timeout is one tunable constant,
+   `TASTE_PROFILE_HANDOFF_TIMEOUT_MS` (default 9000ms).
+3. A second tunable constant, `NON_ALLERGY_EARLY_RELEASE_MS` (default 9000ms,
+   i.e. the same as the full timeout out of the box), governs the release
+   bound when the user's no-gos answer does **not** simple-text-match
+   `/allerg(y|ies|ic)/i`. When it *does* match, the full
+   `TASTE_PROFILE_HANDOFF_TIMEOUT_MS` is always used instead — the intent is
+   that allergy-flagged sessions bias toward waiting for a real
+   `taste_profile` before ever reaching a suggestion shelf, while non-allergy
+   sessions are the one safe place to dial the wait down for a snappier
+   handoff later, without touching the allergy-safe path.
+4. If `generateTasteProfile` finishes first, the `Loader` re-selects the
+   freshly-written `taste_profile` from `profiles` and pushes it back into
+   local state via the same `onUpdate` setter, so App-level state (which
+   `generateTasteProfile` itself bypasses, writing directly to Supabase)
+   actually reflects the new value.
+5. Either way — success or timeout — the handoff always releases to Home;
+   this path can never hang.
+
+**Home "self-correct."** `Home.tsx`'s slice-loading effect was split into two
+independent effects (previously one, bundling pending-received-recipes with
+slice loading). The slice-loading effect now depends on `profile?.taste_profile`,
+so if `taste_profile` lands on local state *after* Home has already mounted
+(e.g. the handoff released on the timeout branch), `computeMySlice()` re-runs
+once the real value arrives — quietly, without resetting `sliceLoading` back to
+a spinner state.
+
+**Known limitation, deliberately not fixed here:** `compute-slice` (Supabase
+Edge Function) short-circuits to whatever slice row already exists for
+`(user_id, slice_date = today)` — see its Stage-1 existing-slice check. This
+means the Home self-correct effect only has a real chance to change the
+carousel's contents for a user whose very first slice has not yet been minted;
+if the timeout branch already caused one blank/generic slice to be persisted
+for today, the self-correct re-fetch will simply receive that same persisted
+row back, not a freshly recomputed one. Fixing this would mean changing
+`compute-slice`'s short-circuit behavior, which is explicitly out of scope for
+this front-end-only build.
+
+**Untouched by this build:** `generateTasteProfile`'s own implementation,
+`compute-slice`, the suggested-recipes pool/matrix pipeline, the chip system,
+`normalizeStep()`, the Recipe List cache, account-to-account sharing, and the
+Profile edit screen.

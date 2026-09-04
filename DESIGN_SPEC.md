@@ -256,3 +256,10 @@ gained a fourth section; final current state:
 - Your Kitchen section: Your palate / Inspiration / Constraints rows, each row's subtitle truncated to 30 chars with an ellipsis.
 - Support section: Sign Out, Contact us.
 - Field-edit sheets (opened by tapping a row): back arrow + field label (Inter 700 uppercase) centered header, single input or textarea (cream-on-light input treatment: `rgba(35,60,0,0.05)` bg, `rgba(35,60,0,0.12)` border, radius 12px), full-width dark-green Save pill at the bottom.
+
+## Onboarding — Conversational Flow
+- Replaces the old three-blank-textbox step with a scripted chat thread, visually identical to Build's Active State conversation (see "Build — Active State" above) rather than a new look of its own: same `ChatBubble` treatment (user messages cream bubble/green text radius `18px 18px 4px 18px`; AI lines no-bubble Fraunces italic cream text directly on background, max-width 88%), same `TypingBubble` three-dot pacing indicator between script lines, same `CookInputBar` input row and send button — all three now shared from `ChatUI.tsx` rather than living only in Build.
+- No photo-attach affordance on this input bar — `CookInputBar`'s attach button only renders when an `onAttachClick` handler is passed in, and onboarding doesn't pass one.
+- No chips, no "or just type" divider, no mini player — this is a single linear thread with no branching UI, unlike Build's Empty/Active states.
+- Handoff screen ("Setting up your kitchen…") is visually unchanged from before this build: pulsing kitchen icon centered on the gradient background, Inter label beneath. The only change is timing/orchestration underneath (see FEATURE_SPECS.md's "Onboarding — Conversational Flow" section), not appearance.
+- Slide transitions between the chat step and the handoff step reuse the same `DURATION`/easing already used elsewhere in `Onboarding.tsx` — untouched by this build.
