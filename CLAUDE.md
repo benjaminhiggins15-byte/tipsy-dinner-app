@@ -62,7 +62,7 @@ pointer named — do not duplicate it here.
 - **`matrix-pipeline.mjs`'s existing-rows fetch MUST stay paginated** — do not remove it; above 1,000 pool rows the additive shortfall count silently breaks without it. Full detail: Suggested Recipes Pool — Layer 1 in FEATURE_SPECS.md.
 - **Accepted dietary-checker flags (swap-policy + false-cognate rows) are DESIGNED to re-flag on every `--recheck-only` run** — do not "re-fix" a re-flagged row without first checking it isn't already a known accepted case. Full detail: Suggested Recipes Pool — Layer 1 in FEATURE_SPECS.md.
 - **The dietary swap policy depends on the full ingredient line surviving display** — never truncate/summarize an ingredient string in a way that could drop an "or `<alternative>`" clause; that clause is the compliance proof. Full detail: Suggested Recipes Pool — Layer 1 in FEATURE_SPECS.md.
-- **Onboarding's chat script writes `profiles` via the exact same setters as the old three-textbox flow, and bounds the `generateTasteProfile` handoff with two tunable timeouts** — never let it hang, and know `compute-slice`'s existing-slice short-circuit limits same-day self-correction. Full detail: Onboarding — Conversational Flow in FEATURE_SPECS.md.
+- **Onboarding's chat script writes `profiles` via the exact same setters as the old three-textbox flow, and gates the `generateTasteProfile` handoff on a real DB poll bounded by a single tunable ceiling** — never let it hang, and know `compute-slice`'s existing-slice short-circuit means a ceiling-timeout slice sticks for the rest of that day. Full detail: Onboarding — Conversational Flow in FEATURE_SPECS.md.
 
 ---
 

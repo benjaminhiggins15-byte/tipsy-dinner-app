@@ -24,25 +24,41 @@ type Props = {
 // regardless — the fix for the confirmed handoff race (a brand-new user's
 // first compute-slice call could previously run against a still-null
 // taste_profile because navigation to Home never waited on this call at
-// all). Never hangs past this. Tunable on-phone.
-const TASTE_PROFILE_HANDOFF_TIMEOUT_MS = 9000;
+// all). generateTasteProfile writes taste_profile directly via Supabase, with
+// no path back into app state, so the only way to know it's actually ready is
+// to poll the row itself. Never hangs past this ceiling. Tunable on-phone.
+const HANDOFF_MAX_WAIT_MS = 6000;
 
-// Non-allergy sessions may release to Home once this window elapses even if
-// taste_profile hasn't landed yet, trusting Home's taste_profile-dependent
-// self-correct effect (see Home.tsx) to pick up personalization once it does
-// land. Allergy-flagged sessions (see containsAllergyMention below) ignore
-// this and always hold for the full TASTE_PROFILE_HANDOFF_TIMEOUT_MS instead.
-// Default matches the full timeout (i.e. no early release for anyone) until
-// deliberately tuned down for the non-allergy path — keep both constants
-// adjacent so they're trivially tunable together.
-const NON_ALLERGY_EARLY_RELEASE_MS = TASTE_PROFILE_HANDOFF_TIMEOUT_MS;
+// Poll interval while waiting on the ceiling above.
+const TASTE_PROFILE_POLL_INTERVAL_MS = 400;
 
-// SEAM: placeholder allergy detection only, used to bias the handoff timing
-// above. A real structured allergy/dislike parser (and the reactive
-// reflections referenced elsewhere in this file) lands in a follow-up build —
-// this does not change what gets written to `constraints`.
-function containsAllergyMention(text: string): boolean {
-  return /allerg(y|ies|ic)/i.test(text);
+// Polls profiles.taste_profile for this user until it's populated or maxWaitMs
+// elapses, releasing the instant it's ready rather than waiting the full
+// ceiling. Any poll error is swallowed and treated as "not ready yet" — this
+// runs during a stranger's first interaction with the app and must never
+// throw or hang.
+async function waitForTasteProfile(profileId: string, maxWaitMs: number, intervalMs: number): Promise<string | null> {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("taste_profile")
+        .eq("id", profileId)
+        .maybeSingle();
+      if (error) throw error;
+      if (data?.taste_profile) return data.taste_profile;
+    } catch (err) {
+      console.error("Taste profile poll failed, releasing at ceiling:", err);
+      const remaining = deadline - Date.now();
+      if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
+      return null;
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(intervalMs, remaining)));
+  }
+  return null;
 }
 
 type ChatMessage = { id: number; role: "user" | "ai"; text: string };
@@ -200,36 +216,26 @@ function Loader({ onUpdate, onDone, profile }: { onUpdate: (updates: Partial<Pro
         return;
       }
 
-      const hasAllergyMention = containsAllergyMention(profile.constraints || "");
-      const releaseBoundMs = hasAllergyMention ? TASTE_PROFILE_HANDOFF_TIMEOUT_MS : NON_ALLERGY_EARLY_RELEASE_MS;
-
-      const tasteProfileDone = generateTasteProfile(profile.id, {
+      // Fire-and-forget — generateTasteProfile writes taste_profile directly
+      // via Supabase and is itself fail-quiet. We don't await it here; the
+      // poll below is the actual readiness signal.
+      generateTasteProfile(profile.id, {
         palate: profile.palate,
         inspiration: profile.inspiration,
         constraints: profile.constraints,
-      }).then(async () => {
-        // generateTasteProfile writes taste_profile directly via Supabase,
-        // bypassing onUpdate — so nothing else refreshes local profile state.
-        // Sync it back in via the existing onUpdate setter so Home's
-        // taste_profile-dependent self-correct effect actually has something
-        // to react to, including when this lands AFTER the bounded release
-        // below (this continues running even after this component unmounts).
+      }).catch((err) => {
+        console.error("Taste profile generation failed:", err);
+      });
+
+      const tasteProfile = await waitForTasteProfile(profile.id, HANDOFF_MAX_WAIT_MS, TASTE_PROFILE_POLL_INTERVAL_MS);
+      if (tasteProfile) {
         try {
-          const { data, error } = await supabase
-            .from("profiles")
-            .select("taste_profile")
-            .eq("id", profile.id)
-            .maybeSingle();
-          if (!error && data) {
-            await onUpdate({ taste_profile: data.taste_profile });
-          }
+          await onUpdate({ taste_profile: tasteProfile });
         } catch (err) {
           console.error("Taste profile state sync failed:", err);
         }
-      });
+      }
 
-      const timeout = new Promise<void>((resolve) => setTimeout(resolve, releaseBoundMs));
-      await Promise.race([tasteProfileDone, timeout]);
       if (!cancelled) onDone();
     })();
 

@@ -2171,52 +2171,57 @@ marked in `OnboardingChat` with `// SEAM:` comments at the exact two spots a
 future prompt will slot in (1) reactive reflect-back copy and (2) an
 allergy/dislike parser — out of scope for this build.
 
-**Handoff race fix.** Two follow-on read-pass diagnostics (not part of this
-build) had established that a brand-new user's first suggested-recipe slice
-could compute against a stale/empty `taste_profile`, because the old `Loader`
-fired `generateTasteProfile` without awaiting it and handed off to Home on a
-flat timer. The new `Loader` instead:
+**Handoff race fix, v1 (superseded below).** A read-pass diagnostic (not part
+of this build) had established that a brand-new user's first suggested-recipe
+slice could compute against a stale/empty `taste_profile`, because the old
+`Loader` fired `generateTasteProfile` without awaiting it and handed off to
+Home on a flat timer. The first fix raced `generateTasteProfile` against a
+flat timeout via `Promise.race`, with a second constant biasing
+allergy-flagged sessions toward the full wait, plus a Home effect keyed on
+`profile?.taste_profile` meant to "self-correct" the carousel if the real
+value landed after handoff.
+
+**Superseded — v2, the actual shipped behavior.** On review, the v1
+self-correct was dead on arrival for two compounding reasons: (1)
+`generateTasteProfile` writes `taste_profile` straight to Supabase with no
+path back into React state, so `profile.taste_profile` in memory could never
+actually change to trigger the effect without the `Loader` manually
+re-syncing it — and even when it did, (2) `compute-slice`'s Stage-1
+existing-slice short-circuit (see its own section above) meant Home's re-fetch
+just received back the same already-persisted row for today, never a fresh
+recompute. The self-correct effect was removed as unreachable, and the
+`Loader` was rewritten around a single real signal instead of two racing
+approximations:
 1. Writes `onboarding_complete: true` (fail-soft — logs and continues on
    error, never blocks).
-2. Kicks off `generateTasteProfile(...)`, and races it against a bounded
-   timeout using `Promise.race` — whichever settles first releases the
-   handoff. The timeout is one tunable constant,
-   `TASTE_PROFILE_HANDOFF_TIMEOUT_MS` (default 9000ms).
-3. A second tunable constant, `NON_ALLERGY_EARLY_RELEASE_MS` (default 9000ms,
-   i.e. the same as the full timeout out of the box), governs the release
-   bound when the user's no-gos answer does **not** simple-text-match
-   `/allerg(y|ies|ic)/i`. When it *does* match, the full
-   `TASTE_PROFILE_HANDOFF_TIMEOUT_MS` is always used instead — the intent is
-   that allergy-flagged sessions bias toward waiting for a real
-   `taste_profile` before ever reaching a suggestion shelf, while non-allergy
-   sessions are the one safe place to dial the wait down for a snappier
-   handoff later, without touching the allergy-safe path.
-4. If `generateTasteProfile` finishes first, the `Loader` re-selects the
-   freshly-written `taste_profile` from `profiles` and pushes it back into
-   local state via the same `onUpdate` setter, so App-level state (which
-   `generateTasteProfile` itself bypasses, writing directly to Supabase)
-   actually reflects the new value.
-5. Either way — success or timeout — the handoff always releases to Home;
-   this path can never hang.
+2. Fires `generateTasteProfile(...)` without awaiting it (it's fail-quiet on
+   its own).
+3. `waitForTasteProfile()` then **polls** `profiles.taste_profile` for this
+   user directly — a light `select` every `TASTE_PROFILE_POLL_INTERVAL_MS`
+   (400ms) — until it's populated or a single ceiling constant,
+   `HANDOFF_MAX_WAIT_MS` (6000ms), elapses. This replaces both v1 constants;
+   there is no allergy-based weighting in this model — one ceiling for every
+   session.
+4. The instant the poll finds a populated `taste_profile`, it's pushed into
+   local state via the existing `onUpdate` setter and the handoff releases
+   immediately — it does not wait out the rest of the ceiling.
+5. Any poll error is swallowed and treated as "not ready" — the sequence
+   still releases to Home once the ceiling elapses. Either way, timeout or
+   success, the handoff always releases; this path can never hang or surface
+   an error to the user.
 
-**Home "self-correct."** `Home.tsx`'s slice-loading effect was split into two
-independent effects (previously one, bundling pending-received-recipes with
-slice loading). The slice-loading effect now depends on `profile?.taste_profile`,
-so if `taste_profile` lands on local state *after* Home has already mounted
-(e.g. the handoff released on the timeout branch), `computeMySlice()` re-runs
-once the real value arrives — quietly, without resetting `sliceLoading` back to
-a spinner state.
+`Home.tsx`'s slice-loading effect is back to running once on mount (no
+`taste_profile` dependency) — the burden of making sure `taste_profile` is
+populated before Home ever sees a user now sits entirely with the `Loader`'s
+poll, which is a real readiness check rather than an unreachable reactive
+patch.
 
-**Known limitation, deliberately not fixed here:** `compute-slice` (Supabase
-Edge Function) short-circuits to whatever slice row already exists for
-`(user_id, slice_date = today)` — see its Stage-1 existing-slice check. This
-means the Home self-correct effect only has a real chance to change the
-carousel's contents for a user whose very first slice has not yet been minted;
-if the timeout branch already caused one blank/generic slice to be persisted
-for today, the self-correct re-fetch will simply receive that same persisted
-row back, not a freshly recomputed one. Fixing this would mean changing
-`compute-slice`'s short-circuit behavior, which is explicitly out of scope for
-this front-end-only build.
+**Known limitation, unchanged:** if `HANDOFF_MAX_WAIT_MS` is hit before
+`generateTasteProfile` finishes, that user's first slice still computes
+against a blank `taste_profile`, and `compute-slice`'s existing-slice
+short-circuit means that first slice sticks for the rest of the day — there
+is no same-day recovery path from the front end alone. Only a longer ceiling
+or a `compute-slice` change (out of scope here) closes this gap entirely.
 
 **Untouched by this build:** `generateTasteProfile`'s own implementation,
 `compute-slice`, the suggested-recipes pool/matrix pipeline, the chip system,
