@@ -350,8 +350,16 @@ function OnboardingChat({
       await sayReflection(reflectionPromise, nextFallbackAck());
       await writePromise;
 
-      await sayAI(`Okay, here's what I've got: ${answersRef.current.palate} / ${answersRef.current.inspiration} / ${val}.`);
-      await sayAI("Give me a second — setting up your kitchen around that.");
+      // Single closing handoff line — no profile re-list, since the
+      // per-answer reflections above already covered it. onNext() (which
+      // drives the visual slide to the loading screen) fires only after this
+      // line's own await resolves, i.e. only once it has fully revealed (or,
+      // on a reveal error, snapped straight to full text — see revealMessage's
+      // fail-soft showFull() path) — never mid-sentence. The profile-
+      // readiness poll itself (waitForTasteProfile/HANDOFF_MAX_WAIT_MS) is
+      // untouched: it still only starts once the Loader mounts, exactly as
+      // before this line was added.
+      await sayAI("Perfect — that's everything I need. Setting up your kitchen around this now.");
       setStage("done");
       onNext();
       return;
