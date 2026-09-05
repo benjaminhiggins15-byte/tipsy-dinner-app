@@ -2184,13 +2184,25 @@ exact established pattern (inlined Supabase URL/anon-key/fetch,
 `parseSSEStream` consumption, try/catch, `null`-on-any-failure — never throws,
 never hangs):
 
-- **`generateOnboardingReflection(field, answer)`** — one short-sentence
-  faithful paraphrase of what the user just said, parameterized per question
-  (`palate` / `inspiration` / `constraints`) so the reflection is scoped to
-  what was actually asked. The system prompt is explicit: never invent or
-  attribute an unstated preference; under-claim on a thin answer rather than
-  over-claim; no superlatives, no self-reference, no praise-bot tone. Returns
-  `string | null`.
+- **`generateOnboardingReflection(field, answer)`** — one short sentence of
+  warm RECOGNITION, parameterized per question (`palate` / `inspiration` /
+  `constraints`) so the reflection is scoped to what was actually asked.
+  **Superseded 2026-09 (Step 3b):** the first version paraphrased/echoed the
+  input ("italian" -> "you like to cook Italian food"), which on-phone testing
+  found lifeless — confirmation, not recognition. Each field's prompt was
+  rewritten to explicitly forbid two named failure modes and target the
+  middle: ECHOING (flat restatement, forbidden) vs. PRESUMPTUOUS (inventing
+  unstated specifics, forbidden) vs. the TARGET (warmth/texture that plainly
+  follows from the answer without claiming anything unstated), with worked
+  examples of all three baked into the prompt for a terse one-word case (and,
+  for palate, an additional richer-answer example). The constraints prompt
+  carries its own no-gos-specific example set and an explicit instruction not
+  to restate a real allergy clinically ("you're allergic to nuts") but to
+  acknowledge it briefly and warmly ("Nuts — noted, I'll keep those off
+  entirely.") without softening or omitting it. Never invents or attributes an
+  unstated preference in any version; under-claims on a thin answer rather
+  than over-claims; no superlatives, no self-reference, no praise-bot tone.
+  Returns `string | null`.
 - **`parseNoGosAnswer(answer)`** — a separate AI call that composes the raw
   constraints answer into two severity-labeled lines:
   `ALLERGY (hard, never serve): ...` / `DISLIKES (prefer to avoid): ...`
@@ -2225,11 +2237,25 @@ Concurrency discipline, per stage:
   whether a valid composed string exists. `constraintsToWrite` is
   `parseComposedConstraints(rawParsed) ?? val` — i.e. the composed,
   severity-labeled string on success, or the user's own raw typed answer on
-  any failure (timeout, parse error, or malformed AI output). The recap line
-  shown to the user still quotes their raw answer (`val`), not the composed
-  multi-line form, since the recap is a human-readable summary, not a stored
-  value. Both the write and the reflection UI settle before the recap/handoff
-  lines fire.
+  any failure (timeout, parse error, or malformed AI output). Both the write
+  and the reflection UI settle before the closing handoff line fires (see
+  below).
+
+**Closing handoff line (Step 3b).** On-phone testing found the sequence
+following the no-gos reflection — a full profile recap line, then a "Give me a
+second…" line — could get visually cut off mid-sentence by the slide into the
+loading screen. The two lines were replaced with a single closing beat, "Perfect
+— that's everything I need. Setting up your kitchen around this now." (no
+profile re-list — the per-answer reflections already covered that), shown via
+the same `sayAI()` mechanism as any other scripted line. `onNext()` — which
+drives the visual slide transition into the `Loader` — is called only after
+this line's own `await` resolves, i.e. only once it has fully revealed (or, on
+a reveal error, snapped straight to full text via `revealMessage`'s existing
+fail-soft `showFull()` path), so the transition can never start mid-sentence.
+This is a purely visual/ordering change: the profile-readiness poll
+(`waitForTasteProfile`/`HANDOFF_MAX_WAIT_MS`) is untouched and still only
+starts once `Loader` mounts, immediately after this line finishes and the
+transition begins — the line's reveal and the poll do not wait on each other.
 
 **`sayReflection()` vs. `sayAI()` — a deliberate pacing decision.** `sayAI()`
 shows the fixed `SCRIPTED_TYPING_INDICATOR_MS` (2000ms) typing-indicator pause
