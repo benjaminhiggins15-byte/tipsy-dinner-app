@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type CSSProperties } from "react";
-import { generateTasteProfile } from "./data";
+import { generateTasteProfile, generateOnboardingReflection, parseNoGosAnswer, parseComposedConstraints } from "./data";
 import { supabase } from "../lib/supabase";
 import { ChatBubble, TypingBubble, CookInputBar } from "./ChatUI";
 
@@ -79,6 +79,61 @@ const SCRIPTED_REVEAL_MS_PER_WORD = 40;
 // on-phone; does not affect SCRIPTED_REVEAL_MS_PER_WORD above.
 const SCRIPTED_TYPING_INDICATOR_MS = 2000;
 
+// Bounded wait for a reactive reflection line (generateOnboardingReflection)
+// before the script falls back to a plain ack instead. Presentation-only
+// pacing — never gates the profile write itself; handleSend fires the write
+// and the reflection call concurrently, so a slow/failed reflection can
+// never delay or block a write. Tunable on-phone.
+const REFLECTION_TIMEOUT_MS = 2500;
+
+// Bounded wait for the constraints parser (parseNoGosAnswer) specifically.
+// Unlike the reflection above, this one DOES gate what gets written — the
+// constraints write waits to know whether a composed, severity-labeled
+// string is available — so it gets its own, slightly longer ceiling. On
+// timeout or malformed output, the write falls back to the user's raw typed
+// answer.
+const CONSTRAINTS_PARSE_TIMEOUT_MS = 4000;
+
+// Rotating plain acknowledgments for when a reflection isn't ready in time
+// (timeout, network failure, or empty output) — never a hang, never a
+// visible error, just a slightly less specific "I heard you" line. Rotated
+// rather than always repeating "Got it." now that it's a visible fallback
+// path rather than the only path.
+const REFLECTION_FALLBACK_ACKS = ["Got it.", "Noted.", "Good to know."];
+
+// Races a promise against a ceiling, resolving null (never rejecting) if the
+// ceiling is hit first or the underlying promise rejects. Used to bound the
+// reflection/parser calls above for UI pacing — the underlying data.ts
+// functions are already fail-quiet on their own, this adds only a UX-facing
+// time ceiling on top.
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        resolve(null);
+      }
+    }, ms);
+    promise
+      .then((value) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(value);
+        }
+      })
+      .catch((err) => {
+        console.error("withTimeout: underlying promise rejected:", err);
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(null);
+        }
+      });
+  });
+}
+
 // Scripted conversational onboarding. Reuses Build's chat presentation
 // (ChatBubble, the messages[] list shape, the input bar, typing indicator)
 // as a visual shell around a hard-wired script — NOT the Build engine
@@ -97,57 +152,95 @@ function OnboardingChat({
   const startedRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const answersRef = useRef({ palate: "", inspiration: "" });
+  const fallbackAckIndexRef = useRef(0);
 
   const pushMessage = (role: "user" | "ai", text: string) => {
     idRef.current += 1;
     setMessages((prev) => [...prev, { id: idRef.current, role, text }]);
   };
 
+  // Rotates through REFLECTION_FALLBACK_ACKS rather than always showing the
+  // same line, since this is now a visible fallback path (reflection
+  // timeout/failure) rather than the only path.
+  const nextFallbackAck = (): string => {
+    const ack = REFLECTION_FALLBACK_ACKS[fallbackAckIndexRef.current % REFLECTION_FALLBACK_ACKS.length];
+    fallbackAckIndexRef.current += 1;
+    return ack;
+  };
+
+  // Word-by-word reveal, extracted from sayAI so a reflection-driven message
+  // (sayReflection below) can share the exact same reveal feel without
+  // sayAI's fixed typing-indicator pause. Fail-soft: any reveal error snaps
+  // straight to the full line rather than leaving a stuck partial one.
+  const revealMessage = (text: string): Promise<void> =>
+    new Promise<void>((resolve) => {
+      idRef.current += 1;
+      const id = idRef.current;
+      setMessages((prev) => [...prev, { id, role: "ai", text: "" }]);
+
+      const showFull = () => {
+        setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, text } : m)));
+        resolve();
+      };
+
+      try {
+        const words = text.split(" ");
+        let revealed = 0;
+        const revealNext = () => {
+          try {
+            revealed += 1;
+            const partial = words.slice(0, revealed).join(" ");
+            setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, text: partial } : m)));
+            if (revealed < words.length) {
+              setTimeout(revealNext, SCRIPTED_REVEAL_MS_PER_WORD);
+            } else {
+              resolve();
+            }
+          } catch (err) {
+            console.error("Scripted reveal step failed, showing full line:", err);
+            showFull();
+          }
+        };
+        revealNext();
+      } catch (err) {
+        console.error("Scripted reveal setup failed, showing full line:", err);
+        showFull();
+      }
+    });
+
   // Presentational only — mirrors Build's typing-indicator-then-reveal feel
   // (ChatBubble/TypingBubble from ChatUI.tsx) with a synthetic word-by-word
   // reveal in place of Build's real token stream. Never affects what gets
   // written to `profiles` or when — callers already write via safeUpdate
-  // before awaiting this. Fail-soft: any reveal error snaps straight to the
-  // full line rather than leaving a stuck partial one.
-  const sayAI = (text: string, pauseMs = SCRIPTED_TYPING_INDICATOR_MS) =>
+  // before awaiting this.
+  const sayAI = (text: string, pauseMs = SCRIPTED_TYPING_INDICATOR_MS): Promise<void> =>
     new Promise<void>((resolve) => {
       setTyping(true);
       setTimeout(() => {
         setTyping(false);
-        idRef.current += 1;
-        const id = idRef.current;
-        setMessages((prev) => [...prev, { id, role: "ai", text: "" }]);
-
-        const showFull = () => {
-          setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, text } : m)));
-          resolve();
-        };
-
-        try {
-          const words = text.split(" ");
-          let revealed = 0;
-          const revealNext = () => {
-            try {
-              revealed += 1;
-              const partial = words.slice(0, revealed).join(" ");
-              setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, text: partial } : m)));
-              if (revealed < words.length) {
-                setTimeout(revealNext, SCRIPTED_REVEAL_MS_PER_WORD);
-              } else {
-                resolve();
-              }
-            } catch (err) {
-              console.error("Scripted reveal step failed, showing full line:", err);
-              showFull();
-            }
-          };
-          revealNext();
-        } catch (err) {
-          console.error("Scripted reveal setup failed, showing full line:", err);
-          showFull();
-        }
+        revealMessage(text).then(resolve);
       }, pauseMs);
     });
+
+  // Reflection-driven variant of sayAI: shows the typing indicator for the
+  // ACTUAL bounded network wait (awaitReflection is already
+  // withTimeout()-bounded by the caller) instead of stacking the fixed
+  // SCRIPTED_TYPING_INDICATOR_MS pause on top of it afterward. Stacking both
+  // would make a reflection line take up to ~4.5s total (2.5s network wait +
+  // 2s cosmetic pause) — clearly slower than a plain scripted line, which
+  // defeats the point of a *reactive* reflection. Falls back to `fallback`
+  // (a rotating plain ack) on timeout, error, or empty reflection text.
+  const sayReflection = async (awaitReflection: Promise<string | null>, fallback: string): Promise<void> => {
+    setTyping(true);
+    let text: string | null = null;
+    try {
+      text = await awaitReflection;
+    } catch (err) {
+      console.error("Reflection wait failed:", err);
+    }
+    setTyping(false);
+    await revealMessage(text || fallback);
+  };
 
   // Fail-soft: a write failure must never block/hang the conversation or
   // surface an error to a brand-new user — the script always proceeds.
@@ -190,10 +283,18 @@ function OnboardingChat({
 
     if (stage === "palate") {
       answersRef.current.palate = val;
-      await safeUpdate({ palate: val });
-      // SEAM: reactive reflection on the palate answer slots in here (next
-      // build) — for now this is a plain placeholder acknowledgment.
-      await sayAI("Got it.");
+      // Write and reflection fire concurrently — the reflection never gates
+      // the write, and a slow/failed reflection can't delay it either.
+      const writePromise = safeUpdate({ palate: val });
+      const reflectionPromise = withTimeout(
+        generateOnboardingReflection("palate", val).catch((err) => {
+          console.error("Onboarding reflection failed:", err);
+          return null;
+        }),
+        REFLECTION_TIMEOUT_MS
+      );
+      await sayReflection(reflectionPromise, nextFallbackAck());
+      await writePromise;
       await sayAI("Who shapes how you cook? A chef, a cookbook, an account you save from, someone who taught you.");
       setStage("inspiration");
       setAwaitingInput(true);
@@ -202,10 +303,16 @@ function OnboardingChat({
 
     if (stage === "inspiration") {
       answersRef.current.inspiration = val;
-      await safeUpdate({ inspiration: val });
-      // SEAM: reactive reflection on the inspiration answer slots in here
-      // (next build) — for now this is a plain placeholder acknowledgment.
-      await sayAI("Got it.");
+      const writePromise = safeUpdate({ inspiration: val });
+      const reflectionPromise = withTimeout(
+        generateOnboardingReflection("inspiration", val).catch((err) => {
+          console.error("Onboarding reflection failed:", err);
+          return null;
+        }),
+        REFLECTION_TIMEOUT_MS
+      );
+      await sayReflection(reflectionPromise, nextFallbackAck());
+      await writePromise;
       await sayAI("Last thing, and this one I'll always respect. Any allergies I should know about? And then, separately, anything you'd just rather not see.");
       setStage("constraints");
       setAwaitingInput(true);
@@ -213,12 +320,36 @@ function OnboardingChat({
     }
 
     if (stage === "constraints") {
-      await safeUpdate({ constraints: val });
-      // SEAM: structured allergy/dislike parsing + reactive reflection slots
-      // in here (next build) — for now the raw no-gos text is written as-is
-      // via the same onUpdate path the rest of onboarding uses, with only a
-      // plain acknowledgment shown.
-      await sayAI("Got it.");
+      // The parser and reflection both fire concurrently, but only the
+      // parser is awaited before writing — the write needs to know whether a
+      // composed, severity-labeled string is available. On timeout or
+      // malformed output, parseComposedConstraints/rawParsed fall back to
+      // the user's raw typed answer, which is always safe to store verbatim.
+      const reflectionPromise = withTimeout(
+        generateOnboardingReflection("constraints", val).catch((err) => {
+          console.error("Onboarding reflection failed:", err);
+          return null;
+        }),
+        REFLECTION_TIMEOUT_MS
+      );
+      const parsePromise = withTimeout(
+        parseNoGosAnswer(val).catch((err) => {
+          console.error("No-gos parsing failed:", err);
+          return null;
+        }),
+        CONSTRAINTS_PARSE_TIMEOUT_MS
+      );
+
+      const rawParsed = await parsePromise;
+      const composed = rawParsed ? parseComposedConstraints(rawParsed) : null;
+      const constraintsToWrite = composed || val;
+      const writePromise = safeUpdate({ constraints: constraintsToWrite });
+
+      // Both the write and the reflection UI settle before the recap lines,
+      // so the recap never talks past a still-in-flight write.
+      await sayReflection(reflectionPromise, nextFallbackAck());
+      await writePromise;
+
       await sayAI(`Okay, here's what I've got: ${answersRef.current.palate} / ${answersRef.current.inspiration} / ${val}.`);
       await sayAI("Give me a second — setting up your kitchen around that.");
       setStage("done");

@@ -2177,14 +2177,80 @@ exact same setters the old three-textbox flow used:
 
 No `profiles` schema changes were made or needed for this step.
 
-**Placeholder acknowledgments, marked for a later prompt.** After each answer,
-the script currently replies with a flat "Got it." rather than a reactive
-reflection of what the user said, and no allergy/dislike structuring is
-applied to the `constraints` answer — it is stored as the same free-text blob
-`onUpdate({ constraints: val })` always wrote. Both gaps are intentional and
-marked in `OnboardingChat` with `// SEAM:` comments at the exact two spots a
-future prompt will slot in (1) reactive reflect-back copy and (2) an
-allergy/dislike parser — out of scope for this build.
+**Reactive reflections + constraints parsing (replaces the placeholder
+acknowledgments above).** The two `// SEAM:` stubs were filled in with two new
+fail-quiet AI-island calls in `data.ts`, following `generateTasteProfile`'s
+exact established pattern (inlined Supabase URL/anon-key/fetch,
+`parseSSEStream` consumption, try/catch, `null`-on-any-failure — never throws,
+never hangs):
+
+- **`generateOnboardingReflection(field, answer)`** — one short-sentence
+  faithful paraphrase of what the user just said, parameterized per question
+  (`palate` / `inspiration` / `constraints`) so the reflection is scoped to
+  what was actually asked. The system prompt is explicit: never invent or
+  attribute an unstated preference; under-claim on a thin answer rather than
+  over-claim; no superlatives, no self-reference, no praise-bot tone. Returns
+  `string | null`.
+- **`parseNoGosAnswer(answer)`** — a separate AI call that composes the raw
+  constraints answer into two severity-labeled lines:
+  `ALLERGY (hard, never serve): ...` / `DISLIKES (prefer to avoid): ...`
+  (either side may read `None`). The prompt is safety-biased: an item the
+  model finds ambiguous between the two buckets is instructed into ALLERGY,
+  never the reverse — a false allergy flag is a harmless over-caution, a
+  missed one is a real risk. Returns the raw composed text, or `null` on
+  failure.
+- **`parseComposedConstraints(rawText)`** — a strict, synchronous (non-AI)
+  validator gating `parseNoGosAnswer`'s output before it's trusted enough to
+  store: requires exactly two lines, exact canonical prefixes, non-empty
+  content on both. Anything else — extra prose, a missing line, wrong
+  wording — returns `null` rather than attempting a lenient/partial parse.
+
+**Wiring in `Onboarding.tsx`'s `handleSend`.** Two new tunable constants bound
+the UX pacing of these calls without touching the engine files:
+`REFLECTION_TIMEOUT_MS` (2500ms) and `CONSTRAINTS_PARSE_TIMEOUT_MS` (4000ms),
+enforced via a small `withTimeout()` helper that races the call against the
+ceiling and resolves `null` (never rejects) either way. On `null` — timeout,
+network failure, or empty text — the script shows a rotating plain
+acknowledgment (`REFLECTION_FALLBACK_ACKS`: "Got it." / "Noted." / "Good to
+know.") instead of leaving a gap or surfacing an error.
+
+Concurrency discipline, per stage:
+- **Palate / inspiration** — the profile write (`safeUpdate`) and the
+  reflection call fire in the same tick; the reflection is displayed via
+  `sayReflection()` while the write proceeds in the background, and the write
+  is awaited only afterward. A slow or failed reflection can never delay or
+  block the write.
+- **Constraints** — the reflection and the parser both fire concurrently, but
+  only the parser is awaited before writing, since the write needs to know
+  whether a valid composed string exists. `constraintsToWrite` is
+  `parseComposedConstraints(rawParsed) ?? val` — i.e. the composed,
+  severity-labeled string on success, or the user's own raw typed answer on
+  any failure (timeout, parse error, or malformed AI output). The recap line
+  shown to the user still quotes their raw answer (`val`), not the composed
+  multi-line form, since the recap is a human-readable summary, not a stored
+  value. Both the write and the reflection UI settle before the recap/handoff
+  lines fire.
+
+**`sayReflection()` vs. `sayAI()` — a deliberate pacing decision.** `sayAI()`
+shows the fixed `SCRIPTED_TYPING_INDICATOR_MS` (2000ms) typing-indicator pause
+before revealing a hard-coded line. Stacking that same fixed pause *after* a
+reflection's own network wait would make a reflection line take up to ~4.5s
+total (2.5s wait + 2s cosmetic pause) — slower than a plain scripted line,
+which defeats the point of a *reactive* reflection. `sayReflection()` instead
+shows the typing indicator for the actual bounded wait itself (the
+already-`withTimeout()`-bounded reflection promise), then reveals immediately
+once it resolves, with no additional fixed pause layered on top. This is a
+judgment call made during this build, not something explicitly specified
+beforehand — flagged here for visibility.
+
+**Write contract, updated.** Palate/inspiration writes are unchanged —
+`onUpdate({ palate: val })` / `onUpdate({ inspiration: val })`, byte-identical
+to before. The constraints write now conditionally stores the composed,
+severity-labeled string instead of the raw blob when parsing succeeds; this is
+the intended outcome of this build, not a regression of the "byte-identical"
+claim made for the palate/inspiration fields above. `onUpdate({
+onboarding_complete: true })` and `generateTasteProfile(...)` at handoff are
+untouched.
 
 **Handoff race fix, v1 (superseded below).** A read-pass diagnostic (not part
 of this build) had established that a brand-new user's first suggested-recipe
