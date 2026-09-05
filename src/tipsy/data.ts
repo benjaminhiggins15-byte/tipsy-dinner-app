@@ -209,6 +209,171 @@ export async function generateTasteProfile(
   }
 }
 
+// Reflection system prompt: one line, faithful paraphrase, never invents.
+// Parameterized per onboarding question so the reflection is scoped to what
+// was actually asked (palate vs inspiration vs constraints) rather than a
+// generic "thanks for sharing" — same fail-quiet-AI-island posture as
+// generateTasteProfile above, just producing a short shown-in-chat sentence
+// instead of a stored profile field.
+const ONBOARDING_REFLECTION_SYSTEM_PROMPTS: Record<
+  "palate" | "inspiration" | "constraints",
+  (answer: string) => string
+> = {
+  palate: (answer) => `You are a warm, attentive cooking assistant reflecting back what a new user just told you about their palate and cooking style — the cuisines, flavors, and way they like to cook.
+
+Write ONE short sentence that paraphrases their answer back to them, in your own words. Do not quote them verbatim. Do NOT invent, infer, or add any cuisine, flavor, dish, or preference they did not state. If their answer is thin or vague, your reflection must be equally thin — under-claim rather than over-claim. No superlatives, no praising the answer, no self-reference ("I love that", "great answer"), no exclamation points. Calm, economical, like a friend who was actually listening. Output ONLY the sentence — no quotes, no preamble, no label.
+
+THEIR ANSWER: ${answer}`,
+  inspiration: (answer) => `You are a warm, attentive cooking assistant reflecting back what a new user just told you about who or what inspires how they cook — a chef, a cookbook, an account, someone who taught them.
+
+Write ONE short sentence that paraphrases their answer back to them, in your own words. Do not quote them verbatim. Do NOT invent, infer, or add any name, style, or detail they did not state. If their answer is thin or vague (e.g. just a name with no elaboration), your reflection must be equally thin — under-claim rather than over-claim. No superlatives, no praising the answer, no self-reference ("I love that", "great answer"), no exclamation points. Calm, economical, like a friend who was actually listening. Output ONLY the sentence — no quotes, no preamble, no label.
+
+THEIR ANSWER: ${answer}`,
+  constraints: (answer) => `You are a warm, attentive cooking assistant reflecting back what a new user just told you about their allergies and dislikes.
+
+Write ONE short sentence that paraphrases their answer back to them, in your own words. Do not quote them verbatim. Do NOT invent, infer, or add any allergy, restriction, or dislike they did not state. If they said they have none, say so plainly and briefly. No superlatives, no praising the answer, no self-reference ("I love that", "great answer"), no exclamation points. Calm, economical, like a friend who was actually listening — this is a safety-relevant answer, so accuracy matters more than warmth. Output ONLY the sentence — no quotes, no preamble, no label.
+
+THEIR ANSWER: ${answer}`,
+};
+
+// Fires a single short-form ai-chat call to produce a faithful one-sentence
+// paraphrase of an onboarding answer, for a reactive "I heard you" line in
+// the scripted chat. Same fail-quiet discipline as generateTasteProfile:
+// never throws, returns null on any failure (network, empty response, etc.)
+// so the caller always has a safe fallback path. This is a stranger's first
+// interaction with the app — nothing here may surface an error.
+export async function generateOnboardingReflection(
+  field: "palate" | "inspiration" | "constraints",
+  answer: string
+): Promise<string | null> {
+  try {
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    if (!supabaseAnonKey) throw new Error("Supabase key not found");
+
+    const systemPrompt = ONBOARDING_REFLECTION_SYSTEM_PROMPTS[field](answer);
+
+    const response = await fetch(
+      "https://xzpmmthreeyscidhwriv.supabase.co/functions/v1/ai-chat",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${supabaseAnonKey}`,
+        },
+        body: JSON.stringify({
+          messages: [{ role: "user", content: "Reflect it back now." }],
+          systemPrompt,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Edge Function error: ${errorText}`);
+    }
+
+    let fullText = "";
+    for await (const chunk of parseSSEStream(response)) {
+      if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta") {
+        fullText += chunk.delta.text;
+      }
+    }
+
+    const trimmed = fullText.trim();
+    return trimmed || null;
+  } catch (error) {
+    console.error("Onboarding reflection generation failed:", error);
+    return null;
+  }
+}
+
+// Composes the constraints field into two severity-labeled sections so the
+// downstream system (buildSystemPrompt, taste profile generation) can act on
+// allergy vs. dislike with different weight. Safety-biased: ambiguous items
+// (unclear whether allergy or preference) are instructed into the ALLERGY
+// bucket, never the reverse — a false allergy flag is a harmless
+// over-caution, a missed one is a real risk. Same fail-quiet discipline as
+// generateTasteProfile: never throws, returns null on any failure so the
+// caller falls back to writing the user's raw answer text.
+const NO_GOS_PARSE_SYSTEM_PROMPT = (answer: string) => `You are composing a structured constraints record from a new user's free-text answer about allergies and dislikes, for a cooking app that will use this to avoid unsafe or unwanted ingredients.
+
+Output EXACTLY two lines, in this exact format, nothing else — no preamble, no explanation:
+ALLERGY (hard, never serve): <items, comma-separated, or the word None>
+DISLIKES (prefer to avoid): <items, comma-separated, or the word None>
+
+Rules:
+- An allergy is anything the user frames as something they cannot eat, are allergic to, or must avoid entirely (including named diets like "vegetarian" or "no pork").
+- A dislike is anything the user frames as merely not enjoying or preferring not to have.
+- If it is AMBIGUOUS which bucket an item belongs in, put it in ALLERGY — never guess toward the less safe bucket.
+- Do NOT invent any item the user did not mention.
+- If the user named nothing for a bucket, write the word None for that line — never omit a line.
+- Read intent through obvious typos silently; do not comment on them.
+
+USER'S ANSWER: ${answer}`;
+
+export async function parseNoGosAnswer(answer: string): Promise<string | null> {
+  try {
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    if (!supabaseAnonKey) throw new Error("Supabase key not found");
+
+    const response = await fetch(
+      "https://xzpmmthreeyscidhwriv.supabase.co/functions/v1/ai-chat",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${supabaseAnonKey}`,
+        },
+        body: JSON.stringify({
+          messages: [{ role: "user", content: "Compose the constraints record now." }],
+          systemPrompt: NO_GOS_PARSE_SYSTEM_PROMPT(answer),
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Edge Function error: ${errorText}`);
+    }
+
+    let fullText = "";
+    for await (const chunk of parseSSEStream(response)) {
+      if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta") {
+        fullText += chunk.delta.text;
+      }
+    }
+
+    const trimmed = fullText.trim();
+    return trimmed || null;
+  } catch (error) {
+    console.error("No-gos parsing failed:", error);
+    return null;
+  }
+}
+
+// Strict, non-AI validator for parseNoGosAnswer's output. The model is asked
+// for an exact two-line format but compliance isn't guaranteed — this is the
+// gate that decides whether its output is trustworthy enough to store, or
+// whether the caller should fall back to the user's raw typed answer
+// instead. Deliberately strict (exact prefixes, non-empty content) rather
+// than lenient: a malformed composed string stored as "the constraints" is
+// worse than falling back to the user's own words, which are always safe to
+// store verbatim.
+const ALLERGY_LINE_PREFIX = "ALLERGY (hard, never serve):";
+const DISLIKES_LINE_PREFIX = "DISLIKES (prefer to avoid):";
+
+export function parseComposedConstraints(rawText: string): string | null {
+  const lines = rawText.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines.length !== 2) return null;
+  const [allergyLine, dislikesLine] = lines;
+  if (!allergyLine.startsWith(ALLERGY_LINE_PREFIX)) return null;
+  if (!dislikesLine.startsWith(DISLIKES_LINE_PREFIX)) return null;
+  const allergyContent = allergyLine.slice(ALLERGY_LINE_PREFIX.length).trim();
+  const dislikesContent = dislikesLine.slice(DISLIKES_LINE_PREFIX.length).trim();
+  if (!allergyContent || !dislikesContent) return null;
+  return `${allergyLine}\n${dislikesLine}`;
+}
+
 function localDateString(): string {
   const d = new Date();
   const year = d.getFullYear();
