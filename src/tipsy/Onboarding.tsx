@@ -79,12 +79,26 @@ const SCRIPTED_REVEAL_MS_PER_WORD = 40;
 // on-phone; does not affect SCRIPTED_REVEAL_MS_PER_WORD above.
 const SCRIPTED_TYPING_INDICATOR_MS = 2000;
 
-// Bounded wait for a reactive reflection line (generateOnboardingReflection)
-// before the script falls back to a plain ack instead. Presentation-only
-// pacing — never gates the profile write itself; handleSend fires the write
-// and the reflection call concurrently, so a slow/failed reflection can
-// never delay or block a write. Tunable on-phone.
+// Bounds TIME-TO-FIRST-TOKEN for a reactive reflection line
+// (generateOnboardingReflection), NOT total completion. Once the first token
+// arrives the reflection is committed to and streams to completion however
+// long that takes — killing a reflection mid-stream to swap in a fallback
+// would be worse than just letting it finish. Only a genuine failure (no
+// first token within this window, network error, or an empty response) falls
+// back to a plain ack. Presentation-only pacing either way — never gates the
+// profile write itself; handleSend fires the write and the reflection call
+// concurrently, so a slow/failed reflection can never delay or block a
+// write. Tunable on-phone.
 const REFLECTION_TIMEOUT_MS = 2500;
+
+// Deliberate pause after the closing handoff line finishes revealing and
+// before onNext() fires the slide into the Loader. Without this, the fully-
+// revealed line and the transition land in the same tick (React batches the
+// final reveal's state update with setStage("done")/setTransition), so the
+// line is carried off-screen with no time to actually read it — this is the
+// fix for that. Fixed, not gated on any async call (fail-soft: cannot hang).
+// Tunable on-phone.
+const HANDOFF_DWELL_MS = 1400;
 
 // Bounded wait for the constraints parser (parseNoGosAnswer) specifically.
 // Unlike the reflection above, this one DOES gate what gets written — the
@@ -103,9 +117,10 @@ const REFLECTION_FALLBACK_ACKS = ["Got it.", "Noted.", "Good to know."];
 
 // Races a promise against a ceiling, resolving null (never rejecting) if the
 // ceiling is hit first or the underlying promise rejects. Used to bound the
-// reflection/parser calls above for UI pacing — the underlying data.ts
-// functions are already fail-quiet on their own, this adds only a UX-facing
-// time ceiling on top.
+// constraints parser call above for UI pacing — the underlying data.ts
+// function is already fail-quiet on its own, this adds only a UX-facing time
+// ceiling on top. The reflection call no longer goes through this — its own
+// first-token timeout lives inside generateOnboardingReflection itself.
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   return new Promise((resolve) => {
     let settled = false;
@@ -168,10 +183,10 @@ function OnboardingChat({
     return ack;
   };
 
-  // Word-by-word reveal, extracted from sayAI so a reflection-driven message
-  // (sayReflection below) can share the exact same reveal feel without
-  // sayAI's fixed typing-indicator pause. Fail-soft: any reveal error snaps
-  // straight to the full line rather than leaving a stuck partial one.
+  // Word-by-word reveal for hard-coded scripted lines (and the reflection
+  // fallback ack — see sayReflection below, which streams a real reflection
+  // live instead of using this). Fail-soft: any reveal error snaps straight
+  // to the full line rather than leaving a stuck partial one.
   const revealMessage = (text: string): Promise<void> =>
     new Promise<void>((resolve) => {
       idRef.current += 1;
@@ -222,24 +237,60 @@ function OnboardingChat({
       }, pauseMs);
     });
 
-  // Reflection-driven variant of sayAI: shows the typing indicator for the
-  // ACTUAL bounded network wait (awaitReflection is already
-  // withTimeout()-bounded by the caller) instead of stacking the fixed
-  // SCRIPTED_TYPING_INDICATOR_MS pause on top of it afterward. Stacking both
-  // would make a reflection line take up to ~4.5s total (2.5s network wait +
-  // 2s cosmetic pause) — clearly slower than a plain scripted line, which
-  // defeats the point of a *reactive* reflection. Falls back to `fallback`
-  // (a rotating plain ack) on timeout, error, or empty reflection text.
-  const sayReflection = async (awaitReflection: Promise<string | null>, fallback: string): Promise<void> => {
+  // Reflection-driven variant of sayAI: streams the reflection into the chat
+  // live as tokens arrive (the same felt cadence as Build's real streaming)
+  // instead of waiting for the full response and revealing it word-by-word
+  // afterward — the stream IS the reveal now, no double-animation. The
+  // typing indicator stays up for exactly as long as it takes the first
+  // token to arrive (bounded by generateOnboardingReflection's own
+  // first-token timeout, REFLECTION_TIMEOUT_MS) — in practice this alone
+  // reproduces the same ~2s "thinking" beat as the fixed-pause scripted
+  // lines, without stacking an extra cosmetic pause on top of the real
+  // network wait. Once a first token has arrived, the stream is committed to
+  // and rendered to completion no matter how long that takes — it is never
+  // torn down and replaced with `fallback` partway through. `fallback` (a
+  // rotating plain ack, shown via the normal scripted reveal) is used ONLY
+  // when no token arrives at all within the timeout, or on a genuine
+  // network/parse failure.
+  const sayReflection = async (
+    field: "palate" | "inspiration" | "constraints",
+    answer: string,
+    fallback: string
+  ): Promise<void> => {
     setTyping(true);
-    let text: string | null = null;
-    try {
-      text = await awaitReflection;
-    } catch (err) {
+    let started = false;
+    let bubbleId = -1;
+
+    const finalText = await generateOnboardingReflection(
+      field,
+      answer,
+      (partialText) => {
+        if (!started) {
+          started = true;
+          setTyping(false);
+          idRef.current += 1;
+          bubbleId = idRef.current;
+          setMessages((prev) => [...prev, { id: bubbleId, role: "ai", text: partialText }]);
+        } else {
+          setMessages((prev) => prev.map((m) => (m.id === bubbleId ? { ...m, text: partialText } : m)));
+        }
+      },
+      REFLECTION_TIMEOUT_MS
+    ).catch((err) => {
       console.error("Reflection wait failed:", err);
+      return null;
+    });
+
+    if (!started) {
+      setTyping(false);
+      await revealMessage(fallback);
+      return;
     }
-    setTyping(false);
-    await revealMessage(text || fallback);
+
+    // Reconcile with the trimmed final text in case it differs from the last
+    // streamed partial (e.g. trailing whitespace) — the bubble is already
+    // showing the streamed content either way.
+    setMessages((prev) => prev.map((m) => (m.id === bubbleId ? { ...m, text: finalText || m.text } : m)));
   };
 
   // Fail-soft: a write failure must never block/hang the conversation or
@@ -286,14 +337,7 @@ function OnboardingChat({
       // Write and reflection fire concurrently — the reflection never gates
       // the write, and a slow/failed reflection can't delay it either.
       const writePromise = safeUpdate({ palate: val });
-      const reflectionPromise = withTimeout(
-        generateOnboardingReflection("palate", val).catch((err) => {
-          console.error("Onboarding reflection failed:", err);
-          return null;
-        }),
-        REFLECTION_TIMEOUT_MS
-      );
-      await sayReflection(reflectionPromise, nextFallbackAck());
+      await sayReflection("palate", val, nextFallbackAck());
       await writePromise;
       await sayAI("Who shapes how you cook? A chef, a cookbook, an account you save from, someone who taught you.");
       setStage("inspiration");
@@ -304,14 +348,7 @@ function OnboardingChat({
     if (stage === "inspiration") {
       answersRef.current.inspiration = val;
       const writePromise = safeUpdate({ inspiration: val });
-      const reflectionPromise = withTimeout(
-        generateOnboardingReflection("inspiration", val).catch((err) => {
-          console.error("Onboarding reflection failed:", err);
-          return null;
-        }),
-        REFLECTION_TIMEOUT_MS
-      );
-      await sayReflection(reflectionPromise, nextFallbackAck());
+      await sayReflection("inspiration", val, nextFallbackAck());
       await writePromise;
       await sayAI("Last thing, and this one I'll always respect. Any allergies I should know about? And then, separately, anything you'd just rather not see.");
       setStage("constraints");
@@ -320,18 +357,15 @@ function OnboardingChat({
     }
 
     if (stage === "constraints") {
-      // The parser and reflection both fire concurrently, but only the
-      // parser is awaited before writing — the write needs to know whether a
-      // composed, severity-labeled string is available. On timeout or
-      // malformed output, parseComposedConstraints/rawParsed fall back to
-      // the user's raw typed answer, which is always safe to store verbatim.
-      const reflectionPromise = withTimeout(
-        generateOnboardingReflection("constraints", val).catch((err) => {
-          console.error("Onboarding reflection failed:", err);
-          return null;
-        }),
-        REFLECTION_TIMEOUT_MS
-      );
+      // The parser and reflection both fire concurrently — sayReflection
+      // kicks off its own reflection call (and starts streaming it into the
+      // chat) immediately, same as before, but its own await is deferred
+      // below so it never blocks the parser. Only the parser is awaited
+      // before writing — the write needs to know whether a composed,
+      // severity-labeled string is available. On timeout or malformed
+      // output, parseComposedConstraints/rawParsed fall back to the user's
+      // raw typed answer, which is always safe to store verbatim.
+      const reflectionUIPromise = sayReflection("constraints", val, nextFallbackAck());
       const parsePromise = withTimeout(
         parseNoGosAnswer(val).catch((err) => {
           console.error("No-gos parsing failed:", err);
@@ -347,19 +381,21 @@ function OnboardingChat({
 
       // Both the write and the reflection UI settle before the recap lines,
       // so the recap never talks past a still-in-flight write.
-      await sayReflection(reflectionPromise, nextFallbackAck());
+      await reflectionUIPromise;
       await writePromise;
 
       // Single closing handoff line — no profile re-list, since the
       // per-answer reflections above already covered it. onNext() (which
-      // drives the visual slide to the loading screen) fires only after this
-      // line's own await resolves, i.e. only once it has fully revealed (or,
-      // on a reveal error, snapped straight to full text — see revealMessage's
-      // fail-soft showFull() path) — never mid-sentence. The profile-
-      // readiness poll itself (waitForTasteProfile/HANDOFF_MAX_WAIT_MS) is
-      // untouched: it still only starts once the Loader mounts, exactly as
-      // before this line was added.
+      // drives the visual slide to the loading screen) fires only once this
+      // line has fully revealed (or, on a reveal error, snapped straight to
+      // full text — see revealMessage's fail-soft showFull() path) AND
+      // HANDOFF_DWELL_MS has elapsed — giving the user actual time to read
+      // it before the screen slides away, rather than the two landing in the
+      // same tick. The profile-readiness poll itself
+      // (waitForTasteProfile/HANDOFF_MAX_WAIT_MS) is untouched: it still
+      // only starts once the Loader mounts, exactly as before.
       await sayAI("Perfect — that's everything I need. Setting up your kitchen around this now.");
+      await new Promise((resolve) => setTimeout(resolve, HANDOFF_DWELL_MS));
       setStage("done");
       onNext();
       return;
