@@ -1793,9 +1793,13 @@ exported — private to the module). Contract:
 
 **Trigger point 1 — onboarding completion.** Wired into the `Loader` step of
 `Onboarding.tsx`, immediately after the `onboarding_complete: true` write resolves.
-Fires once, using the three answers the user just finished entering. Fire-and-forget
-— onboarding's own transition into the app proceeds immediately without waiting on
-generation.
+Fires once, using the three answers the user just finished entering, and the call
+itself is fire-and-forget (never awaited directly). **Corrected:** the Loader's
+transition to Home does not proceed immediately regardless — it polls for
+`taste_profile` to populate (`waitForTasteProfile`, up to `HANDOFF_MAX_WAIT_MS`,
+6000ms) before releasing to Home. This section previously described a flat,
+unawaited handoff; that stopped being true once the poll was added — see "Onboarding
+— Conversational Flow" below for the full mechanics.
 
 **Trigger point 2 — taste-answer edit.** Wired into `ProfileEdit`'s save handler in
 `Profile.tsx`. Guarded to fire **only** when the field being saved is one of
