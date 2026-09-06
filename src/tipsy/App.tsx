@@ -758,6 +758,18 @@ export default function App() {
         setAuthScreen("signin");
         setShowOnboarding(null);
         setProfile(null);
+        // activeTab/tabStacks otherwise survive sign-out (App() doesn't
+        // unmount across a sign-out -> sign-in in the same tab), so without
+        // this a new account's first "app" render could inherit the previous
+        // account's tab position (e.g. land on Profile instead of Home).
+        setActiveTab("home");
+        setTabStacks({
+          build: [{ name: "cook" }],
+          recipes: [{ name: "categories" }],
+          grocery: [{ name: "grocerylist" }],
+          profile: [{ name: "profile" }],
+          home: [{ name: "home" }],
+        });
       }
     });
 
