@@ -284,10 +284,30 @@ THEIR ANSWER: ${answer}`,
 // empty response, etc.) so the caller always has a safe fallback path. This
 // is a stranger's first interaction with the app — nothing here may surface
 // an error.
+//
+// Streams progressively via `onToken` (called with the accumulated text so
+// far on every delta) instead of only resolving once the full response has
+// landed. `firstTokenTimeoutMs` bounds TIME-TO-FIRST-TOKEN only, not total
+// completion — once the first text delta arrives the timeout is cleared and
+// the stream is allowed to run to completion however long that takes. This
+// is the fix for a real latency regression: a longer prompt pushed total
+// generation time past a timeout that used to bound the whole call, so
+// reflections were falling through to the fallback ack nearly every time.
+// The reflection sentence itself is short by prompt design, so an uncapped
+// completion in practice only ever adds a small amount of time on top of
+// first-token latency.
 export async function generateOnboardingReflection(
   field: "palate" | "inspiration" | "constraints",
-  answer: string
+  answer: string,
+  onToken?: (partialText: string) => void,
+  firstTokenTimeoutMs = 2500
 ): Promise<string | null> {
+  const controller = new AbortController();
+  let firstTokenSeen = false;
+  const firstTokenTimer = setTimeout(() => {
+    if (!firstTokenSeen) controller.abort();
+  }, firstTokenTimeoutMs);
+
   try {
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
     if (!supabaseAnonKey) throw new Error("Supabase key not found");
@@ -306,6 +326,7 @@ export async function generateOnboardingReflection(
           messages: [{ role: "user", content: "Reflect it back now." }],
           systemPrompt,
         }),
+        signal: controller.signal,
       }
     );
 
@@ -317,7 +338,12 @@ export async function generateOnboardingReflection(
     let fullText = "";
     for await (const chunk of parseSSEStream(response)) {
       if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta") {
+        if (!firstTokenSeen) {
+          firstTokenSeen = true;
+          clearTimeout(firstTokenTimer);
+        }
         fullText += chunk.delta.text;
+        onToken?.(fullText);
       }
     }
 
@@ -326,6 +352,8 @@ export async function generateOnboardingReflection(
   } catch (error) {
     console.error("Onboarding reflection generation failed:", error);
     return null;
+  } finally {
+    clearTimeout(firstTokenTimer);
   }
 }
 

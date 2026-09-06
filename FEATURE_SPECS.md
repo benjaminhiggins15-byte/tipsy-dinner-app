@@ -2219,12 +2219,15 @@ never hangs):
 
 **Wiring in `Onboarding.tsx`'s `handleSend`.** Two new tunable constants bound
 the UX pacing of these calls without touching the engine files:
-`REFLECTION_TIMEOUT_MS` (2500ms) and `CONSTRAINTS_PARSE_TIMEOUT_MS` (4000ms),
-enforced via a small `withTimeout()` helper that races the call against the
-ceiling and resolves `null` (never rejects) either way. On `null` — timeout,
-network failure, or empty text — the script shows a rotating plain
-acknowledgment (`REFLECTION_FALLBACK_ACKS`: "Got it." / "Noted." / "Good to
-know.") instead of leaving a gap or surfacing an error.
+`REFLECTION_TIMEOUT_MS` (2500ms) and `CONSTRAINTS_PARSE_TIMEOUT_MS` (4000ms).
+**Superseded 2026-09 (Step 3c) for `REFLECTION_TIMEOUT_MS` — see below; the
+description immediately below this note is what shipped in Step 3/3b and no
+longer reflects `REFLECTION_TIMEOUT_MS`'s meaning.** `CONSTRAINTS_PARSE_TIMEOUT_MS`
+is unchanged and still enforced via the small `withTimeout()` helper that
+races the call against the ceiling and resolves `null` (never rejects)
+either way. On `null` — timeout, network failure, or empty text — the script
+shows a rotating plain acknowledgment (`REFLECTION_FALLBACK_ACKS`: "Got it." /
+"Noted." / "Good to know.") instead of leaving a gap or surfacing an error.
 
 Concurrency discipline, per stage:
 - **Palate / inspiration** — the profile write (`safeUpdate`) and the
@@ -2263,11 +2266,73 @@ before revealing a hard-coded line. Stacking that same fixed pause *after* a
 reflection's own network wait would make a reflection line take up to ~4.5s
 total (2.5s wait + 2s cosmetic pause) — slower than a plain scripted line,
 which defeats the point of a *reactive* reflection. `sayReflection()` instead
-shows the typing indicator for the actual bounded wait itself (the
-already-`withTimeout()`-bounded reflection promise), then reveals immediately
-once it resolves, with no additional fixed pause layered on top. This is a
-judgment call made during this build, not something explicitly specified
-beforehand — flagged here for visibility.
+shows the typing indicator for the actual bounded wait itself, then reveals,
+with no additional fixed pause layered on top. **Superseded 2026-09 (Step
+3c): the "reveals immediately once it resolves" half of this sentence is
+stale — see below; the "no additional fixed pause" pacing decision itself
+still holds.**
+
+**Step 3c — reflections stream progressively; `REFLECTION_TIMEOUT_MS` now
+bounds time-to-first-token, not completion.** On-phone testing after Step 3b
+found reflections falling through to the rotating fallback ack nearly every
+time. Root cause, confirmed by direct timing measurement against the live
+`ai-chat` edge function: `generateOnboardingReflection` awaited the *entire*
+SSE stream before returning, so the value racing `REFLECTION_TIMEOUT_MS` was
+total generation time, not time-to-first-token. Step 3b's prompt rewrite
+(worked examples, 3-4x longer) measurably increased total generation time
+(avg 2208ms → 2396ms across 6 runs each, on the simplest possible one-word
+test input) — enough to intermittently exceed the fixed 2500ms ceiling, worse
+on longer real answers.
+
+**The fix is delivery, not a timeout bump.** `generateOnboardingReflection`
+(`data.ts`) now takes an optional `onToken(partialText)` callback and an
+`AbortController` tied to a first-token timer: the timer aborts the
+in-flight request if no `content_block_delta` has arrived by
+`firstTokenTimeoutMs` (the caller passes `REFLECTION_TIMEOUT_MS`); the moment
+the first token arrives, the timer is cleared and the stream is allowed to
+run to completion however long that takes, calling `onToken` with the
+accumulated text on every delta. A reflection that has started streaming is
+**never** torn down and replaced with a fallback partway through — only a
+genuine failure (no first token in time, network error, or an empty final
+response) falls back. `REFLECTION_TIMEOUT_MS`'s constant value (2500ms) is
+unchanged; only its meaning changed, from a total-completion budget to a
+time-to-first-token budget.
+
+`Onboarding.tsx`'s `sayReflection()` was rewritten around this: it no longer
+builds a separately-`withTimeout()`-wrapped promise and hands it to a generic
+reveal step. It calls `generateOnboardingReflection` directly, keeps the
+typing indicator up until the `onToken` callback's first call, then swaps
+straight to a live-updating chat bubble that tracks each `onToken` call — the
+stream **is** the reveal now. The old word-by-word `revealMessage()`
+re-reveal is no longer used for a successful reflection (it's redundant once
+the real stream provides its own progressive arrival); `revealMessage()` is
+still used for the fallback-ack path and for every other hard-coded scripted
+line, unchanged. The typing indicator's duration is no longer a separate
+`withTimeout()`-bounded wait constructed by the caller — it's simply "until
+`onToken` fires," which in practice reproduces the same ~2s felt "thinking"
+beat as the fixed-pause scripted lines, without stacking a cosmetic pause on
+top of the real network wait (the same rejected-tradeoff reasoning as the
+paragraph above, now enforced by the streaming mechanism itself rather than a
+single all-or-nothing timeout).
+
+Concurrency is preserved exactly as before: for constraints, `sayReflection()`
+is invoked (kicking off its own reflection call and streaming immediately)
+*before* the parser is awaited, and only the resulting UI promise is awaited
+later, after the parser/write — so the reflection's network call still runs
+fully in parallel with `parseNoGosAnswer`, unchanged from Step 3.
+
+**Closing handoff line gets a reading dwell (Step 3c).** Step 3b's fix
+ensured `onNext()` never fires before the handoff line's reveal resolves —
+true, but insufficient: the reveal's final state update and
+`setStage("done")`/`onNext()` land in the same tick (React batches them), so
+the fully-revealed line and the start of the slide transition could occur in
+the same render, giving the user close to zero time to actually read it
+before it's carried off-screen. A new constant, `HANDOFF_DWELL_MS` (default
+1400ms), is awaited via a plain `setTimeout`-wrapped promise — not gated on
+any async call, so it cannot hang — between the handoff line's `sayAI()`
+resolving and `setStage("done")`/`onNext()` firing. `HANDOFF_MAX_WAIT_MS`
+(the `Loader`'s taste-profile poll ceiling) is untouched; the dwell is purely
+an on-screen pause before the `Loader` ever mounts.
 
 **Write contract, updated.** Palate/inspiration writes are unchanged —
 `onUpdate({ palate: val })` / `onUpdate({ inspiration: val })`, byte-identical
