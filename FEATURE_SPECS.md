@@ -1624,18 +1624,41 @@ app, that fills the pool cell by cell.
   parses that block with its own regex-based reader, independent of
   `parseRecipeFromAIResponse`.
 - **Matrix definition and additive shortfall logic.** The matrix is cuisine ×
-  meal_type, with cuisines grouped into three tiers and a per-tier, per-meal-type
-  target depth (dinner/lunch use the tier's depth directly; breakfast only gets the
-  full depth for Tier 1, else a shallower depth; dessert/snack are shallow for every
-  tier). Before generating anything for a cell, the script counts existing
-  `suggested_recipe_pool` rows for that `(cuisine, meal_type)` pair and computes
-  `shortfall = max(0, target − existing)` — it only ever generates the gap, never
-  regenerates or duplicates what's already there. This makes the table itself the
-  resume state: the script can be interrupted at any point and re-run safely, and can
-  be re-run later to top up a cell (e.g. after a tier promotion, or to backfill a
-  cell that failed in an earlier run) without any separate tracking file. A
-  `--recheck-only` mode runs the dietary checker against existing rows without
-  generating anything new.
+  meal_type, with cuisines grouped into three tiers and an explicit, weighted
+  per-tier, per-meal-type depth target (`TIER_TARGETS` in the script) — dinner and
+  lunch get the deepest coverage, dessert/snack stay shallow, at every tier:
+  Tier 1 (mainstream cuisines): dinner 50, lunch 28, breakfast 14, dessert 8, snack 8.
+  Tier 2: dinner 30, lunch 20, breakfast 8, dessert 6, snack 6.
+  Tier 3 (thinner/niche cuisines): dinner 14, lunch 10, breakfast 6, dessert 5, snack 5.
+  The tier itself IS the thin-cuisine ceiling — a Tier 3 cuisine is deliberately never
+  asked to reach Tier 1 depth. Before generating anything for a cell, the script
+  counts existing `suggested_recipe_pool` rows for that `(cuisine, meal_type)` pair
+  and computes `shortfall = max(0, target − existing)` — it only ever generates the
+  gap, never regenerates or duplicates what's already there. This makes the table
+  itself the resume state: the script can be interrupted at any point and re-run
+  safely, and can be re-run later to top up a cell (e.g. after a tier promotion, or
+  to backfill a cell that failed in an earlier run) without any separate tracking
+  file. A `--recheck-only` mode runs the dietary checker against existing rows
+  without generating anything new (see the dietary vetting policies below — several
+  rows are EXPECTED to re-flag on this rerun, by design).
+- **Duplicate guard is per-cell, not per-cuisine — a deliberate, accepted scope.**
+  Before generating a cell's shortfall, the script feeds the AI only that cell's own
+  existing titles (`existingTitles`, keyed by the exact `cuisine:meal_type` pair) as
+  the "don't repeat these" list. It does NOT see titles from the same cuisine's other
+  meal-type cells. Consequence, observed and accepted in practice: the same dish name
+  can legitimately appear in two different meal-type cells of the same cuisine (e.g.
+  an Italian dish generated for both `dinner` and `lunch` with an identical title).
+  This is existing, unchanged pipeline behavior, not a regression — cross-cell title
+  overlap within a cuisine is accepted, not deduped.
+- **PAGINATION ON THE EXISTING-ROWS FETCH IS LOAD-BEARING.** The fetch that counts
+  existing rows for the shortfall math above pages through the full table in
+  1,000-row chunks (`.range()` loop), because a single unpaginated `.select()` is
+  silently capped by PostgREST's default max-rows (~1,000). Once the pool crossed
+  that size, an earlier version of this fetch undercounted existing rows and would
+  have computed wildly inflated shortfalls — hundreds of duplicate-generating
+  targets — for every cell. **Do not remove or "simplify" this pagination**; above
+  1,000 total rows, the additive/no-duplicate guarantee described above silently
+  breaks without it.
 - **Deterministic dietary checker (flag-for-review, not auto-correct).** After
   parsing the AI's dietary tags, the script independently scans the parsed
   ingredient list (matched per-ingredient-item, not as one joined blob of text) for
@@ -1674,11 +1697,56 @@ without changing its cuisine slug (`'greek'`) — done deliberately so a small n
 of rows already generated under that same slug in an earlier proof run counted toward
 the same cell rather than becoming an orphaned duplicate set.
 
-**Current state (as of this pipeline's most recent full run):** 342 rows in
-`suggested_recipe_pool`, every matrix cell at its target depth (shortfall of 0
-everywhere), 27 rows sitting at `dietary_check_status = 'flagged'` and
-`vetting_status = 'pending'`, awaiting a future human-review pass before any are
-eligible to surface to real users.
+**Dietary vetting policies (standing, apply to every batch, not just batch-02).**
+Established during a full-pool flag-resolution pass and binding on any future
+triage of checker-flagged rows:
+- **Squid counts as shellfish.** `contains_shellfish = true` for any squid/calamari
+  dish, regardless of the AI's own claimed tag — a deliberate allergy-safety policy
+  decision (squid is a cephalopod, not a crustacean, but is treated as shellfish for
+  this app's purposes), not a checker bug fix.
+- **Uniform swap policy.** If a recipe's own ingredient line surfaces a compliant
+  alternative in the same line (e.g. "lard or additional butter", "chicken or
+  vegetable stock", "ghee or neutral oil"), the compliant tag STANDS as claimed —
+  including `contains_pork`/`is_vegetarian`/`is_dairy_free`, not just the obvious
+  vegan/vegetarian cases. The policy depends on that full ingredient line (base
+  ingredient + the "or <compliant alternative>") staying intact and visible
+  wherever the recipe is displayed — do not truncate or summarize ingredient text in
+  a way that could drop the alternative half of the line.
+- **Correct the tag, never silence the checker.** A genuine contradiction (no
+  compliant alternative offered — e.g. plain "soy sauce" claimed gluten-free, or
+  "oyster sauce" claimed shellfish-free) gets its specific tag flipped to match the
+  actual ingredient, then `dietary_check_status` set to `'clean'`. The checker's
+  term lists/logic are never weakened or narrowed to make a real contradiction stop
+  firing.
+- **Consequence: accepted swap-policy and false-positive rows RE-FLAG on every
+  fresh `--recheck-only` run, by design.** The checker has no memory of a prior
+  human judgment call — it re-evaluates raw ingredient text every time, so any row
+  the swap policy or a false-cognate call (e.g. "oyster mushroom", "coconut cream")
+  cleared will flip back to `dietary_check_status = 'flagged'` on the next recheck.
+  This is expected and is NOT a bug to "re-fix" — verify by checking whether a
+  re-flagged row's title/cell is already a known accepted case before touching it
+  again.
+
+**Season semantics.** `season` is nullable and null is the CORRECT, default value
+for most rows — it means "eligible year-round," not "unknown" or "needs backfill."
+Only genuinely seasonal dishes (a specific produce window, a weather-dependent
+cooking style) should carry a non-null season; backfilling a season onto a
+year-round dish is a regression, since it hides that dish for 9 months of the year
+instead of surfacing it. The one deliberate, narrow exception: the Super
+Bowl/Valentine's occasion rows (see "Occasion-Aware Suggestions" below) were
+generated with `season = null` (a real leak — both are firmly winter-timed
+occasions) and were backfilled to `season = 'winter'` in a targeted, title+occasion
+-matched fix, exact-scoped to those 10 rows only. The other three tentpole
+occasions (`christmas`/`thanksgiving-week`/`fourth-of-july`) got a correct
+non-null season at generation time and were never touched.
+
+**Current state (as of the most recent scale-up + top-up runs):** 1,828 rows in
+`suggested_recipe_pool` across every matrix cell at its (tiered) target depth plus
+the 25 occasion rows, 41 rows sitting at `dietary_check_status = 'flagged'` — all
+41 are known, already-triaged accepted cases (uniform-swap-policy or false-cognate
+rows that re-flag by design, per the policies above), not unreviewed contradictions
+— and `vetting_status = 'pending'` on all rows, awaiting a future human-review pass
+before any are eligible to surface to real users.
 
 ## Suggested Recipes — Layer 2 (taste profile)
 
@@ -1725,9 +1793,13 @@ exported — private to the module). Contract:
 
 **Trigger point 1 — onboarding completion.** Wired into the `Loader` step of
 `Onboarding.tsx`, immediately after the `onboarding_complete: true` write resolves.
-Fires once, using the three answers the user just finished entering. Fire-and-forget
-— onboarding's own transition into the app proceeds immediately without waiting on
-generation.
+Fires once, using the three answers the user just finished entering, and the call
+itself is fire-and-forget (never awaited directly). **Corrected:** the Loader's
+transition to Home does not proceed immediately regardless — it polls for
+`taste_profile` to populate (`waitForTasteProfile`, up to `HANDOFF_MAX_WAIT_MS`,
+6000ms) before releasing to Home. This section previously described a flat,
+unawaited handoff; that stopped being true once the poll was added — see "Onboarding
+— Conversational Flow" below for the full mechanics.
 
 **Trigger point 2 — taste-answer edit.** Wired into `ProfileEdit`'s save handler in
 `Profile.tsx`. Guarded to fire **only** when the field being saved is one of
@@ -1983,3 +2055,351 @@ renders on that tile only — no crash, other tiles unaffected.
   regressions); diffed against the chip (Thread 1) and receiving (Thread 2) code
   paths to confirm zero incidental touches; traced tap → RPC fetch → detail view →
   save → library end-to-end.
+
+---
+
+## Occasion-Aware Suggestions
+
+**DONE, deployed to production 2026-08-28 (`compute-slice` v3).** Extends the Layer
+1-4 suggestions pipeline above so the daily slice can guarantee a seat for a
+recipe matching an active cultural-calendar occasion (Christmas, Thanksgiving,
+etc.), reusing the exact same pool/gate/picker infrastructure rather than a
+parallel system.
+
+**`suggested_recipe_pool.occasion` column.** Text, nullable. CHECK-constrained
+(`suggested_recipe_pool_occasion_check`) to the 21 slugs defined in
+`src/tipsy/chips.ts`'s cultural-calendar taxonomy (`gameday-football`,
+`super-bowl`, `thanksgiving-week`, `christmas-baking`, `christmas`,
+`new-years-eve`, `fourth-of-july`, `summer-grilling`, `first-cold-snap`,
+`cinco-de-mayo`, `valentines`, `mothers-day`, `fathers-day`, `halloween`,
+`easter`, `st-patricks-day`, `spring-produce`, `tomato-season`,
+`stone-fruit-season`, `citrus-winter`, `soup-season`) plus `NULL`. A partial
+btree index (`suggested_recipe_pool_occasion_idx`, `WHERE occasion IS NOT NULL`)
+supports the occasion-scoped query below without indexing the (majority) rows
+that don't carry one. **This CHECK couples the pool schema to the chips
+taxonomy** — adding a new occasion chip in `chips.ts` later requires a matching
+migration to widen this constraint before any pool row can use the new slug.
+
+**The 25 occasion recipes.** Five tentpole occasions — `christmas`,
+`thanksgiving-week`, `super-bowl`, `fourth-of-july`, `valentines` — each with 5
+recipes (batch ids `occasion-<slug>-01`), generated **occasion-framed** rather
+than matrix-cell-framed: prompts name a category appropriate to the occasion's
+cooking character (e.g. "a centerpiece main," "a required vegetarian option")
+without ever naming a specific dish, and the model self-reports `meal_type`/
+`cuisine` via the same tagging-instruction pattern as the Layer 1 matrix
+pipeline (there being no predetermined matrix cell to source those tags from
+for an occasion row). Every occasion has **at least one verified genuinely
+vegetarian option** (confirmed against actual ingredient text, not just the
+claimed tag). All 25 rows passed the same deterministic dietary-contradiction
+checker used by the Layer 1 pipeline with `dietary_check_status = 'clean'` —
+zero flagged rows across the batch.
+
+**`compute-slice` picker change — the occasion guarantee.** Near a tentpole
+occasion's window, the picker tries to reserve one extra seat on the shelf for
+an occasion-matching recipe, on top of the normal 3-4 AI-selected picks:
+- **Timing** is duplicated (copied, not imported) from `chips.ts` into
+  `compute-slice` as a small self-contained block — see the CLAUDE.md pointer
+  for why this is a cross-cutting maintenance trap, not an oversight.
+- **Occasion query** runs alongside the normal Stage 1 query, filtered to the
+  active occasion slug, applying the exact same dietary gates the normal shelf
+  uses — but deliberately **not** gated on `meal_type = 'dinner'` (an occasion
+  seat may be a side, dessert, or snack) and **not** season-gated (the occasion
+  itself already implies the timing).
+- **Don't-repeat wins.** The occasion candidate must be unseen in the user's
+  last-30-slice history, using the same (unrelaxed) seen-set the normal shelf
+  computes — no separate relaxation logic for this seat. If nothing qualifies,
+  the guarantee simply lapses.
+- **ADD, don't replace.** A qualifying occasion pick is spliced in as a 5th
+  seat, after the normal shelf's own "≥3 valid picks or fallback" safety check
+  has already succeeded independently — never in place of one of the AI's own
+  picks. Chosen over replacement because `user_recipe_slices` has no live shelf
+  UI yet (see Data Layer in CLAUDE.md), so nothing assumes a fixed 3-4 card
+  count.
+- **Fail-silent by design.** The entire occasion path (query, timing check,
+  unseen filter) is wrapped in its own try/catch that only logs — it can never
+  trigger the normal shelf's `fallbackToPriorSliceOrError` and can never throw
+  into the outer handler. Its only failure mode is "no bonus seat," never a
+  degraded or stale shelf.
+- **Response shape.** The JSON response gained an `occasion_bonus` field
+  (`{id, title, occasion}` or `null`) alongside the existing `picks_with_reasons`
+  (now includes the bonus pick, if any) — additive only, no existing field
+  changed shape.
+
+**Verified end-to-end before deploy**, against the real linked project (throwaway
+test users, cleaned up after): an unrestricted user near Christmas got a normal
+shelf plus a guaranteed Christmas pick; a user with a hard vegetarian
+restriction got a guaranteed Christmas pick that was itself vegetarian (proving
+the dietary gates apply to the occasion query, not just the normal shelf); a
+user who'd already seen all 5 Christmas pool rows got no bonus seat (proving
+don't-repeat wins over the guarantee); a non-holiday date produced an
+unchanged normal shelf with `occasion_bonus: null`; and a Super Bowl-window
+date produced a `meal_type: 'snack'` bonus pick (proving the seat isn't
+dinner-restricted). Post-deploy, a production smoke test against the live
+endpoint with today's (non-holiday) date confirmed the everyday path is
+unchanged (`occasion_bonus: null`, normal 4-pick shelf) and that `ai-chat`/
+`copy-received-recipe-photo` were unaffected by the deploy.
+
+---
+
+## Onboarding — Conversational Flow
+
+**What changed.** The three-blank-textbox `QuestionScreen` flow in
+`Onboarding.tsx` was replaced with a scripted chat conversation, reusing Build's
+presentational chat shell (`ChatBubble`, `TypingBubble`, `CookInputBar` — now
+extracted to a shared `src/tipsy/ChatUI.tsx` module so both Build's live AI
+engine and this hard-wired script can render through the same components
+unchanged). This is a **script, not a second AI engine** — there is no live
+model call anywhere in `OnboardingChat`; each AI-side line is a fixed string
+advanced by a small `stage` state machine (`palate → inspiration →
+constraints → done`), paced with `TypingBubble` for a natural feel.
+
+**Reveal cadence matches Build, presentationally only.** Build's real AI text
+reveals progressively because it's driven by actual token arrival over the
+`ai-chat` SSE stream — there is no timing constant in Build to reuse, since it
+never artificially paces text. Because onboarding's lines are hard-coded, a
+brief on-phone check surfaced the intro line snapping in as a full block
+instead of matching that feel, most visible before the natural pauses of a
+back-and-forth conversation mask it. `sayAI()`'s reveal step was changed from
+an instant full-text push to a synthetic word-by-word reveal driven by one
+named constant, `SCRIPTED_REVEAL_MS_PER_WORD` (default 40ms/word). This is
+strictly cosmetic: the profile write for a given answer (`safeUpdate(...)`)
+always fires before the following `sayAI(...)` acknowledgment is even called,
+so the reveal timer never gates a write, and any failure inside the reveal
+loop degrades straight to showing the full line rather than leaving a stuck
+partial one.
+
+**Write contract — unchanged, byte-identical.** Every write goes through the
+exact same setters the old three-textbox flow used:
+- `onUpdate({ palate: val })`, `onUpdate({ inspiration: val })`,
+  `onUpdate({ constraints: val })` — raw user text, no parsing or
+  restructuring applied at this step.
+- `onUpdate({ onboarding_complete: true })` at handoff, from the same `Loader`
+  component as before.
+- `generateTasteProfile(profile.id, { palate, inspiration, constraints })`
+  fired from the same intent site as before (inside `Loader`, never routed
+  through a generic `updateProfile`).
+
+No `profiles` schema changes were made or needed for this step.
+
+**Reactive reflections + constraints parsing (replaces the placeholder
+acknowledgments above).** The two `// SEAM:` stubs were filled in with two new
+fail-quiet AI-island calls in `data.ts`, following `generateTasteProfile`'s
+exact established pattern (inlined Supabase URL/anon-key/fetch,
+`parseSSEStream` consumption, try/catch, `null`-on-any-failure — never throws,
+never hangs):
+
+- **`generateOnboardingReflection(field, answer)`** — one short sentence of
+  warm RECOGNITION, parameterized per question (`palate` / `inspiration` /
+  `constraints`) so the reflection is scoped to what was actually asked.
+  **Superseded 2026-09 (Step 3b):** the first version paraphrased/echoed the
+  input ("italian" -> "you like to cook Italian food"), which on-phone testing
+  found lifeless — confirmation, not recognition. Each field's prompt was
+  rewritten to explicitly forbid two named failure modes and target the
+  middle: ECHOING (flat restatement, forbidden) vs. PRESUMPTUOUS (inventing
+  unstated specifics, forbidden) vs. the TARGET (warmth/texture that plainly
+  follows from the answer without claiming anything unstated), with worked
+  examples of all three baked into the prompt for a terse one-word case (and,
+  for palate, an additional richer-answer example). The constraints prompt
+  carries its own no-gos-specific example set and an explicit instruction not
+  to restate a real allergy clinically ("you're allergic to nuts") but to
+  acknowledge it briefly and warmly ("Nuts — noted, I'll keep those off
+  entirely.") without softening or omitting it. Never invents or attributes an
+  unstated preference in any version; under-claims on a thin answer rather
+  than over-claims; no superlatives, no self-reference, no praise-bot tone.
+  Returns `string | null`.
+- **`parseNoGosAnswer(answer)`** — a separate AI call that composes the raw
+  constraints answer into two severity-labeled lines:
+  `ALLERGY (hard, never serve): ...` / `DISLIKES (prefer to avoid): ...`
+  (either side may read `None`). The prompt is safety-biased: an item the
+  model finds ambiguous between the two buckets is instructed into ALLERGY,
+  never the reverse — a false allergy flag is a harmless over-caution, a
+  missed one is a real risk. Returns the raw composed text, or `null` on
+  failure.
+- **`parseComposedConstraints(rawText)`** — a strict, synchronous (non-AI)
+  validator gating `parseNoGosAnswer`'s output before it's trusted enough to
+  store: requires exactly two lines, exact canonical prefixes, non-empty
+  content on both. Anything else — extra prose, a missing line, wrong
+  wording — returns `null` rather than attempting a lenient/partial parse.
+
+**Wiring in `Onboarding.tsx`'s `handleSend`.** Two new tunable constants bound
+the UX pacing of these calls without touching the engine files:
+`REFLECTION_TIMEOUT_MS` (2500ms) and `CONSTRAINTS_PARSE_TIMEOUT_MS` (4000ms).
+**Superseded 2026-09 (Step 3c) for `REFLECTION_TIMEOUT_MS` — see below; the
+description immediately below this note is what shipped in Step 3/3b and no
+longer reflects `REFLECTION_TIMEOUT_MS`'s meaning.** `CONSTRAINTS_PARSE_TIMEOUT_MS`
+is unchanged and still enforced via the small `withTimeout()` helper that
+races the call against the ceiling and resolves `null` (never rejects)
+either way. On `null` — timeout, network failure, or empty text — the script
+shows a rotating plain acknowledgment (`REFLECTION_FALLBACK_ACKS`: "Got it." /
+"Noted." / "Good to know.") instead of leaving a gap or surfacing an error.
+
+Concurrency discipline, per stage:
+- **Palate / inspiration** — the profile write (`safeUpdate`) and the
+  reflection call fire in the same tick; the reflection is displayed via
+  `sayReflection()` while the write proceeds in the background, and the write
+  is awaited only afterward. A slow or failed reflection can never delay or
+  block the write.
+- **Constraints** — the reflection and the parser both fire concurrently, but
+  only the parser is awaited before writing, since the write needs to know
+  whether a valid composed string exists. `constraintsToWrite` is
+  `parseComposedConstraints(rawParsed) ?? val` — i.e. the composed,
+  severity-labeled string on success, or the user's own raw typed answer on
+  any failure (timeout, parse error, or malformed AI output). Both the write
+  and the reflection UI settle before the closing handoff line fires (see
+  below).
+
+**Closing handoff line (Step 3b).** On-phone testing found the sequence
+following the no-gos reflection — a full profile recap line, then a "Give me a
+second…" line — could get visually cut off mid-sentence by the slide into the
+loading screen. The two lines were replaced with a single closing beat, "Perfect
+— that's everything I need. Setting up your kitchen around this now." (no
+profile re-list — the per-answer reflections already covered that), shown via
+the same `sayAI()` mechanism as any other scripted line. `onNext()` — which
+drives the visual slide transition into the `Loader` — is called only after
+this line's own `await` resolves, i.e. only once it has fully revealed (or, on
+a reveal error, snapped straight to full text via `revealMessage`'s existing
+fail-soft `showFull()` path), so the transition can never start mid-sentence.
+This is a purely visual/ordering change: the profile-readiness poll
+(`waitForTasteProfile`/`HANDOFF_MAX_WAIT_MS`) is untouched and still only
+starts once `Loader` mounts, immediately after this line finishes and the
+transition begins — the line's reveal and the poll do not wait on each other.
+
+**`sayReflection()` vs. `sayAI()` — a deliberate pacing decision.** `sayAI()`
+shows the fixed `SCRIPTED_TYPING_INDICATOR_MS` (2000ms) typing-indicator pause
+before revealing a hard-coded line. Stacking that same fixed pause *after* a
+reflection's own network wait would make a reflection line take up to ~4.5s
+total (2.5s wait + 2s cosmetic pause) — slower than a plain scripted line,
+which defeats the point of a *reactive* reflection. `sayReflection()` instead
+shows the typing indicator for the actual bounded wait itself, then reveals,
+with no additional fixed pause layered on top. **Superseded 2026-09 (Step
+3c): the "reveals immediately once it resolves" half of this sentence is
+stale — see below; the "no additional fixed pause" pacing decision itself
+still holds.**
+
+**Step 3c — reflections stream progressively; `REFLECTION_TIMEOUT_MS` now
+bounds time-to-first-token, not completion.** On-phone testing after Step 3b
+found reflections falling through to the rotating fallback ack nearly every
+time. Root cause, confirmed by direct timing measurement against the live
+`ai-chat` edge function: `generateOnboardingReflection` awaited the *entire*
+SSE stream before returning, so the value racing `REFLECTION_TIMEOUT_MS` was
+total generation time, not time-to-first-token. Step 3b's prompt rewrite
+(worked examples, 3-4x longer) measurably increased total generation time
+(avg 2208ms → 2396ms across 6 runs each, on the simplest possible one-word
+test input) — enough to intermittently exceed the fixed 2500ms ceiling, worse
+on longer real answers.
+
+**The fix is delivery, not a timeout bump.** `generateOnboardingReflection`
+(`data.ts`) now takes an optional `onToken(partialText)` callback and an
+`AbortController` tied to a first-token timer: the timer aborts the
+in-flight request if no `content_block_delta` has arrived by
+`firstTokenTimeoutMs` (the caller passes `REFLECTION_TIMEOUT_MS`); the moment
+the first token arrives, the timer is cleared and the stream is allowed to
+run to completion however long that takes, calling `onToken` with the
+accumulated text on every delta. A reflection that has started streaming is
+**never** torn down and replaced with a fallback partway through — only a
+genuine failure (no first token in time, network error, or an empty final
+response) falls back. `REFLECTION_TIMEOUT_MS`'s constant value (2500ms) is
+unchanged; only its meaning changed, from a total-completion budget to a
+time-to-first-token budget.
+
+`Onboarding.tsx`'s `sayReflection()` was rewritten around this: it no longer
+builds a separately-`withTimeout()`-wrapped promise and hands it to a generic
+reveal step. It calls `generateOnboardingReflection` directly, keeps the
+typing indicator up until the `onToken` callback's first call, then swaps
+straight to a live-updating chat bubble that tracks each `onToken` call — the
+stream **is** the reveal now. The old word-by-word `revealMessage()`
+re-reveal is no longer used for a successful reflection (it's redundant once
+the real stream provides its own progressive arrival); `revealMessage()` is
+still used for the fallback-ack path and for every other hard-coded scripted
+line, unchanged. The typing indicator's duration is no longer a separate
+`withTimeout()`-bounded wait constructed by the caller — it's simply "until
+`onToken` fires," which in practice reproduces the same ~2s felt "thinking"
+beat as the fixed-pause scripted lines, without stacking a cosmetic pause on
+top of the real network wait (the same rejected-tradeoff reasoning as the
+paragraph above, now enforced by the streaming mechanism itself rather than a
+single all-or-nothing timeout).
+
+Concurrency is preserved exactly as before: for constraints, `sayReflection()`
+is invoked (kicking off its own reflection call and streaming immediately)
+*before* the parser is awaited, and only the resulting UI promise is awaited
+later, after the parser/write — so the reflection's network call still runs
+fully in parallel with `parseNoGosAnswer`, unchanged from Step 3.
+
+**Closing handoff line gets a reading dwell (Step 3c).** Step 3b's fix
+ensured `onNext()` never fires before the handoff line's reveal resolves —
+true, but insufficient: the reveal's final state update and
+`setStage("done")`/`onNext()` land in the same tick (React batches them), so
+the fully-revealed line and the start of the slide transition could occur in
+the same render, giving the user close to zero time to actually read it
+before it's carried off-screen. A new constant, `HANDOFF_DWELL_MS` (default
+1400ms), is awaited via a plain `setTimeout`-wrapped promise — not gated on
+any async call, so it cannot hang — between the handoff line's `sayAI()`
+resolving and `setStage("done")`/`onNext()` firing. `HANDOFF_MAX_WAIT_MS`
+(the `Loader`'s taste-profile poll ceiling) is untouched; the dwell is purely
+an on-screen pause before the `Loader` ever mounts.
+
+**Write contract, updated.** Palate/inspiration writes are unchanged —
+`onUpdate({ palate: val })` / `onUpdate({ inspiration: val })`, byte-identical
+to before. The constraints write now conditionally stores the composed,
+severity-labeled string instead of the raw blob when parsing succeeds; this is
+the intended outcome of this build, not a regression of the "byte-identical"
+claim made for the palate/inspiration fields above. `onUpdate({
+onboarding_complete: true })` and `generateTasteProfile(...)` at handoff are
+untouched.
+
+**Handoff race fix, v1 (superseded below).** A read-pass diagnostic (not part
+of this build) had established that a brand-new user's first suggested-recipe
+slice could compute against a stale/empty `taste_profile`, because the old
+`Loader` fired `generateTasteProfile` without awaiting it and handed off to
+Home on a flat timer. The first fix raced `generateTasteProfile` against a
+flat timeout via `Promise.race`, with a second constant biasing
+allergy-flagged sessions toward the full wait, plus a Home effect keyed on
+`profile?.taste_profile` meant to "self-correct" the carousel if the real
+value landed after handoff.
+
+**Superseded — v2, the actual shipped behavior.** On review, the v1
+self-correct was dead on arrival for two compounding reasons: (1)
+`generateTasteProfile` writes `taste_profile` straight to Supabase with no
+path back into React state, so `profile.taste_profile` in memory could never
+actually change to trigger the effect without the `Loader` manually
+re-syncing it — and even when it did, (2) `compute-slice`'s Stage-1
+existing-slice short-circuit (see its own section above) meant Home's re-fetch
+just received back the same already-persisted row for today, never a fresh
+recompute. The self-correct effect was removed as unreachable, and the
+`Loader` was rewritten around a single real signal instead of two racing
+approximations:
+1. Writes `onboarding_complete: true` (fail-soft — logs and continues on
+   error, never blocks).
+2. Fires `generateTasteProfile(...)` without awaiting it (it's fail-quiet on
+   its own).
+3. `waitForTasteProfile()` then **polls** `profiles.taste_profile` for this
+   user directly — a light `select` every `TASTE_PROFILE_POLL_INTERVAL_MS`
+   (400ms) — until it's populated or a single ceiling constant,
+   `HANDOFF_MAX_WAIT_MS` (6000ms), elapses. This replaces both v1 constants;
+   there is no allergy-based weighting in this model — one ceiling for every
+   session.
+4. The instant the poll finds a populated `taste_profile`, it's pushed into
+   local state via the existing `onUpdate` setter and the handoff releases
+   immediately — it does not wait out the rest of the ceiling.
+5. Any poll error is swallowed and treated as "not ready" — the sequence
+   still releases to Home once the ceiling elapses. Either way, timeout or
+   success, the handoff always releases; this path can never hang or surface
+   an error to the user.
+
+`Home.tsx`'s slice-loading effect is back to running once on mount (no
+`taste_profile` dependency) — the burden of making sure `taste_profile` is
+populated before Home ever sees a user now sits entirely with the `Loader`'s
+poll, which is a real readiness check rather than an unreachable reactive
+patch.
+
+**Known limitation, unchanged:** if `HANDOFF_MAX_WAIT_MS` is hit before
+`generateTasteProfile` finishes, that user's first slice still computes
+against a blank `taste_profile`, and `compute-slice`'s existing-slice
+short-circuit means that first slice sticks for the rest of the day — there
+is no same-day recovery path from the front end alone. Only a longer ceiling
+or a `compute-slice` change (out of scope here) closes this gap entirely.
+
+**Untouched by this build:** `generateTasteProfile`'s own implementation,
+`compute-slice`, the suggested-recipes pool/matrix pipeline, the chip system,
+`normalizeStep()`, the Recipe List cache, account-to-account sharing, and the
+Profile edit screen.

@@ -146,10 +146,21 @@ export default function Home({
           : null
       );
     })();
-    // Layer 3/4 — mint or fetch today's slice, then hand pick_details to the
-    // carousel below. computeMySlice() itself returns null with no session
-    // (theoretical here, Home is post-auth) — sliceResult stays null in that
-    // case and the carousel renders nothing.
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  // Layer 3/4 — mint or fetch today's slice, then hand pick_details to the
+  // carousel below. computeMySlice() itself returns null with no session
+  // (theoretical here, Home is post-auth) — sliceResult stays null in that
+  // case and the carousel renders nothing. Runs once on mount; the onboarding
+  // handoff (Onboarding.tsx's Loader) is responsible for making sure
+  // taste_profile is populated before Home ever mounts, since compute-slice's
+  // existing-slice short-circuit means a re-fetch here can't recover a
+  // same-day slice already computed against a blank profile.
+  useEffect(() => {
+    let ignore = false;
     (async () => {
       const result = await computeMySlice();
       if (ignore) return;

@@ -209,6 +209,241 @@ export async function generateTasteProfile(
   }
 }
 
+// Reflection system prompt: one line of warm RECOGNITION, never a paraphrase/
+// echo of the input and never invented specifics. Parameterized per
+// onboarding question so the reflection is scoped to what was actually asked
+// (palate vs inspiration vs constraints) rather than a generic "thanks for
+// sharing" — same fail-quiet-AI-island posture as generateTasteProfile above,
+// just producing a short shown-in-chat sentence instead of a stored profile
+// field. Each prompt below carries its own worked echo-vs-presumptuous-vs-
+// target examples, tuned after on-phone testing showed a first pass landing
+// on flat echo ("italian" -> "you like to cook Italian food") rather than
+// recognition.
+const ONBOARDING_REFLECTION_SYSTEM_PROMPTS: Record<
+  "palate" | "inspiration" | "constraints",
+  (answer: string) => string
+> = {
+  palate: (answer) => `You are a warm, attentive cooking assistant reflecting back what a new user just told you about their palate and cooking style — the cuisines, flavors, and way they like to cook.
+
+Your job is RECOGNITION, not confirmation. A reflection that just restates what they said is dead weight — they already know what they typed. Show that you get it by adding a little warmth or texture that plainly follows from their answer, WITHOUT inventing or attributing any specific preference, dish, or technique they did not state. This is a narrow line — stay in the middle between two failure modes:
+
+- ECHOING (too flat, forbidden): just restating the input as a sentence.
+  Answer: "italian" -> BAD: "You like to cook Italian food."
+- PRESUMPTUOUS (too much, forbidden): inventing specifics they never said.
+  Answer: "italian" -> BAD: "You love slow Sunday ragùs and make your own pasta."
+- TARGET (the middle, aim here): warm recognition that claims nothing specific.
+  Answer: "italian" -> GOOD: "Italian — good ingredients, treated simply." or "Italian, nice — that's a whole world to cook in."
+
+A richer answer gives you more real material to draw from — lean on what they actually said, not on invention:
+  Answer: "bright, acidic food — lots of citrus and vinegar, but I also love a slow braise on a cold night" -> GOOD: "Bright and punchy, but with room for a long slow day too — that's a nice tension to cook with."
+
+Terse, one-word answers are where echoing is most tempting and where there's least to work with — add warmth or a light frame there, never fabricated detail to fill the gap.
+
+Rules: one sentence. Do not quote them verbatim. Never invent, infer, or attribute a cuisine, flavor, dish, or preference they did not state. Calm, economical, competent-peer voice — not a hype machine. No superlatives-as-praise ("love that", "amazing", "great answer"), no self-reference ("I..."), no exclamation points. Output ONLY the sentence — no quotes, no preamble, no label.
+
+THEIR ANSWER: ${answer}`,
+  inspiration: (answer) => `You are a warm, attentive cooking assistant reflecting back what a new user just told you about who or what inspires how they cook — a chef, a cookbook, an account, someone who taught them.
+
+Your job is RECOGNITION, not confirmation. A reflection that just restates what they said is dead weight — they already know what they typed. Show that you get it by adding a little warmth or texture that plainly follows from their answer, WITHOUT inventing or attributing any specific style, dish, or detail they did not state. Stay in the middle between two failure modes:
+
+- ECHOING (too flat, forbidden): just restating the input as a sentence.
+  Answer: "my grandmother" -> BAD: "Your grandmother inspires how you cook."
+- PRESUMPTUOUS (too much, forbidden): inventing specifics they never said.
+  Answer: "my grandmother" -> BAD: "You want to recreate the exact Sunday sauce she made every week."
+- TARGET (the middle, aim here): warm recognition that claims nothing specific.
+  Answer: "my grandmother" -> GOOD: "Your grandmother — that's a deep well to cook from." or "Family, nice — that's a real foundation."
+
+Terse, one-word/one-name answers are where echoing is most tempting and where there's least to work with — add warmth or a light frame there, never fabricated detail to fill the gap. If their answer is thin or vague, your reflection must stay equally thin — under-claim rather than over-claim.
+
+Rules: one sentence. Do not quote them verbatim. Never invent, infer, or attribute a name, style, or detail they did not state. Calm, economical, competent-peer voice — not a hype machine. No superlatives-as-praise ("love that", "amazing", "great answer"), no self-reference ("I..."), no exclamation points. Output ONLY the sentence — no quotes, no preamble, no label.
+
+THEIR ANSWER: ${answer}`,
+  constraints: (answer) => `You are a warm, attentive cooking assistant reflecting back what a new user just told you about their allergies and dislikes.
+
+Your job is RECOGNITION, not confirmation — and not a clinical restatement of severity. Show that you get it with a brief, human acknowledgment, WITHOUT inventing or attributing any allergy, restriction, or dislike they did not state, and without softening or omitting a real allergy. Stay in the middle between two failure modes:
+
+- ECHOING/CLINICAL (too flat, forbidden): restating it like a medical record.
+  Answer: "allergic to nuts" -> BAD: "You're allergic to nuts."
+- PRESUMPTUOUS (too much, forbidden): inventing dishes or exposure they never mentioned.
+  Answer: "allergic to nuts" -> BAD: "That must be hard with all the pesto and baklava out there."
+- TARGET (the middle, aim here): a brief, warm, human acknowledgment that still takes it seriously.
+  Answer: "allergic to nuts" -> GOOD: "Nuts — noted, I'll keep those off entirely."
+  Answer: "none, I'll eat anything" -> GOOD: "Good, nothing to work around there."
+
+Terse answers are where echoing is most tempting — add warmth there, never fabricated detail. This is a safety-relevant answer, so never soften, minimize, or omit what they actually said — the warmth is in tone, not in the content.
+
+Rules: one sentence. Do not quote them verbatim. Never invent, infer, or add an allergy, restriction, or dislike they did not state. Calm, economical, competent-peer voice — not a hype machine. No superlatives-as-praise, no self-reference ("I..."), no exclamation points. Output ONLY the sentence — no quotes, no preamble, no label.
+
+THEIR ANSWER: ${answer}`,
+};
+
+// Fires a single short-form ai-chat call to produce a warm-recognition
+// one-sentence reflection of an onboarding answer, for a reactive "I heard
+// you" line in the scripted chat. Same fail-quiet discipline as
+// generateTasteProfile: never throws, returns null on any failure (network,
+// empty response, etc.) so the caller always has a safe fallback path. This
+// is a stranger's first interaction with the app — nothing here may surface
+// an error.
+//
+// Streams progressively via `onToken` (called with the accumulated text so
+// far on every delta) instead of only resolving once the full response has
+// landed. `firstTokenTimeoutMs` bounds TIME-TO-FIRST-TOKEN only, not total
+// completion — once the first text delta arrives the timeout is cleared and
+// the stream is allowed to run to completion however long that takes. This
+// is the fix for a real latency regression: a longer prompt pushed total
+// generation time past a timeout that used to bound the whole call, so
+// reflections were falling through to the fallback ack nearly every time.
+// The reflection sentence itself is short by prompt design, so an uncapped
+// completion in practice only ever adds a small amount of time on top of
+// first-token latency.
+export async function generateOnboardingReflection(
+  field: "palate" | "inspiration" | "constraints",
+  answer: string,
+  onToken?: (partialText: string) => void,
+  firstTokenTimeoutMs = 2500
+): Promise<string | null> {
+  const controller = new AbortController();
+  let firstTokenSeen = false;
+  const firstTokenTimer = setTimeout(() => {
+    if (!firstTokenSeen) controller.abort();
+  }, firstTokenTimeoutMs);
+
+  try {
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    if (!supabaseAnonKey) throw new Error("Supabase key not found");
+
+    const systemPrompt = ONBOARDING_REFLECTION_SYSTEM_PROMPTS[field](answer);
+
+    const response = await fetch(
+      "https://xzpmmthreeyscidhwriv.supabase.co/functions/v1/ai-chat",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${supabaseAnonKey}`,
+        },
+        body: JSON.stringify({
+          messages: [{ role: "user", content: "Reflect it back now." }],
+          systemPrompt,
+        }),
+        signal: controller.signal,
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Edge Function error: ${errorText}`);
+    }
+
+    let fullText = "";
+    for await (const chunk of parseSSEStream(response)) {
+      if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta") {
+        if (!firstTokenSeen) {
+          firstTokenSeen = true;
+          clearTimeout(firstTokenTimer);
+        }
+        fullText += chunk.delta.text;
+        onToken?.(fullText);
+      }
+    }
+
+    const trimmed = fullText.trim();
+    return trimmed || null;
+  } catch (error) {
+    console.error("Onboarding reflection generation failed:", error);
+    return null;
+  } finally {
+    clearTimeout(firstTokenTimer);
+  }
+}
+
+// Composes the constraints field into two severity-labeled sections so the
+// downstream system (buildSystemPrompt, taste profile generation) can act on
+// allergy vs. dislike with different weight. Safety-biased: ambiguous items
+// (unclear whether allergy or preference) are instructed into the ALLERGY
+// bucket, never the reverse — a false allergy flag is a harmless
+// over-caution, a missed one is a real risk. Same fail-quiet discipline as
+// generateTasteProfile: never throws, returns null on any failure so the
+// caller falls back to writing the user's raw answer text.
+const NO_GOS_PARSE_SYSTEM_PROMPT = (answer: string) => `You are composing a structured constraints record from a new user's free-text answer about allergies and dislikes, for a cooking app that will use this to avoid unsafe or unwanted ingredients.
+
+Output EXACTLY two lines, in this exact format, nothing else — no preamble, no explanation:
+ALLERGY (hard, never serve): <items, comma-separated, or the word None>
+DISLIKES (prefer to avoid): <items, comma-separated, or the word None>
+
+Rules:
+- An allergy is anything the user frames as something they cannot eat, are allergic to, or must avoid entirely (including named diets like "vegetarian" or "no pork").
+- A dislike is anything the user frames as merely not enjoying or preferring not to have.
+- If it is AMBIGUOUS which bucket an item belongs in, put it in ALLERGY — never guess toward the less safe bucket.
+- Do NOT invent any item the user did not mention.
+- If the user named nothing for a bucket, write the word None for that line — never omit a line.
+- Read intent through obvious typos silently; do not comment on them.
+
+USER'S ANSWER: ${answer}`;
+
+export async function parseNoGosAnswer(answer: string): Promise<string | null> {
+  try {
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    if (!supabaseAnonKey) throw new Error("Supabase key not found");
+
+    const response = await fetch(
+      "https://xzpmmthreeyscidhwriv.supabase.co/functions/v1/ai-chat",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${supabaseAnonKey}`,
+        },
+        body: JSON.stringify({
+          messages: [{ role: "user", content: "Compose the constraints record now." }],
+          systemPrompt: NO_GOS_PARSE_SYSTEM_PROMPT(answer),
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Edge Function error: ${errorText}`);
+    }
+
+    let fullText = "";
+    for await (const chunk of parseSSEStream(response)) {
+      if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta") {
+        fullText += chunk.delta.text;
+      }
+    }
+
+    const trimmed = fullText.trim();
+    return trimmed || null;
+  } catch (error) {
+    console.error("No-gos parsing failed:", error);
+    return null;
+  }
+}
+
+// Strict, non-AI validator for parseNoGosAnswer's output. The model is asked
+// for an exact two-line format but compliance isn't guaranteed — this is the
+// gate that decides whether its output is trustworthy enough to store, or
+// whether the caller should fall back to the user's raw typed answer
+// instead. Deliberately strict (exact prefixes, non-empty content) rather
+// than lenient: a malformed composed string stored as "the constraints" is
+// worse than falling back to the user's own words, which are always safe to
+// store verbatim.
+const ALLERGY_LINE_PREFIX = "ALLERGY (hard, never serve):";
+const DISLIKES_LINE_PREFIX = "DISLIKES (prefer to avoid):";
+
+export function parseComposedConstraints(rawText: string): string | null {
+  const lines = rawText.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines.length !== 2) return null;
+  const [allergyLine, dislikesLine] = lines;
+  if (!allergyLine.startsWith(ALLERGY_LINE_PREFIX)) return null;
+  if (!dislikesLine.startsWith(DISLIKES_LINE_PREFIX)) return null;
+  const allergyContent = allergyLine.slice(ALLERGY_LINE_PREFIX.length).trim();
+  const dislikesContent = dislikesLine.slice(DISLIKES_LINE_PREFIX.length).trim();
+  if (!allergyContent || !dislikesContent) return null;
+  return `${allergyLine}\n${dislikesLine}`;
+}
+
 function localDateString(): string {
   const d = new Date();
   const year = d.getFullYear();
