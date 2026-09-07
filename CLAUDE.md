@@ -63,6 +63,7 @@ pointer named — do not duplicate it here.
 - **Accepted dietary-checker flags (swap-policy + false-cognate rows) are DESIGNED to re-flag on every `--recheck-only` run** — do not "re-fix" a re-flagged row without first checking it isn't already a known accepted case. Full detail: Suggested Recipes Pool — Layer 1 in FEATURE_SPECS.md.
 - **The dietary swap policy depends on the full ingredient line surviving display** — never truncate/summarize an ingredient string in a way that could drop an "or `<alternative>`" clause; that clause is the compliance proof. Full detail: Suggested Recipes Pool — Layer 1 in FEATURE_SPECS.md.
 - **Onboarding's chat script writes `profiles` via the exact same setters as the old three-textbox flow, and gates the `generateTasteProfile` handoff on a real DB poll bounded by a single tunable ceiling** — never let it hang, and know `compute-slice`'s existing-slice short-circuit means a ceiling-timeout slice sticks for the rest of that day. Full detail: Onboarding — Conversational Flow in FEATURE_SPECS.md.
+- **`profiles.allergies` structured Big-9 gate takes merge priority over the unchanged prose-based `deriveDietaryGates`, with a deterministic backstop for `unparsed:true` records** — fail-closed pool columns, suggested-recipes-only enforcement. Full detail: Structured Hard-Allergy Capture & Gate in FEATURE_SPECS.md.
 
 ---
 

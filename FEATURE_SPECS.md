@@ -2403,3 +2403,129 @@ or a `compute-slice` change (out of scope here) closes this gap entirely.
 `compute-slice`, the suggested-recipes pool/matrix pipeline, the chip system,
 `normalizeStep()`, the Recipe List cache, account-to-account sharing, and the
 Profile edit screen.
+
+---
+
+## Structured Hard-Allergy Capture & Gate (Builds 1–3 + fail-open fix)
+
+**Schema.** `profiles.allergies` is a nullable jsonb column shaped
+`{big9: Big9Id[], other: string[], unparsed?: true}`, guarded by a DB-level
+CHECK constraint that validates the envelope shape only (array-typed
+`big9`/`other`, boolean-or-absent `unparsed`) — it does not validate that
+every string inside `big9` is one of the nine recognized ids. `NULL` means
+"never asked" (the pre-existing Build 0 legacy state); `{big9: [], other:
+[]}` with no `unparsed` flag is the distinct, deliberate "confirmed no
+allergies" answer. `Big9Id` is a single closed vocabulary — `egg | milk |
+fish | shellfish | tree_nut | peanut | wheat | soy | sesame` — defined once
+in `src/tipsy/allergyMap.ts` and described as "EU-14-ready": the id set is
+intentionally small and stable today, leaving room to extend to the EU's
+14-allergen list later without a shape change. `suggested_recipe_pool`
+carries six new columns added for this feature — `contains_egg`,
+`contains_fish`, `contains_soy`, `contains_sesame`, `contains_peanut`,
+`contains_treenut` — each `DEFAULT true`, i.e. fail-closed: a pool row is
+assumed to contain an allergen until a tagging pass proves otherwise, so an
+untagged row can never leak silently as newly-added inventory. Three Big-9
+ids are deliberately NOT given their own column and instead reuse existing
+Build-1 dietary columns: `milk` → `is_dairy_free`, `wheat` →
+`is_gluten_free`, `shellfish` → `contains_shellfish`. The two `is_*_free`
+reused columns have inverted polarity relative to the six new
+`contains_*` columns — `true` means SAFE on `is_dairy_free`/`is_gluten_free`,
+but `true` means UNSAFE on every `contains_*` column (including the reused
+`contains_shellfish`). `BIG9_TO_POOL_GATE` in `compute-slice/index.ts`
+encodes this polarity per id so no call site has to remember it by hand.
+
+**Capture.** The allergy composer (onboarding and the profile edit path,
+same component) collects free-text answers and runs them through
+`mapAllergyItems`, which splits each answer into recognized Big-9 hits
+(written to `big9`) and unrecognized leftover text (written to `other`).
+When the composer cannot confidently structure an answer at all, it writes
+`unparsed: true` on that profile's `allergies` object instead of guessing —
+`big9` stays empty in that case, `other` may hold the raw fragments it did
+manage to split out. Dislikes (as opposed to allergies) are captured
+separately and stay soft preference signal only; they never touch
+`allergies` and are never gated on.
+
+**Pool tagging.** All 1,828 rows in `suggested_recipe_pool` were AI-tagged
+for the six new `contains_*` columns as part of `matrix-pipeline.mjs`,
+using hidden-carrier reasoning (e.g. recognizing mayonnaise, brioche, aioli,
+carbonara, and custard as egg carriers even when "egg" never appears in the
+title or ingredient list). A one-directional vetting checker cross-checks
+the AI tagging against ingredient text and flags rows where the tag looks
+wrong; it only ever flags a row for review, it does not auto-correct.
+Documented gap, not yet closed: roughly 35 mismatches for
+wheat/milk/shellfish were recorded as judgment calls during vetting but
+never written back to the pool rows — those 35 rows currently carry their
+original (pre-vetting) tag value, not the reviewer's judgment.
+
+**The gate.** `compute-slice` (now at production version v4) filters the
+pool deterministically in Stage 1, before any AI call, from three gate
+sources merged in a fixed, first-source-wins priority order:
+`deriveBig9Gates` (reads `profiles.allergies.big9` directly — the primary,
+fully-structured source) → `deriveUnparsedBackstopGates` (the fail-open fix
+described below) → `deriveDietaryGates` (the original prose scanner,
+unchanged). To be precise about that last one, since it has been
+misdescribed elsewhere: **`deriveDietaryGates` was not modified or narrowed
+by this work.** It still scans `taste_profile` sentence-by-sentence for the
+literal phrases "hard allergy"/"dietary restriction" and can still gate all
+seven of its original signals — `is_vegan`, `is_vegetarian`,
+`is_gluten_free`, `is_dairy_free`, `contains_shellfish`, `contains_pork`,
+`contains_nuts`. What changed is its priority, not its content: it now runs
+last and only fills in columns neither deterministic source above already
+covers — in practice this means it remains the only source for
+`is_vegan`/`is_vegetarian`/`contains_pork` (Big-9 has no vegan/vegetarian/pork
+concept), and it remains a fallback for any older profile whose allergy
+signal only ever made it into prose rather than the structured `allergies`
+column.
+
+`deriveUnparsedBackstopGates` closes a proven fail-open (adversarial proof
+#7): a profile with `allergies.unparsed === true` has an empty `big9` array
+by construction, so `deriveBig9Gates` alone produces zero gates for it — a
+"cannot eat peanuts" user whose answer failed to structure was being served
+peanut recipes with no gate blocking them. The backstop runs a deterministic
+Big-9 text scan (`scanTextForBig9Ids`, reusing `ALLERGEN_SYNONYM_MAP`, a
+duplicate — not an import — of `allergyMap.ts`'s own synonym set and
+longest-match-first/word-boundary approach) directly against the raw failed
+answer, and only ever fires when `unparsed === true`; a successfully-parsed
+record (real `big9` list, or explicit confirmed-none) never reaches it and
+is untouched by this fix. Separately, the same raw unparsed text is passed
+to Stage 2 as a labeled, best-effort-only soft hint appended to
+`tasteProfileForAI` ("STATED but UNVERIFIED... best-effort") — this lets the
+AI take non-Big-9 terms in a failed answer (e.g. "mustard") under advisement
+even though no pool column exists to hard-gate on them.
+
+Proposed, not built: a minimal re-entry flag so a profile stuck with
+`unparsed: true` can be flagged for the user to re-answer the allergy
+question through the composer, converting a permanent backstop-only state
+into a real structured one. Out of scope for this fix; logged here as the
+natural next step.
+
+**Honest boundaries — what this gate does and does not cover:**
+1. The suggested-recipes carousel (`compute-slice` → `user_recipe_slices`)
+   is the ONLY surface this gate protects. Build (AI recipe chat) and
+   cook-chat are not hardened against allergies at all — a user can ask
+   Build for a peanut dish regardless of their profile.
+2. Non-Big-9 terms in `other` or in unparsed raw text are best-effort only,
+   via the Stage 2 soft hint — never a hard gate, and never guaranteed to be
+   caught (the hint depends on the model reading and honoring it).
+3. Sulfites and nightshades are deliberately untagged — no schema column,
+   no gate, no soft hint. Out of scope for this feature.
+4. A `NULL` `allergies` value (a legacy profile that predates this feature
+   and was never asked) produces zero gates from every source — such a
+   user is completely unprotected until they pass through the composer at
+   least once.
+5. `wheat`, `milk`, and `shellfish` rely on three REUSED pre-existing pool
+   columns rather than dedicated ones, inheriting whatever tagging accuracy
+   those columns already had from Build 1 — including the ~35 unresolved
+   vetting mismatches noted above under Pool tagging.
+6. The gate is a pool-level filter, not a recipe-content guarantee — it
+   trusts the pool's tagging; a mistagged row (false-negative on a
+   `contains_*` column) can still reach a user with that allergy.
+
+**Verification.** 12/12 adversarial proofs pass against the actual
+committed source (fidelity-checked by extracting and running the real code,
+not a reimplementation), including proof #7 — the fail-open this fix
+closes — and a new proof #12 covering the unparsed+non-Big-9
+(soft-hint-only, no hard gate) case. Separately, 3/3 live smoke tests pass
+against the deployed v4 HTTP endpoint using real signed-in test users
+(shellfish-allergy, egg-allergy, no-allergy), confirming the fix behaves
+identically in production, not just in git.
