@@ -69,6 +69,8 @@ const ALLERGEN_SYNONYM_MAP: Record<string, Big9Id> = {
   sardine: "fish",
   sardines: "fish",
   herring: "fish",
+  // hidden carrier: Worcestershire sauce is traditionally anchovy-based
+  worcestershire: "fish",
 
   // milk
   milk: "milk",
@@ -79,6 +81,9 @@ const ALLERGEN_SYNONYM_MAP: Record<string, Big9Id> = {
   cream: "milk",
   yogurt: "milk",
   yoghurt: "milk",
+  // hidden carriers
+  ghee: "milk",
+  paneer: "milk",
 
   // egg
   egg: "egg",
@@ -86,6 +91,17 @@ const ALLERGEN_SYNONYM_MAP: Record<string, Big9Id> = {
   albumen: "egg",
   mayonnaise: "egg",
   mayo: "egg",
+  // hidden carriers — dish/product names that reliably contain egg even when
+  // "egg" itself never appears in the ingredient text. Known-carriers list,
+  // not exhaustive.
+  brioche: "egg",
+  aioli: "egg",
+  carbonara: "egg",
+  custard: "egg",
+  meringue: "egg",
+  hollandaise: "egg",
+  frittata: "egg",
+  quiche: "egg",
 
   // peanut
   peanut: "peanut",
@@ -122,6 +138,10 @@ const ALLERGEN_SYNONYM_MAP: Record<string, Big9Id> = {
   // match anything more specific — see PART 2 note in the calling code)
   wheat: "wheat",
   gluten: "wheat",
+  // hidden carriers
+  panko: "wheat",
+  couscous: "wheat",
+  seitan: "wheat",
 
   // soy
   soy: "soy",
@@ -130,6 +150,10 @@ const ALLERGEN_SYNONYM_MAP: Record<string, Big9Id> = {
   soybeans: "soy",
   edamame: "soy",
   tofu: "soy",
+  // hidden carriers
+  miso: "soy",
+  tempeh: "soy",
+  tamari: "soy",
 
   // sesame
   sesame: "sesame",
@@ -188,4 +212,99 @@ export function mapAllergyItems(allergyContent: string): { big9: Big9Id[]; other
   }
 
   return { big9: Array.from(big9Set), other };
+}
+
+// Human-readable labels for prompt text and user-facing failure copy.
+export const BIG9_DISPLAY_NAMES: Record<Big9Id, string> = {
+  egg: "egg",
+  milk: "milk",
+  fish: "fish",
+  shellfish: "shellfish",
+  tree_nut: "tree nuts",
+  peanut: "peanut",
+  wheat: "wheat",
+  soy: "soy",
+  sesame: "sesame",
+};
+
+// Scans an arbitrary block of text (not a single comma-split item) for any
+// Big-9 synonym, including the hidden-carrier dish names above. Client-side
+// sibling of compute-slice/index.ts's scanTextForBig9Ids — duplicated, not
+// imported, same cross-boundary convention as this file's other exports
+// (compute-slice is Deno/Edge Function code, a different runtime and build
+// system from this client bundle).
+export function scanTextForBig9Ids(text: string): Big9Id[] {
+  const normalized = text.toLowerCase();
+  const found = new Set<Big9Id>();
+  for (const key of SORTED_KEYS) {
+    const pattern = new RegExp(`\\b${key.replace(/\s+/g, "\\s+")}\\b`, "i");
+    if (pattern.test(normalized)) found.add(ALLERGEN_SYNONYM_MAP[key]);
+  }
+  return Array.from(found);
+}
+
+// Extracts the raw failed-answer text from an unparsed allergies record
+// ({big9:[], other:[rawAnswer], unparsed:true} — see
+// composeConstraintsAndAllergies in data.ts). Returns '' for any record that
+// isn't unparsed:true or has no usable `other` strings. Mirrors
+// compute-slice/index.ts's getUnparsedRawText exactly.
+export function getUnparsedRawText(allergies: StructuredAllergies | null | undefined): string {
+  if (!allergies || allergies.unparsed !== true) return "";
+  if (!Array.isArray(allergies.other)) return "";
+  return allergies.other.filter((x): x is string => typeof x === "string").join(" ").trim();
+}
+
+// The allergen id set to actually gate/scan against for a given profile,
+// merging the same two deterministic sources compute-slice's
+// deriveBig9Gates/deriveUnparsedBackstopGates merge, in the same priority:
+// a successfully-parsed big9 list wins; an unparsed record falls back to a
+// deterministic scan of its raw failed-answer text; a NULL profile (never
+// asked) produces no gate here — same documented boundary as compute-slice,
+// where a NULL profile is unprotected until it passes through the composer
+// at least once. This is intentionally Big-9-only: it does not replicate
+// deriveDietaryGates' prose scanning (vegan/vegetarian/pork have no Big-9
+// concept and are out of scope for allergen enforcement).
+export function effectiveAllergensForScan(allergies: StructuredAllergies | null | undefined): Big9Id[] {
+  if (!allergies) return [];
+  if (Array.isArray(allergies.big9) && allergies.big9.length > 0) return allergies.big9;
+  const rawText = getUnparsedRawText(allergies);
+  if (!rawText) return [];
+  return scanTextForBig9Ids(rawText);
+}
+
+export interface Big9Hit {
+  allergen: Big9Id;
+  ingredient: string;
+  matchedTerm: string;
+}
+
+// Scans a generated recipe's ingredient list for any of the user's own
+// Big-9 allergens (targetIds), including hidden-carrier dish names. Each
+// ingredient's name + qty text is scanned independently (mirrors
+// matrix-pipeline.mjs's ingredientItemTexts pattern) so a hit can be
+// attributed to the specific offending ingredient, not just the recipe as a
+// whole. Only checks terms whose mapped id is in targetIds — this is a
+// per-user check, not a full Big-9 sweep. Returns [] when clean or when
+// targetIds is empty (nothing to check against).
+export function scanIngredientsForBig9(
+  ingredients: { name: string; qty: string }[],
+  targetIds: Big9Id[],
+): Big9Hit[] {
+  if (targetIds.length === 0) return [];
+  const targetSet = new Set(targetIds);
+  const hits: Big9Hit[] = [];
+
+  for (const ing of ingredients) {
+    const text = `${ing.name} ${ing.qty}`.toLowerCase();
+    for (const key of SORTED_KEYS) {
+      const allergen = ALLERGEN_SYNONYM_MAP[key];
+      if (!targetSet.has(allergen)) continue;
+      const pattern = new RegExp(`\\b${key.replace(/\s+/g, "\\s+")}\\b`, "i");
+      if (pattern.test(text)) {
+        hits.push({ allergen, ingredient: ing.name, matchedTerm: key });
+      }
+    }
+  }
+
+  return hits;
 }
