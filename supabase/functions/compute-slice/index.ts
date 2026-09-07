@@ -65,6 +65,81 @@ function deriveDietaryGates(tasteProfile: string): { column: string; value: bool
   return gates
 }
 
+// ---------------------------------------------------------------------------
+// TENTPOLE OCCASION WINDOW — COPIED from src/tipsy/chips.ts (the
+// ChipTiming fixedHoliday/floatingHoliday shapes, isInLeadInWindow, and the 5
+// tentpole timing constants, with their exact date/lead-in values). Single
+// source of truth lives there. If you update floating-holiday dates
+// (Thanksgiving/Super Bowl) here, update chips.ts too, and vice versa.
+// Floating dates expire after 2027.
+//
+// Deliberately narrower than chips.ts's full ChipTiming union: the 5
+// tentpoles only ever use "fixedHoliday"/"floatingHoliday", so "seasonal"/
+// "recurringWeekly"/"oneOff" are not copied. Deliberately re-implemented on
+// UTC epoch-day integer math rather than chips.ts's local-timezone `Date`
+// objects — Deno has no meaningful "user local timezone" the way a browser
+// does, so this operates purely on the already-resolved `localDate` calendar
+// string, not wall-clock time. Same fixedHoliday limitation as chips.ts,
+// inherited on purpose (not fixed here): only checks the holiday's date in
+// `localDate`'s own year, so a lead-in window that would wrap into the prior
+// December is not handled — none of these 5 tentpoles' lead-in windows do
+// that (all comfortably fit inside one calendar month), so it's a non-issue
+// today, same as it is in chips.ts.
+// ---------------------------------------------------------------------------
+
+type FixedHolidayTiming = { kind: 'fixedHoliday'; monthDay: string; leadInDays: number }
+type FloatingHolidayTiming = { kind: 'floatingHoliday'; dates: string[]; leadInDays: number }
+type TentpoleTiming = FixedHolidayTiming | FloatingHolidayTiming
+
+const TENTPOLE_TIMINGS: Record<string, TentpoleTiming> = {
+  christmas: { kind: 'fixedHoliday', monthDay: '12-25', leadInDays: 10 },
+  'thanksgiving-week': { kind: 'floatingHoliday', dates: ['2026-11-26', '2027-11-25'], leadInDays: 18 },
+  'super-bowl': { kind: 'floatingHoliday', dates: ['2026-02-08', '2027-02-14'], leadInDays: 7 },
+  'fourth-of-july': { kind: 'fixedHoliday', monthDay: '07-04', leadInDays: 7 },
+  valentines: { kind: 'fixedHoliday', monthDay: '02-14', leadInDays: 6 },
+}
+
+function dateStringToEpochDay(dateStr: string): number {
+  const [year, month, day] = dateStr.split('-').map(Number)
+  return Math.floor(Date.UTC(year, month - 1, day) / 86_400_000)
+}
+
+function monthDayToEpochDayInYear(monthDay: string, year: number): number {
+  const [month, day] = monthDay.split('-').map(Number)
+  return Math.floor(Date.UTC(year, month - 1, day) / 86_400_000)
+}
+
+// Mirrors chips.ts's isInLeadInWindow exactly: active if
+// (target - leadInDays) <= today <= target, in whole calendar days.
+function isInLeadInWindowEpoch(todayEpochDay: number, targetEpochDay: number, leadInDays: number): boolean {
+  return todayEpochDay >= targetEpochDay - leadInDays && todayEpochDay <= targetEpochDay
+}
+
+// Given the request's already-resolved "YYYY-MM-DD" localDate, returns the
+// active tentpole occasion slug (one of the 5 keys above) or null. Mirrors
+// chips.ts's isChipActive for fixedHoliday/floatingHoliday only.
+function activeTentpoleOccasion(localDate: string): string | null {
+  const todayEpochDay = dateStringToEpochDay(localDate)
+  const todayYear = Number(localDate.slice(0, 4))
+
+  for (const [slug, timing] of Object.entries(TENTPOLE_TIMINGS)) {
+    if (timing.kind === 'fixedHoliday') {
+      const targetEpochDay = monthDayToEpochDayInYear(timing.monthDay, todayYear)
+      if (isInLeadInWindowEpoch(todayEpochDay, targetEpochDay, timing.leadInDays)) {
+        return slug
+      }
+    } else {
+      for (const dateStr of timing.dates) {
+        const targetEpochDay = dateStringToEpochDay(dateStr)
+        if (isInLeadInWindowEpoch(todayEpochDay, targetEpochDay, timing.leadInDays)) {
+          return slug
+        }
+      }
+    }
+  }
+  return null
+}
+
 // Same system prompt proven in scripts/prove-slice-selection.mjs — reused
 // verbatim. This Edge Function cannot import that browser-facing script (it
 // pulls in src/tipsy/data.ts, which assumes import.meta.env/browser globals),
@@ -299,8 +374,13 @@ Deno.serve(async (req) => {
     let relaxed = false
     let candidates = pool
 
+    // Hoisted out of the `if` below (was block-scoped) so the OCCASION
+    // GUARANTEE's unseen-check can read it after this block — it stays the
+    // UNRELAXED seen-set (every id from the last 30 slices) even though
+    // `excluded` below gets relaxed for the normal shelf's 8-candidate floor.
+    const idToRecency = new Map<string, number>()
+
     if (recentSlices && recentSlices.length > 0) {
-      const idToRecency = new Map<string, number>()
       recentSlices.forEach((s, idx) => {
         const ids: string[] = Array.isArray(s.recipe_ids) ? s.recipe_ids : []
         for (const id of ids) {
@@ -325,6 +405,76 @@ Deno.serve(async (req) => {
     if (candidates.length < 3) {
       return await fallbackToPriorSliceOrError(
         `Only ${candidates.length} Stage 1 candidates survived filtering — too few for a slice`
+      )
+    }
+
+    // ---------------------------------------------------------------------
+    // OCCASION GUARANTEE — near a tentpole holiday window, try to reserve one
+    // extra seat on the shelf for an occasion-matching recipe. Deliberately
+    // NOT gated on meal_type='dinner' (an occasion seat may be any meal
+    // type — e.g. a Thanksgiving side or a Super Bowl snack) and NOT
+    // season-gated (the occasion itself already implies the timing, so a
+    // redundant season filter would only risk dropping valid occasion rows
+    // for no benefit). Reuses `dietaryGates` verbatim — the same hard
+    // constraints that bind the normal shelf bind this seat too.
+    //
+    // FAIL SILENT BY DESIGN: this entire block is wrapped in its own
+    // try/catch that only logs. It must NEVER call
+    // fallbackToPriorSliceOrError and must NEVER throw out to the outer
+    // try/catch — an occasion-guarantee failure (query error, no active
+    // occasion, no unseen row, none dietary-safe) degrades to "no bonus
+    // seat," not a degraded/stale/broken shelf. The normal shelf computed
+    // above (and everything after this block) is completely unaffected by
+    // anything that happens in here.
+    // ---------------------------------------------------------------------
+    let occasionPick: {
+      id: string
+      title: string
+      description: string | null
+      cuisine: string | null
+      effort: string | null
+      occasionSlug: string
+    } | null = null
+
+    try {
+      const activeSlug = activeTentpoleOccasion(localDate)
+      if (activeSlug) {
+        let occasionQuery = adminClient
+          .from('suggested_recipe_pool')
+          .select(
+            'id,title,description,cuisine,effort,is_vegetarian,is_vegan,is_gluten_free,is_dairy_free,contains_pork,contains_shellfish,contains_nuts'
+          )
+          .eq('occasion', activeSlug)
+
+        for (const gate of dietaryGates) {
+          occasionQuery = occasionQuery.eq(gate.column, gate.value)
+        }
+
+        const { data: occasionRows, error: occasionError } = await occasionQuery
+        if (occasionError) {
+          console.error('occasion guarantee: query failed, skipping bonus seat:', occasionError.message)
+        } else {
+          // UNSEEN CHECK — the unrelaxed idToRecency set, not the relaxed
+          // `excluded` set: don't-repeat wins over the occasion guarantee,
+          // full stop, with no floor-driven relaxation for this seat.
+          const unseen = (occasionRows ?? []).filter((r) => !idToRecency.has(r.id))
+          if (unseen.length > 0) {
+            const chosen = unseen[0]
+            occasionPick = {
+              id: chosen.id,
+              title: chosen.title,
+              description: chosen.description ?? null,
+              cuisine: chosen.cuisine ?? null,
+              effort: chosen.effort ?? null,
+              occasionSlug: activeSlug,
+            }
+          }
+        }
+      }
+    } catch (occasionErr) {
+      console.error(
+        'occasion guarantee: unexpected error, skipping bonus seat:',
+        occasionErr instanceof Error ? occasionErr.message : occasionErr
       )
     }
 
@@ -359,12 +509,45 @@ Deno.serve(async (req) => {
       return await fallbackToPriorSliceOrError(`Stage 2 selection failed: ${parsed.error}`)
     }
 
+    // Splice the occasion guarantee in AFTER Stage 2 has already succeeded on
+    // its own ("≥3 valid picks or fallback" already happened above,
+    // untouched by anything here). ADD a 5th seat rather than replacing one
+    // of the AI's picks — per CLAUDE.md, `user_recipe_slices` has "no shelf
+    // UI yet," so there is no live consumer assuming a fixed 3-4 card count;
+    // growing to 5 on tentpole days carries no known UI risk today, and
+    // replacing a pick would silently discard a pick the AI already
+    // justified for this cook. Guard against a duplicate: if the AI
+    // independently already picked the same recipe, don't add it twice.
+    const finalPicks =
+      occasionPick && !parsed.picks.some((p) => p.id === occasionPick!.id)
+        ? [
+            ...parsed.picks,
+            {
+              id: occasionPick.id,
+              title: occasionPick.title,
+              reason: `A ${occasionPick.occasionSlug} pick, just for the occasion.`,
+            },
+          ]
+        : parsed.picks
+
     // Denormalized per-pick display fields for the future suggestions
     // carousel — additive only, does not change recipe_ids or any selection
     // logic above. candidates is already in scope from Stage 1, so this is a
-    // lookup by id, not a new query.
+    // lookup by id, not a new query. The occasion pick isn't in `candidates`
+    // (it came from a separate query), so it's special-cased by hand from
+    // `occasionPick` itself rather than through `candidateById`.
     const candidateById = new Map(candidates.map((c) => [c.id, c]))
-    const pickDetails = parsed.picks.map((p) => {
+    const pickDetails = finalPicks.map((p) => {
+      if (occasionPick && p.id === occasionPick.id) {
+        return {
+          id: p.id,
+          title: p.title,
+          cuisine: occasionPick.cuisine,
+          effort: occasionPick.effort,
+          description: occasionPick.description,
+          reason: p.reason,
+        }
+      }
       const candidate = candidateById.get(p.id)
       return {
         id: p.id,
@@ -383,7 +566,7 @@ Deno.serve(async (req) => {
         {
           user_id: callerId,
           slice_date: localDate,
-          recipe_ids: parsed.picks.map((p) => p.id),
+          recipe_ids: finalPicks.map((p) => p.id),
           selection_reason: parsed.sliceReason,
           status: 'ready',
           pick_details: pickDetails,
@@ -401,7 +584,10 @@ Deno.serve(async (req) => {
       {
         slice: upserted,
         computed: true,
-        picks_with_reasons: parsed.picks,
+        picks_with_reasons: finalPicks,
+        occasion_bonus: occasionPick
+          ? { id: occasionPick.id, title: occasionPick.title, occasion: occasionPick.occasionSlug }
+          : null,
         relaxed,
         used_server_date_fallback: usedServerDateFallback,
       },
