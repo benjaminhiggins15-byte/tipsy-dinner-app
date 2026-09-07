@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
 import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName, sendRecipeToFriends, searchProfiles, getMyConnections, type ProfileSearchResult, type PendingReceivedRecipe, getPendingReceivedRecipes, type SuggestedRecipeDetail, getSuggestedRecipeDetail, type StructuredAllergies } from "./data";
 import { type CropRect } from "./image";
-import { type Big9Id, BIG9_DISPLAY_NAMES, effectiveAllergensForScan, scanIngredientsForBig9, type Big9Hit } from "./allergyMap";
+import { type Big9Id, BIG9_DISPLAY_NAMES, effectiveAllergensForScan, scanIngredientsForBig9, scanFreeTextForBig9, type Big9Hit } from "./allergyMap";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
@@ -253,6 +253,29 @@ export const parseRecipeFromAIResponse = (fullText: string, sourceId?: string, s
 // this many regenerations before giving up and surfacing an honest failure
 // instead of ever rendering a recipe that contains a known hit.
 const MAX_ALLERGEN_SAFE_ATTEMPTS = 3;
+
+// Single choke-point for the Layer 2 backstop: scans EVERY user-visible,
+// AI-generated free-text field on a parsed recipe draft, not just the
+// ingredient list. Fixes a real production fail-open where a carbonara's
+// ingredient list was egg-free but its own description narrated "egg yolk
+// emulsified into a silky sauce" — text the user reads regardless of what's
+// in the ingredient list. Call sites must route through this function rather
+// than calling scanIngredientsForBig9 directly, so a future field never
+// silently falls outside the backstop's coverage. RecipeDraft has no
+// notes/tips field — title, description, ingredients, and each step's
+// title + instruction are the only user-visible AI-generated text a
+// generated recipe has today.
+function scanRecipeDraftForBig9(recipe: RecipeDraft, targetIds: Big9Id[]): Big9Hit[] {
+  const hits: Big9Hit[] = [];
+  hits.push(...scanIngredientsForBig9(recipe.ingredients, targetIds));
+  hits.push(...scanFreeTextForBig9(recipe.title, targetIds, "title"));
+  hits.push(...scanFreeTextForBig9(recipe.description, targetIds, "description"));
+  recipe.steps.forEach((step, index) => {
+    const { title, instruction } = normalizeStep(step);
+    hits.push(...scanFreeTextForBig9(`${title} ${instruction}`.trim(), targetIds, `step ${index + 1}`));
+  });
+  return hits;
+}
 
 // Builds the louder, corrective system-prompt addendum used on a
 // regeneration attempt after scanIngredientsForBig9 found a hit. Named
@@ -5470,9 +5493,10 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
 
         const parsedRecipe = parseRecipeFromAIResponse(fullText, currentRecipe?.sourceId, currentRecipe?.sourceTitle);
 
-        // Deterministic allergen backstop — scan the ACTUAL parsed ingredients
-        // against this user's Big-9 allergens before showing or saving anything.
-        const hits = parsedRecipe ? scanIngredientsForBig9(parsedRecipe.ingredients, userAllergens) : [];
+        // Deterministic allergen backstop — scan the ACTUAL parsed recipe (title,
+        // description, ingredients, and step text) against this user's Big-9
+        // allergens before showing or saving anything.
+        const hits = parsedRecipe ? scanRecipeDraftForBig9(parsedRecipe, userAllergens) : [];
 
         if (hits.length === 0) {
           // Clean (or no recipe in this turn at all) — this is the response we keep.
@@ -5649,9 +5673,10 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
 
         const parsedRecipe = parseRecipeFromAIResponse(fullText, currentRecipe?.sourceId, currentRecipe?.sourceTitle);
 
-        // Deterministic allergen backstop — scan the ACTUAL parsed ingredients
-        // against this user's Big-9 allergens before showing or saving anything.
-        const hits = parsedRecipe ? scanIngredientsForBig9(parsedRecipe.ingredients, userAllergens) : [];
+        // Deterministic allergen backstop — scan the ACTUAL parsed recipe (title,
+        // description, ingredients, and step text) against this user's Big-9
+        // allergens before showing or saving anything.
+        const hits = parsedRecipe ? scanRecipeDraftForBig9(parsedRecipe, userAllergens) : [];
 
         if (hits.length === 0) {
           // Clean (or no recipe in this turn at all) — this is the response we keep.
@@ -5936,9 +5961,10 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
 
           const parsedRecipe = parseRecipeFromAIResponse(fullText, currentRecipe?.sourceId, currentRecipe?.sourceTitle);
 
-          // Deterministic allergen backstop — scan the ACTUAL parsed ingredients
-          // against this user's Big-9 allergens before showing or saving anything.
-          const hits = parsedRecipe ? scanIngredientsForBig9(parsedRecipe.ingredients, userAllergens) : [];
+          // Deterministic allergen backstop — scan the ACTUAL parsed recipe (title,
+          // description, ingredients, and step text) against this user's Big-9
+          // allergens before showing or saving anything.
+          const hits = parsedRecipe ? scanRecipeDraftForBig9(parsedRecipe, userAllergens) : [];
 
           if (hits.length === 0) {
             // Clean (or no recipe in this turn at all) — this is the response we keep.

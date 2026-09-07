@@ -336,3 +336,23 @@ export function scanIngredientsForBig9(
 
   return hits;
 }
+
+// Scans a single block of user-visible free text (a recipe's title,
+// description, or a step's title/instruction — NOT the comma-split
+// ingredient list, which scanIngredientsForBig9 handles) for the user's own
+// Big-9 allergens. Reuses scanTextForBig9Ids as the detection engine — same
+// synonym/carrier map, no second detection path — and reshapes its output
+// into the same Big9Hit shape scanIngredientsForBig9 returns, so a caller can
+// treat an ingredient-list hit and a prose hit identically. `source` labels
+// where the hit was found (e.g. "title", "description", "step 2") since
+// there is no ingredient name to attribute a prose hit to. Fixes a real
+// fail-open: an ingredient list can be clean while the recipe's own
+// description narrates the allergen in prose (e.g. "egg yolk emulsified into
+// a silky sauce") — text the user actually reads.
+export function scanFreeTextForBig9(text: string, targetIds: Big9Id[], source: string): Big9Hit[] {
+  if (targetIds.length === 0 || !text) return [];
+  const targetSet = new Set(targetIds);
+  return scanTextForBig9Ids(text)
+    .filter((allergen) => targetSet.has(allergen))
+    .map((allergen) => ({ allergen, ingredient: source, matchedTerm: `(mentioned in ${source})` }));
+}
