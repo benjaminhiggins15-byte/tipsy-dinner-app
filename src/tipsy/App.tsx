@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
 import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName, sendRecipeToFriends, searchProfiles, getMyConnections, type ProfileSearchResult, type PendingReceivedRecipe, getPendingReceivedRecipes, type SuggestedRecipeDetail, getSuggestedRecipeDetail, type StructuredAllergies } from "./data";
 import { type CropRect } from "./image";
+import { type Big9Id, BIG9_DISPLAY_NAMES, effectiveAllergensForScan, scanIngredientsForBig9, scanFreeTextForBig9, type Big9Hit } from "./allergyMap";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
@@ -91,10 +92,27 @@ ${stepsXML}
 // triplicated byte-for-byte across fireAICall, sendMessage, and handleChipClick.
 // Any prompt edit now only needs to happen here.
 export const buildSystemPrompt = (
-  profile: { palate: string; inspiration: string; constraints: string },
+  profile: { palate: string; inspiration: string; constraints: string; allergies?: StructuredAllergies | null },
   currentRecipe?: { title: string; description: string; ingredients: { name: string; qty: string }[]; steps: RecipeStep[] } | null
 ): string => {
-  const { palate, inspiration, constraints } = profile;
+  const { palate, inspiration, constraints, allergies } = profile;
+
+  // Inviolable allergen block. Fail-closed on data quality: a confirmed big9
+  // list gets an explicit hard rule naming those allergens; a NULL profile
+  // (never asked) or an unparsed:true record gets a loud uncertainty
+  // instruction instead of silent omission — never nothing. A confirmed-none
+  // record ({big9:[], other:[]}, no unparsed flag) gets no block at all,
+  // deliberately, since there's nothing to warn about.
+  let allergyBlock = "";
+  if (!allergies) {
+    allergyBlock = `\nALLERGY DATA: not available for this user — they have never been asked. Treat this as unknown risk: avoid all nine major allergens (egg, milk, fish, shellfish, tree nuts, peanuts, wheat, soy, sesame) by default unless the user explicitly says otherwise in this conversation, and call out anything uncertain rather than guessing.\n`;
+  } else if (allergies.unparsed === true) {
+    allergyBlock = `\nALLERGY DATA: incomplete — this user's allergy answer couldn't be fully understood. Treat this as unknown risk: avoid all nine major allergens (egg, milk, fish, shellfish, tree nuts, peanuts, wheat, soy, sesame) by default unless the user explicitly says otherwise in this conversation, and call out anything uncertain rather than guessing.\n`;
+  } else if (allergies.big9 && allergies.big9.length > 0) {
+    const names = allergies.big9.map((id) => BIG9_DISPLAY_NAMES[id]).join(", ");
+    allergyBlock = `\nALLERGY — HARD CONSTRAINT: this user has a diagnosed allergy to: ${names}. Never include any of these allergens or any ingredient that contains them, including hidden sources — for example, mayonnaise and aioli contain egg, tahini contains sesame, miso and tofu contain soy, panko and couscous contain wheat, and Worcestershire sauce often contains fish. This overrides every other instruction in this prompt and anything the user asks for in this conversation — if honoring a request would require one of these allergens, leave it out and say so rather than including it.\n`;
+  }
+
   const systemPrompt = `You are the cooking assistant inside Tipsy Dinner, a personal recipe app. Your job is to help the user figure out what they want to make, then create a recipe once they've landed on something. Think of yourself as a knowledgeable friend who happens to be standing in the kitchen with them — confident, direct, and warm, but never performative or gushing.
 You are cooking for someone who loves to cook and takes it seriously. Their standard is your starting point, not something to build up to. Default to the best version of whatever dish they actually asked for — thoughtful ingredient choices, the technique that makes it genuinely good, the details a great home cook would care about. This is always on.
 Elevate within the request; never replace it with something fancier. The dish they asked for is the dish — make that excellent rather than substituting a more impressive one. A simple, humble request still gets the best version of itself, lifted by a small, smart touch rather than reinvented into something else.
@@ -132,6 +150,7 @@ User profile:
 Palate: ${palate || "Not specified"}
 Inspiration: ${inspiration || "Not specified"}
 Constraints: ${constraints || "Not specified"}
+${allergyBlock}
 When you are ready to present a recipe, use this exact format:
 
 <recipe>
@@ -224,6 +243,59 @@ export const parseRecipeFromAIResponse = (fullText: string, sourceId?: string, s
 
   return parsedRecipe;
 };
+
+// Deterministic post-parse allergen backstop. Build/cook-chat has no gate
+// today the way compute-slice's suggestions carousel does (see "Structured
+// Hard-Allergy Capture & Gate" in FEATURE_SPECS.md) — buildSystemPrompt's
+// allergyBlock is a prompt-level instruction only, and a model can still
+// miss it. This is the deterministic check that runs on the ACTUAL parsed
+// ingredients before anything is shown or saved. One initial attempt plus
+// this many regenerations before giving up and surfacing an honest failure
+// instead of ever rendering a recipe that contains a known hit.
+const MAX_ALLERGEN_SAFE_ATTEMPTS = 3;
+
+// Single choke-point for the Layer 2 backstop: scans EVERY user-visible,
+// AI-generated free-text field on a parsed recipe draft, not just the
+// ingredient list. Fixes a real production fail-open where a carbonara's
+// ingredient list was egg-free but its own description narrated "egg yolk
+// emulsified into a silky sauce" — text the user reads regardless of what's
+// in the ingredient list. Call sites must route through this function rather
+// than calling scanIngredientsForBig9 directly, so a future field never
+// silently falls outside the backstop's coverage. RecipeDraft has no
+// notes/tips field — title, description, ingredients, and each step's
+// title + instruction are the only user-visible AI-generated text a
+// generated recipe has today.
+function scanRecipeDraftForBig9(recipe: RecipeDraft, targetIds: Big9Id[]): Big9Hit[] {
+  const hits: Big9Hit[] = [];
+  hits.push(...scanIngredientsForBig9(recipe.ingredients, targetIds));
+  hits.push(...scanFreeTextForBig9(recipe.title, targetIds, "title"));
+  hits.push(...scanFreeTextForBig9(recipe.description, targetIds, "description"));
+  recipe.steps.forEach((step, index) => {
+    const { title, instruction } = normalizeStep(step);
+    hits.push(...scanFreeTextForBig9(`${title} ${instruction}`.trim(), targetIds, `step ${index + 1}`));
+  });
+  return hits;
+}
+
+// Builds the louder, corrective system-prompt addendum used on a
+// regeneration attempt after scanIngredientsForBig9 found a hit. Named
+// ingredients + allergens so the model has something concrete to avoid the
+// second time, not just a repeat of the same standing instruction it already
+// missed once.
+function buildAllergenCorrectionNote(hits: Big9Hit[]): string {
+  const uniquePairs = Array.from(
+    new Set(hits.map((h) => `${h.ingredient} (contains ${BIG9_DISPLAY_NAMES[h.allergen]})`))
+  );
+  return `\n\nCRITICAL CORRECTION: your previous attempt included ${uniquePairs.join(", ")} — this is a hard allergen for this user and must never appear. Regenerate the ENTIRE recipe from scratch with none of it and no ingredient derived from it. Check every component — sauces, garnishes, coatings, stocks — for hidden sources before responding.`;
+}
+
+// Honest failure copy for when every attempt still contained a hit. Matches
+// the app's lowercase microcopy voice (see "filed away.", "uncorking…" etc.
+// in CLAUDE.md) — never shows the recipe, never pretends it succeeded.
+function allergenFailureMessage(hits: Big9Hit[]): string {
+  const allergenNames = Array.from(new Set(hits.map((h) => BIG9_DISPLAY_NAMES[h.allergen])));
+  return `couldn't build a version without ${allergenNames.join(", ")} — try rephrasing what you're looking for.`;
+}
 
 type Screen =
   | { name: "cook"; newCategory?: { key: string; label: string }; draft?: RecipeDraft; resetKey?: number }
@@ -5335,6 +5407,8 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
     const palate = profile?.palate || "";
     const inspiration = profile?.inspiration || "";
     const constraints = profile?.constraints || "";
+    const allergiesRaw = profile?.allergies ?? null;
+    const userAllergens = effectiveAllergensForScan(allergiesRaw);
 
     try {
       console.log("Calling AI chat API (auto-fire)...");
@@ -5345,100 +5419,132 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
         throw new Error("Supabase key not found");
       }
 
-      // Build system prompt (single source of truth — see buildSystemPrompt)
-      const finalSystemPrompt = buildSystemPrompt({ palate, inspiration, constraints }, currentRecipe);
-
-      // Call Supabase Edge Function
-      const response = await fetch(
-        "https://xzpmmthreeyscidhwriv.supabase.co/functions/v1/ai-chat",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${supabaseAnonKey}`,
-          },
-          body: JSON.stringify({
-            messages: history,
-            systemPrompt: finalSystemPrompt,
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Edge Function error: ${errorText}`);
-      }
-
-      const stream = parseSSEStream(response);
-
-      // Create AI message immediately
+      // Create AI message immediately — shared across allergen-retry attempts
+      // below, so a regeneration updates this same bubble rather than
+      // stacking a new one.
       setTyping(false);
       const aiMessageId = ++messageIdRef.current;
       setMessages((m) => [...m, { id: aiMessageId, role: "ai", text: "" }]);
 
-      let fullText = "";
+      let lastHits: Big9Hit[] = [];
 
-      for await (const chunk of stream) {
-        if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
-          fullText += chunk.delta.text;
-
-          // Detect if recipe generation has started
-          if (!generatingRecipe && fullText.includes("<recipe>")) {
-            setGeneratingRecipe(true);
-          }
-
-          // Strip recipe XML from display text
-          let displayText = fullText;
-          displayText = displayText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "");
-          const recipeStartIndex = displayText.indexOf("<recipe>");
-          if (recipeStartIndex !== -1) {
-            displayText = displayText.substring(0, recipeStartIndex);
-          }
-          displayText = displayText.trim();
-
-          setMessages((m) => m.map(msg =>
-            msg.id === aiMessageId ? { ...msg, text: displayText } : msg
-          ));
+      for (let attempt = 0; attempt < MAX_ALLERGEN_SAFE_ATTEMPTS; attempt++) {
+        // Build system prompt (single source of truth — see buildSystemPrompt).
+        // On a retry, append a louder, specific correction naming what slipped through.
+        let finalSystemPrompt = buildSystemPrompt({ palate, inspiration, constraints, allergies: allergiesRaw }, currentRecipe);
+        if (attempt > 0) {
+          finalSystemPrompt += buildAllergenCorrectionNote(lastHits);
         }
-      }
 
-      console.log("Anthropic response received");
+        // Call Supabase Edge Function
+        const response = await fetch(
+          "https://xzpmmthreeyscidhwriv.supabase.co/functions/v1/ai-chat",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${supabaseAnonKey}`,
+            },
+            body: JSON.stringify({
+              messages: history,
+              systemPrompt: finalSystemPrompt,
+            }),
+          }
+        );
 
-      if (!fullText) {
-        throw new Error("Empty response from API");
-      }
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Edge Function error: ${errorText}`);
+        }
 
-      const parsedRecipe = parseRecipeFromAIResponse(fullText, currentRecipe?.sourceId, currentRecipe?.sourceTitle);
+        const stream = parseSSEStream(response);
 
-      // Final update to ensure clean text without recipe XML
-      const displayText = fullText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "").trim();
-      setMessages((m) => m.map(msg =>
-        msg.id === aiMessageId ? { ...msg, text: displayText || "..." } : msg
-      ));
+        let fullText = "";
 
-      // Update conversation history
-      setConversationHistory([...history, { role: "assistant", content: fullText }]);
+        for await (const chunk of stream) {
+          if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
+            fullText += chunk.delta.text;
 
-      // Handle recipe if present (update the existing recipe)
-      if (parsedRecipe) {
-        setCurrentRecipe(parsedRecipe);
-        setGeneratingRecipe(false);
+            // Detect if recipe generation has started
+            if (!generatingRecipe && fullText.includes("<recipe>")) {
+              setGeneratingRecipe(true);
+            }
 
-        // Trigger mini player animation
-        if (!recipeRevealed) {
-          setRecipeRevealed(true);
-          setTimeout(() => {
-            setMiniBarVisible(true);
-            setTimeout(() => {
+            // Strip recipe XML from display text
+            let displayText = fullText;
+            displayText = displayText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "");
+            const recipeStartIndex = displayText.indexOf("<recipe>");
+            if (recipeStartIndex !== -1) {
+              displayText = displayText.substring(0, recipeStartIndex);
+            }
+            displayText = displayText.trim();
+
+            setMessages((m) => m.map(msg =>
+              msg.id === aiMessageId ? { ...msg, text: displayText } : msg
+            ));
+          }
+        }
+
+        console.log("Anthropic response received");
+
+        if (!fullText) {
+          throw new Error("Empty response from API");
+        }
+
+        const parsedRecipe = parseRecipeFromAIResponse(fullText, currentRecipe?.sourceId, currentRecipe?.sourceTitle);
+
+        // Deterministic allergen backstop — scan the ACTUAL parsed recipe (title,
+        // description, ingredients, and step text) against this user's Big-9
+        // allergens before showing or saving anything.
+        const hits = parsedRecipe ? scanRecipeDraftForBig9(parsedRecipe, userAllergens) : [];
+
+        if (hits.length === 0) {
+          // Clean (or no recipe in this turn at all) — this is the response we keep.
+          const displayText = fullText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "").trim();
+          setMessages((m) => m.map(msg =>
+            msg.id === aiMessageId ? { ...msg, text: displayText || "..." } : msg
+          ));
+
+          // Update conversation history
+          setConversationHistory([...history, { role: "assistant", content: fullText }]);
+
+          // Handle recipe if present (update the existing recipe)
+          if (parsedRecipe) {
+            setCurrentRecipe(parsedRecipe);
+            setGeneratingRecipe(false);
+
+            // Trigger mini player animation
+            if (!recipeRevealed) {
+              setRecipeRevealed(true);
+              setTimeout(() => {
+                setMiniBarVisible(true);
+                setTimeout(() => {
+                  setMiniTitleVisible(true);
+                  setRecipePulse(true);
+                }, 200);
+              }, 300);
+            } else {
+              setMiniBarVisible(true);
               setMiniTitleVisible(true);
               setRecipePulse(true);
-            }, 200);
-          }, 300);
-        } else {
-          setMiniBarVisible(true);
-          setMiniTitleVisible(true);
-          setRecipePulse(true);
+            }
+          }
+          return;
         }
+
+        // Hit — never render or save this recipe.
+        lastHits = hits;
+        if (attempt === MAX_ALLERGEN_SAFE_ATTEMPTS - 1) {
+          console.error("Allergen backstop: exhausted retries without a clean recipe", hits);
+          setGeneratingRecipe(false);
+          const failureText = allergenFailureMessage(hits);
+          setMessages((m) => m.map(msg =>
+            msg.id === aiMessageId ? { ...msg, text: failureText } : msg
+          ));
+          setConversationHistory([...history, { role: "assistant", content: failureText }]);
+          return;
+        }
+        console.warn(`Allergen backstop: attempt ${attempt + 1} contained a hit, regenerating`, hits);
       }
     } catch (error) {
       console.error("Error in auto-fire AI call:", error);
@@ -5478,6 +5584,8 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
     const palate = profile?.palate || "";
     const inspiration = profile?.inspiration || "";
     const constraints = profile?.constraints || "";
+    const allergiesRaw = profile?.allergies ?? null;
+    const userAllergens = effectiveAllergensForScan(allergiesRaw);
 
     try {
       console.log("Calling AI chat API...");
@@ -5488,105 +5596,137 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
         throw new Error("Supabase key not found");
       }
 
-      // Build system prompt (single source of truth — see buildSystemPrompt)
-      const finalSystemPrompt = buildSystemPrompt({ palate, inspiration, constraints }, currentRecipe);
-
-      // Call Supabase Edge Function
-      const response = await fetch(
-        "https://xzpmmthreeyscidhwriv.supabase.co/functions/v1/ai-chat",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${supabaseAnonKey}`,
-          },
-          body: JSON.stringify({
-            messages: updatedHistory,
-            systemPrompt: finalSystemPrompt,
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Edge Function error: ${errorText}`);
-      }
-
-      const stream = parseSSEStream(response);
-
-      // Create AI message immediately
+      // Create AI message immediately — shared across allergen-retry attempts
+      // below, so a regeneration updates this same bubble rather than
+      // stacking a new one.
       setTyping(false);
       const aiMessageId = ++messageIdRef.current;
       setMessages((m) => [...m, { id: aiMessageId, role: "ai", text: "" }]);
 
-      let fullText = "";
+      let lastHits: Big9Hit[] = [];
 
-      for await (const chunk of stream) {
-        if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
-          fullText += chunk.delta.text;
+      for (let attempt = 0; attempt < MAX_ALLERGEN_SAFE_ATTEMPTS; attempt++) {
+        // Build system prompt (single source of truth — see buildSystemPrompt).
+        // On a retry, append a louder, specific correction naming what slipped through.
+        let finalSystemPrompt = buildSystemPrompt({ palate, inspiration, constraints, allergies: allergiesRaw }, currentRecipe);
+        if (attempt > 0) {
+          finalSystemPrompt += buildAllergenCorrectionNote(lastHits);
+        }
 
-          // Detect if recipe generation has started
-          if (!generatingRecipe && fullText.includes("<recipe>")) {
-            setGeneratingRecipe(true);
+        // Call Supabase Edge Function
+        const response = await fetch(
+          "https://xzpmmthreeyscidhwriv.supabase.co/functions/v1/ai-chat",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${supabaseAnonKey}`,
+            },
+            body: JSON.stringify({
+              messages: updatedHistory,
+              systemPrompt: finalSystemPrompt,
+            }),
           }
+        );
 
-          // Strip recipe XML from display text
-          let displayText = fullText;
-          // First, remove any complete recipe blocks
-          displayText = displayText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "");
-          // Then, if there's an opening <recipe> tag without closing tag (incomplete block),
-          // strip everything from <recipe> onwards to prevent partial XML from showing
-          const recipeStartIndex = displayText.indexOf("<recipe>");
-          if (recipeStartIndex !== -1) {
-            displayText = displayText.substring(0, recipeStartIndex);
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Edge Function error: ${errorText}`);
+        }
+
+        const stream = parseSSEStream(response);
+
+        let fullText = "";
+
+        for await (const chunk of stream) {
+          if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
+            fullText += chunk.delta.text;
+
+            // Detect if recipe generation has started
+            if (!generatingRecipe && fullText.includes("<recipe>")) {
+              setGeneratingRecipe(true);
+            }
+
+            // Strip recipe XML from display text
+            let displayText = fullText;
+            // First, remove any complete recipe blocks
+            displayText = displayText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "");
+            // Then, if there's an opening <recipe> tag without closing tag (incomplete block),
+            // strip everything from <recipe> onwards to prevent partial XML from showing
+            const recipeStartIndex = displayText.indexOf("<recipe>");
+            if (recipeStartIndex !== -1) {
+              displayText = displayText.substring(0, recipeStartIndex);
+            }
+            displayText = displayText.trim();
+
+            setMessages((m) => m.map(msg =>
+              msg.id === aiMessageId ? { ...msg, text: displayText } : msg
+            ));
           }
-          displayText = displayText.trim();
+        }
 
+        console.log("Anthropic response received");
+
+        if (!fullText) {
+          throw new Error("Empty response from API");
+        }
+
+        const parsedRecipe = parseRecipeFromAIResponse(fullText, currentRecipe?.sourceId, currentRecipe?.sourceTitle);
+
+        // Deterministic allergen backstop — scan the ACTUAL parsed recipe (title,
+        // description, ingredients, and step text) against this user's Big-9
+        // allergens before showing or saving anything.
+        const hits = parsedRecipe ? scanRecipeDraftForBig9(parsedRecipe, userAllergens) : [];
+
+        if (hits.length === 0) {
+          // Clean (or no recipe in this turn at all) — this is the response we keep.
+          const displayText = fullText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "").trim();
           setMessages((m) => m.map(msg =>
-            msg.id === aiMessageId ? { ...msg, text: displayText } : msg
+            msg.id === aiMessageId ? { ...msg, text: displayText || "..." } : msg
           ));
-        }
-      }
 
-      console.log("Anthropic response received");
+          // Update conversation history
+          setConversationHistory([...updatedHistory, { role: "assistant", content: fullText }]);
 
-      if (!fullText) {
-        throw new Error("Empty response from API");
-      }
+          // Handle recipe if present
+          if (parsedRecipe) {
+            setCurrentRecipe(parsedRecipe);
+            setGeneratingRecipe(false);
 
-      const parsedRecipe = parseRecipeFromAIResponse(fullText, currentRecipe?.sourceId, currentRecipe?.sourceTitle);
-
-      // Final update to ensure clean text without recipe XML
-      const displayText = fullText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "").trim();
-      setMessages((m) => m.map(msg =>
-        msg.id === aiMessageId ? { ...msg, text: displayText || "..." } : msg
-      ));
-
-      // Update conversation history
-      setConversationHistory([...updatedHistory, { role: "assistant", content: fullText }]);
-
-      // Handle recipe if present
-      if (parsedRecipe) {
-        setCurrentRecipe(parsedRecipe);
-        setGeneratingRecipe(false);
-
-        // Trigger mini player animation
-        if (!recipeRevealed) {
-          setRecipeRevealed(true);
-          setTimeout(() => {
-            setMiniBarVisible(true);
-            setTimeout(() => {
+            // Trigger mini player animation
+            if (!recipeRevealed) {
+              setRecipeRevealed(true);
+              setTimeout(() => {
+                setMiniBarVisible(true);
+                setTimeout(() => {
+                  setMiniTitleVisible(true);
+                  // Trigger pulse on first load after title is visible
+                  setRecipePulse(true);
+                }, 200);
+              }, 300);
+            } else {
+              // Recipe updated - already revealed, just update data and trigger pulse
+              setMiniBarVisible(true);
               setMiniTitleVisible(true);
-              // Trigger pulse on first load after title is visible
               setRecipePulse(true);
-            }, 200);
-          }, 300);
-        } else {
-          // Recipe updated - already revealed, just update data and trigger pulse
-          setMiniBarVisible(true);
-          setMiniTitleVisible(true);
-          setRecipePulse(true);
+            }
+          }
+          return;
         }
+
+        // Hit — never render or save this recipe.
+        lastHits = hits;
+        if (attempt === MAX_ALLERGEN_SAFE_ATTEMPTS - 1) {
+          console.error("Allergen backstop: exhausted retries without a clean recipe", hits);
+          setGeneratingRecipe(false);
+          const failureText = allergenFailureMessage(hits);
+          setMessages((m) => m.map(msg =>
+            msg.id === aiMessageId ? { ...msg, text: failureText } : msg
+          ));
+          setConversationHistory([...updatedHistory, { role: "assistant", content: failureText }]);
+          return;
+        }
+        console.warn(`Allergen backstop: attempt ${attempt + 1} contained a hit, regenerating`, hits);
       }
     } catch (error) {
       console.error("Error sending message:", error);
@@ -5744,96 +5884,132 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
     const palate = profile?.palate || "";
     const inspiration = profile?.inspiration || "";
     const constraints = profile?.constraints || "";
+    const allergiesRaw = profile?.allergies ?? null;
+    const userAllergens = effectiveAllergensForScan(allergiesRaw);
 
     (async () => {
       try {
         const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
         if (!supabaseAnonKey) throw new Error("Supabase key not found");
 
-        // Build system prompt (single source of truth — see buildSystemPrompt)
-        const finalSystemPrompt = buildSystemPrompt({ palate, inspiration, constraints }, currentRecipe);
-
-        const response = await fetch(
-          "https://xzpmmthreeyscidhwriv.supabase.co/functions/v1/ai-chat",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${supabaseAnonKey}`,
-            },
-            body: JSON.stringify({
-              messages: updatedHistory,
-              systemPrompt: finalSystemPrompt,
-            }),
-          }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Edge Function error: ${errorText}`);
-        }
-
-        const stream = parseSSEStream(response);
-
+        // Create AI message immediately — shared across allergen-retry
+        // attempts below, so a regeneration updates this same bubble rather
+        // than stacking a new one.
         setTyping(false);
         const aiMessageId = ++messageIdRef.current;
         setMessages((m) => [...m, { id: aiMessageId, role: "ai", text: "" }]);
 
-        let fullText = "";
+        let lastHits: Big9Hit[] = [];
 
-        for await (const chunk of stream) {
-          if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
-            fullText += chunk.delta.text;
-
-            if (!generatingRecipe && fullText.includes("<recipe>")) {
-              setGeneratingRecipe(true);
-            }
-
-            let displayText = fullText;
-            displayText = displayText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "");
-            const recipeStartIndex = displayText.indexOf("<recipe>");
-            if (recipeStartIndex !== -1) {
-              displayText = displayText.substring(0, recipeStartIndex);
-            }
-            displayText = displayText.trim();
-
-            setMessages((m) => m.map(msg =>
-              msg.id === aiMessageId ? { ...msg, text: displayText } : msg
-            ));
+        for (let attempt = 0; attempt < MAX_ALLERGEN_SAFE_ATTEMPTS; attempt++) {
+          // Build system prompt (single source of truth — see buildSystemPrompt).
+          // On a retry, append a louder, specific correction naming what slipped through.
+          let finalSystemPrompt = buildSystemPrompt({ palate, inspiration, constraints, allergies: allergiesRaw }, currentRecipe);
+          if (attempt > 0) {
+            finalSystemPrompt += buildAllergenCorrectionNote(lastHits);
           }
-        }
 
-        if (!fullText) {
-          throw new Error("Empty response from API");
-        }
+          const response = await fetch(
+            "https://xzpmmthreeyscidhwriv.supabase.co/functions/v1/ai-chat",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${supabaseAnonKey}`,
+              },
+              body: JSON.stringify({
+                messages: updatedHistory,
+                systemPrompt: finalSystemPrompt,
+              }),
+            }
+          );
 
-        const parsedRecipe = parseRecipeFromAIResponse(fullText, currentRecipe?.sourceId, currentRecipe?.sourceTitle);
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Edge Function error: ${errorText}`);
+          }
 
-        const displayText = fullText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "").trim();
-        setMessages((m) => m.map(msg =>
-          msg.id === aiMessageId ? { ...msg, text: displayText || "..." } : msg
-        ));
+          const stream = parseSSEStream(response);
 
-        setConversationHistory([...updatedHistory, { role: "assistant", content: fullText }]);
+          let fullText = "";
 
-        if (parsedRecipe) {
-          setCurrentRecipe(parsedRecipe);
-          setGeneratingRecipe(false);
+          for await (const chunk of stream) {
+            if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
+              fullText += chunk.delta.text;
 
-          if (!recipeRevealed) {
-            setRecipeRevealed(true);
-            setTimeout(() => {
-              setMiniBarVisible(true);
-              setTimeout(() => {
+              if (!generatingRecipe && fullText.includes("<recipe>")) {
+                setGeneratingRecipe(true);
+              }
+
+              let displayText = fullText;
+              displayText = displayText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "");
+              const recipeStartIndex = displayText.indexOf("<recipe>");
+              if (recipeStartIndex !== -1) {
+                displayText = displayText.substring(0, recipeStartIndex);
+              }
+              displayText = displayText.trim();
+
+              setMessages((m) => m.map(msg =>
+                msg.id === aiMessageId ? { ...msg, text: displayText } : msg
+              ));
+            }
+          }
+
+          if (!fullText) {
+            throw new Error("Empty response from API");
+          }
+
+          const parsedRecipe = parseRecipeFromAIResponse(fullText, currentRecipe?.sourceId, currentRecipe?.sourceTitle);
+
+          // Deterministic allergen backstop — scan the ACTUAL parsed recipe (title,
+          // description, ingredients, and step text) against this user's Big-9
+          // allergens before showing or saving anything.
+          const hits = parsedRecipe ? scanRecipeDraftForBig9(parsedRecipe, userAllergens) : [];
+
+          if (hits.length === 0) {
+            // Clean (or no recipe in this turn at all) — this is the response we keep.
+            const displayText = fullText.replace(/<recipe>[\s\S]*?<\/recipe>/g, "").trim();
+            setMessages((m) => m.map(msg =>
+              msg.id === aiMessageId ? { ...msg, text: displayText || "..." } : msg
+            ));
+
+            setConversationHistory([...updatedHistory, { role: "assistant", content: fullText }]);
+
+            if (parsedRecipe) {
+              setCurrentRecipe(parsedRecipe);
+              setGeneratingRecipe(false);
+
+              if (!recipeRevealed) {
+                setRecipeRevealed(true);
+                setTimeout(() => {
+                  setMiniBarVisible(true);
+                  setTimeout(() => {
+                    setMiniTitleVisible(true);
+                    setRecipePulse(true);
+                  }, 200);
+                }, 300);
+              } else {
+                setMiniBarVisible(true);
                 setMiniTitleVisible(true);
                 setRecipePulse(true);
-              }, 200);
-            }, 300);
-          } else {
-            setMiniBarVisible(true);
-            setMiniTitleVisible(true);
-            setRecipePulse(true);
+              }
+            }
+            return;
           }
+
+          // Hit — never render or save this recipe.
+          lastHits = hits;
+          if (attempt === MAX_ALLERGEN_SAFE_ATTEMPTS - 1) {
+            console.error("Allergen backstop: exhausted retries without a clean recipe", hits);
+            setGeneratingRecipe(false);
+            const failureText = allergenFailureMessage(hits);
+            setMessages((m) => m.map(msg =>
+              msg.id === aiMessageId ? { ...msg, text: failureText } : msg
+            ));
+            setConversationHistory([...updatedHistory, { role: "assistant", content: failureText }]);
+            return;
+          }
+          console.warn(`Allergen backstop: attempt ${attempt + 1} contained a hit, regenerating`, hits);
         }
       } catch (error) {
         console.error("Error sending message:", error);
