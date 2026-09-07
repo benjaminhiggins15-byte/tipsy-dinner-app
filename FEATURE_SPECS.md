@@ -2501,9 +2501,12 @@ natural next step.
 
 **Honest boundaries — what this gate does and does not cover:**
 1. The suggested-recipes carousel (`compute-slice` → `user_recipe_slices`)
-   is the ONLY surface this gate protects. Build (AI recipe chat) and
-   cook-chat are not hardened against allergies at all — a user can ask
-   Build for a peanut dish regardless of their profile.
+   was, for a time, the ONLY surface this gate protected. **Superseded —
+   Build (AI recipe chat) and cook-chat are now separately hardened** by
+   their own two-layer defense; see "Build/Cook-Chat Allergy Hardening"
+   below. The two hardenings are independent implementations (this gate's
+   `compute-slice` code is untouched by that work) that happen to share the
+   same underlying `allergyMap.ts` detection primitives.
 2. Non-Big-9 terms in `other` or in unparsed raw text are best-effort only,
    via the Stage 2 soft hint — never a hard gate, and never guaranteed to be
    caught (the hint depends on the model reading and honoring it).
@@ -2529,3 +2532,86 @@ closes — and a new proof #12 covering the unparsed+non-Big-9
 against the deployed v4 HTTP endpoint using real signed-in test users
 (shellfish-allergy, egg-allergy, no-allergy), confirming the fix behaves
 identically in production, not just in git.
+
+## Build/Cook-Chat Allergy Hardening
+
+Adds the same allergen-safety guarantee described above to the Build/cook-chat
+AI recipe generation path — additive only. `compute-slice`, pool tagging,
+onboarding capture, and the `profiles.allergies` schema are untouched; this
+work extends coverage to a second, previously-unprotected surface using two
+independent layers.
+
+**Layer 1 — salience (prompt-level, non-deterministic).**
+`buildSystemPrompt` (App.tsx) injects an always-present allergen instruction
+block on every turn — Build, cook-chat, and chip-driven turns alike, since all
+three call sites (`fireAICall`, `sendMessage`, `handleChipClick`) route
+through this one function. A confirmed `big9` list gets an explicit hard rule
+naming those allergens by name (with hidden-carrier examples called out,
+e.g. "mayonnaise and aioli contain egg"). A `NULL` profile (never asked) or an
+`unparsed: true` record gets a loud fail-closed instruction instead of silent
+omission — "treat this as unknown risk: avoid all nine major allergens by
+default." A confirmed-no-allergies profile (`{big9: [], other: []}`) gets no
+block at all, deliberately, since there's nothing to warn about. This layer is
+prompt instruction only — a model can still miss it, which is why Layer 2
+exists.
+
+**Layer 2 — deterministic backstop (code-level, cannot be talked out of it).**
+At the `parseRecipeFromAIResponse` choke-point, `scanRecipeDraftForBig9`
+(App.tsx) scans every user-visible, AI-generated field on the parsed
+recipe draft — **title, description, ingredients, and every step's title +
+instruction text** — against the user's effective allergen set, using
+`scanFreeTextForBig9`/`scanIngredientsForBig9` (`allergyMap.ts`), which both
+reuse the same underlying synonym/carrier map as `scanTextForBig9Ids` (one
+detection engine, not a second one). Scanning all four fields, not just
+ingredients, closes a real production fail-open found in phone testing: a
+carbonara whose ingredient list was genuinely egg-free but whose description
+read "egg yolk emulsified into a silky sauce" — text the user actually reads.
+A hit anywhere silently discards that attempt and regenerates with a louder,
+allergen-specific correction appended to the prompt, capped at
+`MAX_ALLERGEN_SAFE_ATTEMPTS = 3` total attempts; on exhaustion the user sees
+an honest failure message instead of the recipe. No unsafe recipe is ever
+rendered, saved, or added to conversation history at any point in this flow.
+
+**The effective allergen set — `effectiveAllergensForScan`
+(`allergyMap.ts`).** A successfully-parsed `big9` list wins; an `unparsed:
+true` record falls back to a deterministic `scanTextForBig9Ids` scan of its
+raw failed-answer text (same mechanism as `compute-slice`'s
+`deriveUnparsedBackstopGates`, independently duplicated here). A `NULL`
+profile (never asked) resolves to the **full Big-9 set** —
+fail-closed, deliberately diverging from `compute-slice`'s own null-user
+posture (see boundary 4 above): this is the live generation path, not the
+offline suggestion pool, and an adversarial test proved that an empty scan
+set here meant Layer 2 scanned for nothing, relying entirely on the
+non-deterministic Layer 1 instruction. A confirmed-no-allergies profile
+(`{big9: [], other: []}`, no `unparsed` flag) still resolves to an empty
+scan set and passes through unblocked — this distinction from `NULL` is
+load-bearing and must not collapse; the two states are never conflated.
+
+**Honest limits — do not over-claim what this catches:**
+1. Code enforcement (Layer 2) only recognizes Big-9 named terms plus a
+   hand-authored KNOWN-CARRIERS list in `allergyMap.ts`'s synonym map (e.g.
+   brioche/aioli/carbonara/custard/meringue/hollandaise/frittata/quiche →
+   egg; miso/tempeh/tamari/tofu → soy; panko/couscous/seitan → wheat;
+   ghee/paneer → milk; Worcestershire → fish). This list is explicitly NOT
+   exhaustive — it is a known-carriers list, not a complete culinary
+   ontology, and can miss an allergen hidden in a dish name or preparation
+   it doesn't recognize.
+2. Non-Big-9 allergens (anything only ever captured in a profile's `other[]`
+   array) and allergens with no deterministic text signature at all
+   (sulfites, nightshades) are NOT covered by Layer 2 — they remain
+   best-effort only, carried through Layer 1's prompt instruction if the
+   user mentions them in conversation, same honest limit as the
+   suggested-recipes gate above.
+3. The null-profile fail-closed default described above applies to THIS
+   path only. `compute-slice`'s own null-user gap (boundary 4 above — a
+   never-asked user gets zero gates from every pool-side source) is a
+   separate, already-documented, and still-unchanged limitation; this work
+   did not touch it.
+
+**Verification.** A 40-case adversarial test suite (named-allergen detection,
+all known hidden carriers, null/unparsed/confirmed-empty fail-closed
+behavior, no-false-positive/happy-path checks, and a stubbed 3-attempt retry
+loop) passes 40/40 with zero fail-open findings, run against the actual
+committed `allergyMap.ts`/`App.tsx` source. Additionally verified on a real
+device across three scenarios — regenerate-to-clean, creative substitution,
+and upfront refusal — all of which keep the allergen away from the user.
