@@ -1,5 +1,8 @@
 import { supabase } from '../lib/supabase';
 import { compressImageFile, type CropRect } from './image';
+import { mapAllergyItems, type StructuredAllergies } from './allergyMap';
+
+export type { StructuredAllergies };
 
 // Generic SSE stream decoder for the ai-chat edge function. Shared so isolated,
 // non-conversational AI calls (e.g. grocery enrichment) don't need to import
@@ -432,7 +435,17 @@ export async function parseNoGosAnswer(answer: string): Promise<string | null> {
 const ALLERGY_LINE_PREFIX = "ALLERGY (hard, never serve):";
 const DISLIKES_LINE_PREFIX = "DISLIKES (prefer to avoid):";
 
-export function parseComposedConstraints(rawText: string): string | null {
+interface ComposedConstraintsDetail {
+  // The two lines rejoined — byte-identical to what parseComposedConstraints
+  // has always returned. This is what gets written to profiles.constraints.
+  composedText: string;
+  // Just the ALLERGY line's content (e.g. "shellfish, tree nuts" or "None"),
+  // broken out so callers can run it through the Big-9 code map without
+  // re-deriving the prefix-slicing logic themselves.
+  allergyContent: string;
+}
+
+function parseComposedConstraintsDetailed(rawText: string): ComposedConstraintsDetail | null {
   const lines = rawText.split("\n").map((l) => l.trim()).filter(Boolean);
   if (lines.length !== 2) return null;
   const [allergyLine, dislikesLine] = lines;
@@ -441,7 +454,76 @@ export function parseComposedConstraints(rawText: string): string | null {
   const allergyContent = allergyLine.slice(ALLERGY_LINE_PREFIX.length).trim();
   const dislikesContent = dislikesLine.slice(DISLIKES_LINE_PREFIX.length).trim();
   if (!allergyContent || !dislikesContent) return null;
-  return `${allergyLine}\n${dislikesLine}`;
+  return { composedText: `${allergyLine}\n${dislikesLine}`, allergyContent };
+}
+
+export function parseComposedConstraints(rawText: string): string | null {
+  return parseComposedConstraintsDetailed(rawText)?.composedText ?? null;
+}
+
+// Races a promise against a ceiling, resolving null (never rejecting) if the
+// ceiling is hit first or the underlying promise rejects. Moved here (from
+// Onboarding.tsx) so both the onboarding capture path and the Profile edit
+// path can bound the same composer call through one shared implementation.
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        resolve(null);
+      }
+    }, ms);
+    promise
+      .then((value) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(value);
+        }
+      })
+      .catch((err) => {
+        console.error("withTimeout: underlying promise rejected:", err);
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(null);
+        }
+      });
+  });
+}
+
+// Bounded wait for the constraints parser specifically. Shared ceiling for
+// both the onboarding capture call and the Profile constraints-edit call.
+export const CONSTRAINTS_PARSE_TIMEOUT_MS = 4000;
+
+// Single shared entry point for turning a free-text allergy/dislikes answer
+// into (a) the composed constraints string and (b) the structured Big-9
+// allergies record — used by BOTH onboarding capture and the Profile
+// constraints edit path, so the two can never drift apart. Fail-closed on
+// composer failure: an unparseable answer never produces an empty allergies
+// record (empty means "asked, none") — it's marked `unparsed` instead, with
+// the raw answer preserved verbatim in `other` so nothing is lost.
+export async function composeConstraintsAndAllergies(
+  rawAnswer: string,
+  timeoutMs: number = CONSTRAINTS_PARSE_TIMEOUT_MS
+): Promise<{ constraintsToWrite: string; allergiesToWrite: StructuredAllergies }> {
+  const parsePromise = parseNoGosAnswer(rawAnswer).catch((err) => {
+    console.error("No-gos parsing failed:", err);
+    return null;
+  });
+  const rawParsed = await withTimeout(parsePromise, timeoutMs);
+  const detailed = rawParsed ? parseComposedConstraintsDetailed(rawParsed) : null;
+
+  if (detailed) {
+    const { big9, other } = mapAllergyItems(detailed.allergyContent);
+    return { constraintsToWrite: detailed.composedText, allergiesToWrite: { big9, other } };
+  }
+
+  return {
+    constraintsToWrite: rawAnswer,
+    allergiesToWrite: { big9: [], other: [rawAnswer], unparsed: true },
+  };
 }
 
 function localDateString(): string {
