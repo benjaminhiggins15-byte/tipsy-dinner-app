@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type CSSProperties } from "react";
-import { generateTasteProfile, generateOnboardingReflection, parseNoGosAnswer, parseComposedConstraints } from "./data";
+import { generateTasteProfile, generateOnboardingReflection, composeConstraintsAndAllergies, type StructuredAllergies } from "./data";
 import { supabase } from "../lib/supabase";
 import { ChatBubble, TypingBubble, CookInputBar } from "./ChatUI";
 
@@ -8,6 +8,7 @@ type ProfileType = {
   palate: string;
   inspiration: string;
   constraints: string;
+  allergies: StructuredAllergies | null;
   display_name: string;
   handle: string;
   onboarding_complete: boolean;
@@ -114,40 +115,6 @@ const CONSTRAINTS_PARSE_TIMEOUT_MS = 4000;
 // rather than always repeating "Got it." now that it's a visible fallback
 // path rather than the only path.
 const REFLECTION_FALLBACK_ACKS = ["Got it.", "Noted.", "Good to know."];
-
-// Races a promise against a ceiling, resolving null (never rejecting) if the
-// ceiling is hit first or the underlying promise rejects. Used to bound the
-// constraints parser call above for UI pacing — the underlying data.ts
-// function is already fail-quiet on its own, this adds only a UX-facing time
-// ceiling on top. The reflection call no longer goes through this — its own
-// first-token timeout lives inside generateOnboardingReflection itself.
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        resolve(null);
-      }
-    }, ms);
-    promise
-      .then((value) => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve(value);
-        }
-      })
-      .catch((err) => {
-        console.error("withTimeout: underlying promise rejected:", err);
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve(null);
-        }
-      });
-  });
-}
 
 // Scripted conversational onboarding. Reuses Build's chat presentation
 // (ChatBubble, the messages[] list shape, the input bar, typing indicator)
@@ -363,21 +330,15 @@ function OnboardingChat({
       // below so it never blocks the parser. Only the parser is awaited
       // before writing — the write needs to know whether a composed,
       // severity-labeled string is available. On timeout or malformed
-      // output, parseComposedConstraints/rawParsed fall back to the user's
-      // raw typed answer, which is always safe to store verbatim.
+      // output, composeConstraintsAndAllergies falls back to the user's raw
+      // typed answer for constraints, and marks allergies `unparsed` (never
+      // empty — empty means "asked, none").
       const reflectionUIPromise = sayReflection("constraints", val, nextFallbackAck());
-      const parsePromise = withTimeout(
-        parseNoGosAnswer(val).catch((err) => {
-          console.error("No-gos parsing failed:", err);
-          return null;
-        }),
+      const { constraintsToWrite, allergiesToWrite } = await composeConstraintsAndAllergies(
+        val,
         CONSTRAINTS_PARSE_TIMEOUT_MS
       );
-
-      const rawParsed = await parsePromise;
-      const composed = rawParsed ? parseComposedConstraints(rawParsed) : null;
-      const constraintsToWrite = composed || val;
-      const writePromise = safeUpdate({ constraints: constraintsToWrite });
+      const writePromise = safeUpdate({ constraints: constraintsToWrite, allergies: allergiesToWrite });
 
       // Both the write and the reflection UI settle before the recap lines,
       // so the recap never talks past a still-in-flight write.

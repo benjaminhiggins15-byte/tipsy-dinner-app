@@ -1,12 +1,13 @@
 import { useState, type CSSProperties } from "react";
 import { supabase } from "../lib/supabase";
-import { isValidHandleFormat, generateTasteProfile } from "./data";
+import { isValidHandleFormat, generateTasteProfile, composeConstraintsAndAllergies, CONSTRAINTS_PARSE_TIMEOUT_MS, type StructuredAllergies } from "./data";
 
 type ProfileType = {
   id: string;
   palate: string;
   inspiration: string;
   constraints: string;
+  allergies: StructuredAllergies | null;
   display_name: string;
   handle: string;
   onboarding_complete: boolean;
@@ -298,6 +299,7 @@ export function ProfileEdit({ fieldKey, back, profile, onUpdate }: { fieldKey: F
   };
 
   const [val, setVal] = useState(getInitialValue());
+  const [isSaving, setIsSaving] = useState(false);
   const inputBase: CSSProperties = {
     width: "100%",
     background: "rgba(35,60,0,0.05)",
@@ -340,25 +342,54 @@ export function ProfileEdit({ fieldKey, back, profile, onUpdate }: { fieldKey: F
         )}
         <div style={{ flex: 1 }} />
         <button
+          disabled={isSaving}
           onClick={async () => {
-            // Use Supabase for migrated fields, localStorage for legacy fields
-            if (fieldKey === "palate" || fieldKey === "inspiration" || fieldKey === "constraints") {
-              const previousValue =
-                fieldKey === "palate" ? (profile?.palate || "") :
-                fieldKey === "inspiration" ? (profile?.inspiration || "") :
-                (profile?.constraints || "");
-              const changed = val !== previousValue;
-              await onUpdate({ [fieldKey]: val });
-              if (changed && profile) {
-                generateTasteProfile(profile.id, {
-                  palate: fieldKey === "palate" ? val : profile.palate,
-                  inspiration: fieldKey === "inspiration" ? val : profile.inspiration,
-                  constraints: fieldKey === "constraints" ? val : profile.constraints,
-                });
+            setIsSaving(true);
+            try {
+              // Use Supabase for migrated fields, localStorage for legacy fields
+              if (fieldKey === "palate" || fieldKey === "inspiration" || fieldKey === "constraints") {
+                const previousValue =
+                  fieldKey === "palate" ? (profile?.palate || "") :
+                  fieldKey === "inspiration" ? (profile?.inspiration || "") :
+                  (profile?.constraints || "");
+                const changed = val !== previousValue;
+
+                if (fieldKey === "constraints" && changed) {
+                  // Route the edit through the SAME composer + Big-9 code map
+                  // as onboarding capture, so a hand-edit here can never
+                  // silently desync profiles.allergies from profiles.constraints.
+                  // Fail-closed: on composer failure, constraintsToWrite falls
+                  // back to the raw edited text and allergiesToWrite is marked
+                  // `unparsed` (see composeConstraintsAndAllergies) — never a
+                  // silent empty overwrite.
+                  const { constraintsToWrite, allergiesToWrite } = await composeConstraintsAndAllergies(
+                    val,
+                    CONSTRAINTS_PARSE_TIMEOUT_MS
+                  );
+                  await onUpdate({ constraints: constraintsToWrite, allergies: allergiesToWrite });
+                  if (profile) {
+                    generateTasteProfile(profile.id, {
+                      palate: profile.palate,
+                      inspiration: profile.inspiration,
+                      constraints: constraintsToWrite,
+                    });
+                  }
+                } else {
+                  await onUpdate({ [fieldKey]: val });
+                  if (changed && profile) {
+                    generateTasteProfile(profile.id, {
+                      palate: fieldKey === "palate" ? val : profile.palate,
+                      inspiration: fieldKey === "inspiration" ? val : profile.inspiration,
+                      constraints: fieldKey === "constraints" ? val : profile.constraints,
+                    });
+                  }
+                }
+              } else {
+                // Legacy fields (email, table) still use localStorage
+                try { localStorage.setItem(storageKey, val); } catch { /* noop */ }
               }
-            } else {
-              // Legacy fields (email, table) still use localStorage
-              try { localStorage.setItem(storageKey, val); } catch { /* noop */ }
+            } finally {
+              setIsSaving(false);
             }
             back();
           }}
@@ -367,10 +398,11 @@ export function ProfileEdit({ fieldKey, back, profile, onUpdate }: { fieldKey: F
             borderRadius: 100, padding: "14px 0",
             fontFamily: "'Inter', sans-serif", fontSize: 12, fontWeight: 500,
             letterSpacing: "0.12em", textTransform: "uppercase",
-            width: "100%", cursor: "pointer",
+            width: "100%", cursor: isSaving ? "default" : "pointer",
+            opacity: isSaving ? 0.6 : 1,
           }}
         >
-          Save
+          {isSaving ? "Saving…" : "Save"}
         </button>
       </div>
     </div>
