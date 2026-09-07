@@ -66,6 +66,56 @@ function deriveDietaryGates(tasteProfile: string): { column: string; value: bool
 }
 
 // ---------------------------------------------------------------------------
+// STRUCTURED BIG-9 ALLERGY GATE — sourced from profiles.allergies.big9
+// (Build 2, src/tipsy/allergyMap.ts), a deterministic list of canonical
+// Big-9 ids captured at onboarding/edit time. This id set and the map below
+// are DUPLICATED (not imported) from allergyMap.ts, same cross-boundary
+// convention as the tentpole timing block below: Deno's module graph can
+// technically reach outside supabase/functions, but this repo's established
+// pattern for reusing small src/tipsy pieces here is to copy them, not
+// import across the boundary. milk -> is_dairy_free and wheat ->
+// is_gluten_free reuse existing pool columns (Build 1 migration); the other
+// six map to their own dedicated contains_* column, each DEFAULT true
+// (fail-closed) at the schema level.
+// ---------------------------------------------------------------------------
+
+type Big9Id = 'egg' | 'milk' | 'fish' | 'shellfish' | 'tree_nut' | 'peanut' | 'wheat' | 'soy' | 'sesame'
+
+const BIG9_TO_POOL_GATE: Record<Big9Id, { column: string; value: boolean }> = {
+  egg: { column: 'contains_egg', value: false },
+  milk: { column: 'is_dairy_free', value: true },
+  fish: { column: 'contains_fish', value: false },
+  shellfish: { column: 'contains_shellfish', value: false },
+  tree_nut: { column: 'contains_treenut', value: false },
+  peanut: { column: 'contains_peanut', value: false },
+  wheat: { column: 'is_gluten_free', value: true },
+  soy: { column: 'contains_soy', value: false },
+  sesame: { column: 'contains_sesame', value: false },
+}
+
+// profiles.allergies is jsonb ({big9, other, unparsed?}) or NULL ("never
+// asked," Build 0's migration). Reads ONLY the big9 array — `other` and
+// `unparsed` name no pool column, so there is nothing to gate on for either
+// (an `unparsed` answer's raw text still flows into constraints/taste_profile
+// prose as before, so it can still be caught by deriveDietaryGates above;
+// this function adds a deterministic backstop on top, it does not replace
+// that path). Unrecognized ids are skipped rather than thrown on: the shape
+// CHECK constraint guarantees the envelope, not that every string inside
+// `big9` is one of the nine known ids.
+function deriveBig9Gates(allergies: unknown): { column: string; value: boolean }[] {
+  if (!allergies || typeof allergies !== 'object') return []
+  const big9 = (allergies as { big9?: unknown }).big9
+  if (!Array.isArray(big9)) return []
+
+  const gates: { column: string; value: boolean }[] = []
+  for (const id of big9) {
+    const gate = BIG9_TO_POOL_GATE[id as Big9Id]
+    if (gate) gates.push(gate)
+  }
+  return gates
+}
+
+// ---------------------------------------------------------------------------
 // TENTPOLE OCCASION WINDOW — COPIED from src/tipsy/chips.ts (the
 // ChipTiming fixedHoliday/floatingHoliday shapes, isInLeadInWindow, and the 5
 // tentpole timing constants, with their exact date/lead-in values). Single
@@ -333,12 +383,27 @@ Deno.serve(async (req) => {
   try {
     const { data: profileRow } = await adminClient
       .from('profiles')
-      .select('taste_profile')
+      .select('taste_profile, allergies')
       .eq('id', callerId)
       .maybeSingle()
 
     const tasteProfile = profileRow?.taste_profile ?? ''
-    const dietaryGates = deriveDietaryGates(tasteProfile)
+    const proseGates = deriveDietaryGates(tasteProfile)
+    const structuredGates = deriveBig9Gates(profileRow?.allergies)
+
+    // Merge, de-duped by column. Structured gates go first — they're the
+    // deterministic, non-AI-dependent source — and prose gates only fill in
+    // columns structured capture doesn't cover (is_vegan/is_vegetarian,
+    // contains_pork, and anything from a pre-structured-capture or
+    // `unparsed` profile that only ever made it into prose).
+    const dietaryGates: { column: string; value: boolean }[] = [...structuredGates]
+    const seenGateColumns = new Set(structuredGates.map((g) => g.column))
+    for (const gate of proseGates) {
+      if (seenGateColumns.has(gate.column)) continue
+      seenGateColumns.add(gate.column)
+      dietaryGates.push(gate)
+    }
+
     const month = Number(localDate.slice(5, 7))
     const season = seasonForMonth(month)
 
@@ -347,7 +412,7 @@ Deno.serve(async (req) => {
     let stage1Query = adminClient
       .from('suggested_recipe_pool')
       .select(
-        'id,title,description,cuisine,effort,season,is_vegetarian,is_vegan,is_gluten_free,is_dairy_free,contains_pork,contains_shellfish,contains_nuts'
+        'id,title,description,cuisine,effort,season,is_vegetarian,is_vegan,is_gluten_free,is_dairy_free,contains_pork,contains_shellfish,contains_nuts,contains_egg,contains_fish,contains_soy,contains_sesame,contains_peanut,contains_treenut'
       )
       .eq('meal_type', 'dinner')
       .or(`season.is.null,season.eq.${season}`)
@@ -442,7 +507,7 @@ Deno.serve(async (req) => {
         let occasionQuery = adminClient
           .from('suggested_recipe_pool')
           .select(
-            'id,title,description,cuisine,effort,is_vegetarian,is_vegan,is_gluten_free,is_dairy_free,contains_pork,contains_shellfish,contains_nuts'
+            'id,title,description,cuisine,effort,is_vegetarian,is_vegan,is_gluten_free,is_dairy_free,contains_pork,contains_shellfish,contains_nuts,contains_egg,contains_fish,contains_soy,contains_sesame,contains_peanut,contains_treenut'
           )
           .eq('occasion', activeSlug)
 
@@ -496,6 +561,12 @@ Deno.serve(async (req) => {
         contains_pork: c.contains_pork,
         contains_shellfish: c.contains_shellfish,
         contains_nuts: c.contains_nuts,
+        contains_egg: c.contains_egg,
+        contains_fish: c.contains_fish,
+        contains_soy: c.contains_soy,
+        contains_sesame: c.contains_sesame,
+        contains_peanut: c.contains_peanut,
+        contains_treenut: c.contains_treenut,
       })),
     })
 
