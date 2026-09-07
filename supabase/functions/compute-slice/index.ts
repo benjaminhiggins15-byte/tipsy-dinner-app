@@ -94,14 +94,15 @@ const BIG9_TO_POOL_GATE: Record<Big9Id, { column: string; value: boolean }> = {
 }
 
 // profiles.allergies is jsonb ({big9, other, unparsed?}) or NULL ("never
-// asked," Build 0's migration). Reads ONLY the big9 array — `other` and
-// `unparsed` name no pool column, so there is nothing to gate on for either
-// (an `unparsed` answer's raw text still flows into constraints/taste_profile
-// prose as before, so it can still be caught by deriveDietaryGates above;
-// this function adds a deterministic backstop on top, it does not replace
-// that path). Unrecognized ids are skipped rather than thrown on: the shape
-// CHECK constraint guarantees the envelope, not that every string inside
-// `big9` is one of the nine known ids.
+// asked," Build 0's migration). Reads ONLY the big9 array — `other` names no
+// pool column, so there is nothing to gate on there for a SUCCESSFULLY
+// parsed record. `unparsed:true` is handled separately below
+// (deriveUnparsedBackstopGates) — this function intentionally does nothing
+// extra for it (an unparsed record's `big9` is always empty, so this simply
+// returns no gates, which is correct: the backstop function is the one that
+// covers that case). Unrecognized ids are skipped rather than thrown on: the
+// shape CHECK constraint guarantees the envelope, not that every string
+// inside `big9` is one of the nine known ids.
 function deriveBig9Gates(allergies: unknown): { column: string; value: boolean }[] {
   if (!allergies || typeof allergies !== 'object') return []
   const big9 = (allergies as { big9?: unknown }).big9
@@ -110,6 +111,181 @@ function deriveBig9Gates(allergies: unknown): { column: string; value: boolean }
   const gates: { column: string; value: boolean }[] = []
   for (const id of big9) {
     const gate = BIG9_TO_POOL_GATE[id as Big9Id]
+    if (gate) gates.push(gate)
+  }
+  return gates
+}
+
+// ---------------------------------------------------------------------------
+// UNPARSED-ALLERGY DETERMINISTIC BACKSTOP — fixes a proven fail-open: when
+// `allergies.unparsed === true`, the composer FAILED to structure the user's
+// answer, so `big9` is always empty and deriveBig9Gates above has nothing to
+// work with. Without this, a profile whose raw failed answer says "cannot
+// eat peanuts under any circumstances" got served peanut recipes, because
+// the only other backstop (deriveDietaryGates, prose-based) only fires on
+// the literal phrases "hard allergy"/"dietary restriction," which ordinary
+// phrasing like this never contains.
+//
+// ONLY fires when unparsed === true — a composer FAILURE signal, never a
+// user answer. A successfully-parsed record (a real big9 list, OR the
+// explicit "confirmed none" {big9:[],other:[]} with no unparsed flag) never
+// reaches this function's scan; deriveBig9Gates above is the only thing that
+// runs for those, unchanged.
+//
+// ALLERGEN_SYNONYM_MAP/scanTextForBig9Ids are DUPLICATED (not imported) from
+// src/tipsy/allergyMap.ts's ALLERGEN_SYNONYM_MAP/matchAllergyItem, same
+// cross-boundary convention as every other copied block in this file — same
+// synonym set, same longest-key-first + word-boundary regex matching, just
+// run directly against the raw failed-answer sentence instead of one
+// pre-split comma item (the regex scan has no such length assumption, so it
+// works unchanged on a full sentence). Fail-closed bias inherited from
+// allergyMap.ts: this scan finding nothing does NOT mean "safe" — it means
+// "no known synonym recognized" — which is exactly why the same raw text is
+// ALSO passed to Stage 2 as a soft AI hint (see below), rather than treating
+// a clean scan as a green light.
+// ---------------------------------------------------------------------------
+
+const ALLERGEN_SYNONYM_MAP: Record<string, Big9Id> = {
+  // shellfish
+  shellfish: 'shellfish',
+  shrimp: 'shellfish',
+  shrimps: 'shellfish',
+  prawn: 'shellfish',
+  prawns: 'shellfish',
+  lobster: 'shellfish',
+  crab: 'shellfish',
+  crabs: 'shellfish',
+  crayfish: 'shellfish',
+  crawfish: 'shellfish',
+  langoustine: 'shellfish',
+  scallop: 'shellfish',
+  scallops: 'shellfish',
+  mussel: 'shellfish',
+  mussels: 'shellfish',
+  clam: 'shellfish',
+  clams: 'shellfish',
+  oyster: 'shellfish',
+  oysters: 'shellfish',
+  squid: 'shellfish',
+  calamari: 'shellfish',
+
+  // fish
+  fish: 'fish',
+  salmon: 'fish',
+  tuna: 'fish',
+  cod: 'fish',
+  anchovy: 'fish',
+  anchovies: 'fish',
+  halibut: 'fish',
+  tilapia: 'fish',
+  trout: 'fish',
+  bass: 'fish',
+  mackerel: 'fish',
+  sardine: 'fish',
+  sardines: 'fish',
+  herring: 'fish',
+
+  // milk
+  milk: 'milk',
+  dairy: 'milk',
+  lactose: 'milk',
+  cheese: 'milk',
+  butter: 'milk',
+  cream: 'milk',
+  yogurt: 'milk',
+  yoghurt: 'milk',
+
+  // egg
+  egg: 'egg',
+  eggs: 'egg',
+  albumen: 'egg',
+  mayonnaise: 'egg',
+  mayo: 'egg',
+
+  // peanut
+  peanut: 'peanut',
+  peanuts: 'peanut',
+  groundnut: 'peanut',
+  groundnuts: 'peanut',
+
+  // tree_nut
+  'tree nut': 'tree_nut',
+  'tree nuts': 'tree_nut',
+  treenut: 'tree_nut',
+  treenuts: 'tree_nut',
+  almond: 'tree_nut',
+  almonds: 'tree_nut',
+  walnut: 'tree_nut',
+  walnuts: 'tree_nut',
+  cashew: 'tree_nut',
+  cashews: 'tree_nut',
+  pecan: 'tree_nut',
+  pecans: 'tree_nut',
+  pistachio: 'tree_nut',
+  pistachios: 'tree_nut',
+  hazelnut: 'tree_nut',
+  hazelnuts: 'tree_nut',
+  macadamia: 'tree_nut',
+  macadamias: 'tree_nut',
+  'brazil nut': 'tree_nut',
+  'brazil nuts': 'tree_nut',
+  chestnut: 'tree_nut',
+  chestnuts: 'tree_nut',
+
+  // wheat (gluten is broader than wheat, but for capture purposes the
+  // closest Big-9 id is wheat — same simplification allergyMap.ts makes)
+  wheat: 'wheat',
+  gluten: 'wheat',
+
+  // soy
+  soy: 'soy',
+  soya: 'soy',
+  soybean: 'soy',
+  soybeans: 'soy',
+  edamame: 'soy',
+  tofu: 'soy',
+
+  // sesame
+  sesame: 'sesame',
+  tahini: 'sesame',
+}
+
+// Longest keys first so e.g. "tree nut" matches before scanning falls
+// through to component words — mirrors allergyMap.ts's SORTED_KEYS exactly.
+const SORTED_ALLERGEN_KEYS = Object.keys(ALLERGEN_SYNONYM_MAP).sort((a, b) => b.length - a.length)
+
+function scanTextForBig9Ids(text: string): Big9Id[] {
+  const normalized = text.toLowerCase()
+  const found = new Set<Big9Id>()
+  for (const key of SORTED_ALLERGEN_KEYS) {
+    const pattern = new RegExp(`\\b${key.replace(/\s+/g, '\\s+')}\\b`, 'i')
+    if (pattern.test(normalized)) found.add(ALLERGEN_SYNONYM_MAP[key])
+  }
+  return Array.from(found)
+}
+
+// Extracts the raw failed-answer text from an unparsed allergies record
+// ({big9:[], other:[rawAnswer], unparsed:true} — see
+// composeConstraintsAndAllergies in src/tipsy/data.ts). Returns '' for any
+// record that isn't unparsed:true, or has no usable `other` strings — both
+// callers below (the hard-gate scan and the Stage 2 soft hint) short-circuit
+// on an empty string, so a successfully-parsed record is never touched.
+function getUnparsedRawText(allergies: unknown): string {
+  if (!allergies || typeof allergies !== 'object') return ''
+  const record = allergies as { unparsed?: unknown; other?: unknown }
+  if (record.unparsed !== true) return ''
+  if (!Array.isArray(record.other)) return ''
+  return record.other.filter((x): x is string => typeof x === 'string').join(' ').trim()
+}
+
+function deriveUnparsedBackstopGates(allergies: unknown): { column: string; value: boolean }[] {
+  const rawText = getUnparsedRawText(allergies)
+  if (!rawText) return []
+
+  const foundIds = scanTextForBig9Ids(rawText)
+  const gates: { column: string; value: boolean }[] = []
+  for (const id of foundIds) {
+    const gate = BIG9_TO_POOL_GATE[id]
     if (gate) gates.push(gate)
   }
   return gates
@@ -390,19 +566,35 @@ Deno.serve(async (req) => {
     const tasteProfile = profileRow?.taste_profile ?? ''
     const proseGates = deriveDietaryGates(tasteProfile)
     const structuredGates = deriveBig9Gates(profileRow?.allergies)
+    // Empty for every successfully-parsed record (clean big9 list, or the
+    // explicit "confirmed none" case) — only ever non-empty when
+    // allergies.unparsed === true. See deriveUnparsedBackstopGates above.
+    const unparsedBackstopGates = deriveUnparsedBackstopGates(profileRow?.allergies)
 
-    // Merge, de-duped by column. Structured gates go first — they're the
-    // deterministic, non-AI-dependent source — and prose gates only fill in
-    // columns structured capture doesn't cover (is_vegan/is_vegetarian,
-    // contains_pork, and anything from a pre-structured-capture or
-    // `unparsed` profile that only ever made it into prose).
-    const dietaryGates: { column: string; value: boolean }[] = [...structuredGates]
-    const seenGateColumns = new Set(structuredGates.map((g) => g.column))
-    for (const gate of proseGates) {
-      if (seenGateColumns.has(gate.column)) continue
-      seenGateColumns.add(gate.column)
-      dietaryGates.push(gate)
+    // Merge, de-duped by column. Both deterministic sources (structured
+    // big9, then the unparsed backstop) go first — prose gates only fill in
+    // columns neither deterministic source covers (is_vegan/is_vegetarian,
+    // contains_pork, and anything from a pre-structured-capture profile that
+    // only ever made it into prose).
+    const dietaryGates: { column: string; value: boolean }[] = []
+    const seenGateColumns = new Set<string>()
+    const addGates = (gates: { column: string; value: boolean }[]) => {
+      for (const gate of gates) {
+        if (seenGateColumns.has(gate.column)) continue
+        seenGateColumns.add(gate.column)
+        dietaryGates.push(gate)
+      }
     }
+    addGates(structuredGates)
+    addGates(unparsedBackstopGates)
+    addGates(proseGates)
+
+    // Soft AI hint for Stage 2 — best-effort only, NOT a hard gate. Only
+    // non-empty when allergies.unparsed === true (composer failure); a
+    // successfully-parsed record never reaches this. Covers non-Big-9 terms
+    // in the same failed answer (e.g. "mustard") that deriveUnparsedBackstopGates
+    // has no column to hard-filter on.
+    const unparsedRawTextForAI = getUnparsedRawText(profileRow?.allergies)
 
     const month = Number(localDate.slice(5, 7))
     const season = seasonForMonth(month)
@@ -543,11 +735,21 @@ Deno.serve(async (req) => {
       )
     }
 
-    // STAGE 2 — AI selection. Payload mirrors scripts/prove-slice-selection.mjs
-    // exactly: taste_profile + lean candidate fields (no season, no full pool metadata).
+    // STAGE 2 — AI selection. Payload mirrors scripts/prove-slice-selection.mjs:
+    // taste_profile + lean candidate fields (no season, no full pool metadata).
+    // ONE addition on top of that mirror: when this profile's allergy answer
+    // was unparsed (composer failure), the raw failed text is appended to
+    // taste_profile as an explicitly-labeled, best-effort-only note — this is
+    // the soft AI hint for non-Big-9 terms (e.g. "mustard") that
+    // deriveUnparsedBackstopGates has no column to hard-filter on. Empty for
+    // every successfully-parsed profile, so this is a no-op for them.
+    const tasteProfileForAI = unparsedRawTextForAI
+      ? `${tasteProfile}\n\nNOTE: this cook's allergy/dietary answer could not be fully structured. Treat the following as a STATED but UNVERIFIED allergy — avoid it on a best-effort basis. This is not a guaranteed hard filter, just a strong signal: "${unparsedRawTextForAI}"`
+      : tasteProfile
+
     const validIds = new Set(candidates.map((c) => c.id))
     const userMessage = JSON.stringify({
-      taste_profile: tasteProfile,
+      taste_profile: tasteProfileForAI,
       candidates: candidates.map((c) => ({
         id: c.id,
         title: c.title,
