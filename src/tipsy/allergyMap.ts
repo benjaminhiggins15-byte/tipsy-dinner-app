@@ -27,6 +27,20 @@ export interface StructuredAllergies {
   unparsed?: true;
 }
 
+// The full Big-9 set, used as the fail-closed default for a NULL (never
+// asked) profile in effectiveAllergensForScan below.
+export const ALL_BIG9_IDS: Big9Id[] = [
+  "egg",
+  "milk",
+  "fish",
+  "shellfish",
+  "tree_nut",
+  "peanut",
+  "wheat",
+  "soy",
+  "sesame",
+];
+
 // Longer/multi-word keys are matched before their component single words
 // (see matchAllergyItem) so "tree nut" isn't shadowed by a bare "nut" match
 // that doesn't exist, and so compound phrases resolve to one clean id.
@@ -258,14 +272,28 @@ export function getUnparsedRawText(allergies: StructuredAllergies | null | undef
 // merging the same two deterministic sources compute-slice's
 // deriveBig9Gates/deriveUnparsedBackstopGates merge, in the same priority:
 // a successfully-parsed big9 list wins; an unparsed record falls back to a
-// deterministic scan of its raw failed-answer text; a NULL profile (never
-// asked) produces no gate here — same documented boundary as compute-slice,
-// where a NULL profile is unprotected until it passes through the composer
-// at least once. This is intentionally Big-9-only: it does not replicate
-// deriveDietaryGates' prose scanning (vegan/vegetarian/pork have no Big-9
-// concept and are out of scope for allergen enforcement).
+// deterministic scan of its raw failed-answer text.
+//
+// A NULL profile (never asked) is fail-closed HERE, deliberately diverging
+// from compute-slice's documented null-is-unprotected boundary: this is the
+// live Build/cook-chat generation path, not the offline suggestion pool, and
+// an adversarial test proved that resolving null to an empty scan set let
+// the deterministic backstop scan for nothing — silently relying only on the
+// (non-deterministic) system-prompt instruction. A never-asked user is now
+// treated as at-risk for all nine allergens (ALL_BIG9_IDS), same posture as
+// buildSystemPrompt's own null-profile prompt block. This does NOT change
+// compute-slice — that null-user gap is separate and out of scope here.
+//
+// This must stay distinct from a CONFIRMED-no-allergies profile
+// ({big9: [], other: []}, no unparsed flag): that is a real, asked-and-empty
+// answer and correctly resolves to an empty scan set (no blocking) below —
+// only the null/undefined case flips to the full set.
+//
+// Intentionally Big-9-only: it does not replicate deriveDietaryGates' prose
+// scanning (vegan/vegetarian/pork have no Big-9 concept and are out of scope
+// for allergen enforcement).
 export function effectiveAllergensForScan(allergies: StructuredAllergies | null | undefined): Big9Id[] {
-  if (!allergies) return [];
+  if (!allergies) return ALL_BIG9_IDS;
   if (Array.isArray(allergies.big9) && allergies.big9.length > 0) return allergies.big9;
   const rawText = getUnparsedRawText(allergies);
   if (!rawText) return [];
