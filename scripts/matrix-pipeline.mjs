@@ -25,7 +25,7 @@ if (!SUPABASE_URL || !ANON_KEY || !SERVICE_ROLE_KEY) {
 
 const LIVE = process.argv.includes("--live");
 const SLICE = process.argv.includes("--slice");
-const BATCH_ID = "batch-01"; // real generation rows this run; next real run uses batch-02, etc.
+const BATCH_ID = "batch-02"; // full pool scale-up to the new depth targets (batch-01 was the original shallow matrix fill)
 
 // The curated ~50-recipe "spread slice" — a second proof before the full
 // batch. Chosen to span all three tiers and satisfy the stated minimums
@@ -93,15 +93,20 @@ const CUISINES = [
   { label: "Portuguese", slug: "portuguese", tier: 3 },
 ];
 
-const TIER_DEPTH = { 1: 5, 2: 3, 3: 2 };
+// Depth-scale-up targets (batch-02) — supersede the original TIER_DEPTH-based
+// shallow targets. Per-tier, per-meal-type explicitly, not a single depth
+// number: dinner/lunch get the deepest coverage, dessert/snack stay shallower.
+const TIER_TARGETS = {
+  1: { dinner: 50, lunch: 28, breakfast: 14, dessert: 8, snack: 8 },
+  2: { dinner: 30, lunch: 20, breakfast: 8, dessert: 6, snack: 6 },
+  3: { dinner: 14, lunch: 10, breakfast: 6, dessert: 5, snack: 5 },
+};
 const MEAL_TYPES = ["dinner", "lunch", "breakfast", "dessert", "snack"];
 
 function targetForCell(tier, mealType) {
-  const depth = TIER_DEPTH[tier];
-  if (mealType === "dinner" || mealType === "lunch") return depth;
-  if (mealType === "breakfast") return tier === 1 ? depth : 2;
-  if (mealType === "dessert" || mealType === "snack") return 2;
-  throw new Error(`Unknown meal type: ${mealType}`);
+  const target = TIER_TARGETS[tier]?.[mealType];
+  if (target === undefined) throw new Error(`Unknown tier/meal type: ${tier}/${mealType}`);
+  return target;
 }
 
 const CELLS = [];
@@ -510,13 +515,30 @@ function runSelfTest() {
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-const { data: existingRows, error: fetchError } = await supabase
-  .from("suggested_recipe_pool")
-  .select("id, cuisine, meal_type, title, description, ingredients, steps, season, effort, holiday, is_vegetarian, is_vegan, is_gluten_free, is_dairy_free, contains_pork, contains_shellfish, contains_nuts, dietary_check_status");
+// PostgREST caps a single .select() at its default max-rows (~1000). The pool
+// crossed that size after batch-02, so this fetch MUST paginate with .range()
+// or it silently truncates and the shortfall math below undercounts existing
+// rows — computing wildly inflated (duplicate-generating) targets.
+const EXISTING_ROWS_PAGE_SIZE = 1000;
+const existingRows = [];
+{
+  let from = 0;
+  while (true) {
+    const to = from + EXISTING_ROWS_PAGE_SIZE - 1;
+    const { data: page, error: fetchError } = await supabase
+      .from("suggested_recipe_pool")
+      .select("id, cuisine, meal_type, title, description, ingredients, steps, season, effort, holiday, is_vegetarian, is_vegan, is_gluten_free, is_dairy_free, contains_pork, contains_shellfish, contains_nuts, dietary_check_status")
+      .range(from, to);
 
-if (fetchError) {
-  console.error("Failed to fetch existing rows:", fetchError);
-  process.exit(1);
+    if (fetchError) {
+      console.error("Failed to fetch existing rows:", fetchError);
+      process.exit(1);
+    }
+
+    existingRows.push(...page);
+    if (page.length < EXISTING_ROWS_PAGE_SIZE) break;
+    from += EXISTING_ROWS_PAGE_SIZE;
+  }
 }
 
 const existingCountMap = {};
@@ -883,7 +905,9 @@ for (const cell of runCells) {
 
   for (let i = 0; i < cell.shortfall; i++) {
     const distinctClause = previousTitles.length
-      ? ` It must be a genuinely different dish from: ${previousTitles.join(", ")}.`
+      ? ` It must be a genuinely distinct dish from every one of these dishes already generated` +
+        ` for this exact cuisine and meal type — not a variation, not the same dish renamed, not the` +
+        ` same base preparation with a swapped protein or garnish: ${previousTitles.join(", ")}.`
       : "";
     const userMessage =
       `Pick one specific, genuinely traditional ${cell.cuisineLabel} ${cell.mealType} dish yourself` +
