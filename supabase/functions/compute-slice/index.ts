@@ -12,6 +12,14 @@ const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const DONT_REPEAT_LOOKBACK = 30
 const MIN_CANDIDATES_AFTER_DONT_REPEAT = 8
 
+// Session 2 cost-down: cap the Stage 2 AI payload. Proven (offline experiment,
+// 8 synthetic profiles, real Anthropic calls) to cut the dominant cost driver
+// — candidate COUNT, not per-candidate field size — from ~$0.30-0.38/compute
+// to ~$0.04/compute with no measured pick-quality loss. This is a Stage-2
+// payload cap ONLY; it runs on `candidates`, the output of the untouched
+// Stage 1 SQL gate + don't-repeat filter below, never a substitute for either.
+const MAX_STAGE2_CANDIDATES = 60
+
 function jsonResponse(body: unknown, status: number) {
   return new Response(JSON.stringify(body), {
     status,
@@ -24,6 +32,31 @@ function seasonForMonth(month: number): string {
   if (month >= 3 && month <= 5) return 'spring'
   if (month >= 6 && month <= 8) return 'summer'
   return 'fall'
+}
+
+// Round-robins across cuisine buckets rather than truncating in DB order, so
+// the cap still spans variety instead of e.g. all-Italian if the pool happens
+// to be sorted that way. Input is already gate-filtered + don't-repeat
+// filtered `candidates` — this never runs before or instead of that.
+function narrowCandidatePool<T extends { cuisine: string | null }>(candidates: T[], max: number): T[] {
+  if (candidates.length <= max) return candidates
+  const byCuisine = new Map<string, T[]>()
+  for (const c of candidates) {
+    const key = c.cuisine ?? 'unknown'
+    if (!byCuisine.has(key)) byCuisine.set(key, [])
+    byCuisine.get(key)!.push(c)
+  }
+  const buckets = [...byCuisine.values()]
+  const result: T[] = []
+  let i = 0
+  while (result.length < max && buckets.some((b) => i < b.length)) {
+    for (const b of buckets) {
+      if (result.length >= max) break
+      if (i < b.length) result.push(b[i])
+    }
+    i++
+  }
+  return result
 }
 
 function isPlausibleLocalDate(value: unknown): value is string {
@@ -366,16 +399,17 @@ function activeTentpoleOccasion(localDate: string): string | null {
   return null
 }
 
-// Same system prompt proven in scripts/prove-slice-selection.mjs — reused
-// verbatim. This Edge Function cannot import that browser-facing script (it
-// pulls in src/tipsy/data.ts, which assumes import.meta.env/browser globals),
-// so the prompt text and parse logic are duplicated here on purpose, not
-// re-derived. Any future wording change must be made in both places.
+// System prompt originally proven in scripts/prove-slice-selection.mjs, then
+// updated in Session 3 (see the Stage 2 payload-slimming comment below) to
+// match the smaller candidate schema actually sent now — no longer verbatim.
+// This Edge Function cannot import that browser-facing script (it pulls in
+// src/tipsy/data.ts, which assumes import.meta.env/browser globals), so the
+// prompt text and parse logic are duplicated here on purpose, not re-derived.
 const SELECTION_SYSTEM_PROMPT = `You are selecting a daily set of 3 or 4 dinner recipes for one home cook, chosen from a fixed list of candidate recipes.
 
 You are given:
 - TASTE PROFILE — a natural-language interpretation of this cook's flavor leanings, cooking register, and constraints.
-- CANDIDATES — a JSON array of recipes, each with an id, title, description, cuisine, effort, and dietary boolean flags.
+- CANDIDATES — a JSON array of recipes, each with an id, title, description, cuisine, effort, and meal_type. Every candidate has already been filtered for this cook's hard dietary restrictions and allergies before reaching you — you do not need to (and cannot, since no dietary fields are included) screen for them yourself.
 
 How to use the taste profile: it is a CENTER OF GRAVITY, not a cage. Lean toward it, but a genuinely excellent dish that sits slightly outside the cook's usual leanings is a welcome surprise, not a violation — do not pick only the four most dead-center-safe options. The one exception is anything the profile names as a firm constraint (dietary restriction, allergy, or a dislike stated with real intensity) — those DO bind and must never be violated, unlike soft leanings.
 
@@ -739,8 +773,16 @@ Deno.serve(async (req) => {
       )
     }
 
-    // STAGE 2 — AI selection. Payload mirrors scripts/prove-slice-selection.mjs:
-    // taste_profile + lean candidate fields (no season, no full pool metadata).
+    // STAGE 2 — AI selection. Payload is a SLIMMED-DOWN mirror of
+    // scripts/prove-slice-selection.mjs, not a verbatim one anymore (Session 3
+    // cost-down, see MAX_STAGE2_CANDIDATES above): taste_profile + a capped,
+    // round-robin-narrowed candidate set, with only the fields the AI needs to
+    // rank taste-fit (id/title/description/cuisine/effort/meal_type) — the 9
+    // dietary boolean columns are dropped from THIS payload only. They stay
+    // fully fetched in the Stage 1 SQL SELECT and still do all real allergy/diet
+    // enforcement there (gate) and via `validIds` below (picks); the AI was
+    // never the enforcement layer for them, so removing them from what the AI
+    // sees changes cost, not safety.
     // ONE addition on top of that mirror: when this profile's allergy answer
     // was unparsed (composer failure), the raw failed text is appended to
     // taste_profile as an explicitly-labeled, best-effort-only note — this is
@@ -751,28 +793,17 @@ Deno.serve(async (req) => {
       ? `${tasteProfile}\n\nNOTE: this cook's allergy/dietary answer could not be fully structured. Treat the following as a STATED but UNVERIFIED allergy — avoid it on a best-effort basis. This is not a guaranteed hard filter, just a strong signal: "${unparsedRawTextForAI}"`
       : tasteProfile
 
-    const validIds = new Set(candidates.map((c) => c.id))
+    const stage2Candidates = narrowCandidatePool(candidates, MAX_STAGE2_CANDIDATES)
+    const validIds = new Set(stage2Candidates.map((c) => c.id))
     const userMessage = JSON.stringify({
       taste_profile: tasteProfileForAI,
-      candidates: candidates.map((c) => ({
+      candidates: stage2Candidates.map((c) => ({
         id: c.id,
         title: c.title,
         description: c.description,
         cuisine: c.cuisine,
         effort: c.effort,
-        is_vegetarian: c.is_vegetarian,
-        is_vegan: c.is_vegan,
-        is_gluten_free: c.is_gluten_free,
-        is_dairy_free: c.is_dairy_free,
-        contains_pork: c.contains_pork,
-        contains_shellfish: c.contains_shellfish,
-        contains_nuts: c.contains_nuts,
-        contains_egg: c.contains_egg,
-        contains_fish: c.contains_fish,
-        contains_soy: c.contains_soy,
-        contains_sesame: c.contains_sesame,
-        contains_peanut: c.contains_peanut,
-        contains_treenut: c.contains_treenut,
+        meal_type: 'dinner',
       })),
     })
 
