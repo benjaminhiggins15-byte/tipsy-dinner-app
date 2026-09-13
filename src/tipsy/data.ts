@@ -183,6 +183,8 @@ export async function generateTasteProfile(
         body: JSON.stringify({
           messages: [{ role: "user", content: "Generate the taste profile now." }],
           systemPrompt,
+          call_type: "taste-profile",
+          user_id: userId,
         }),
       }
     );
@@ -316,6 +318,7 @@ export async function generateOnboardingReflection(
     if (!supabaseAnonKey) throw new Error("Supabase key not found");
 
     const systemPrompt = ONBOARDING_REFLECTION_SYSTEM_PROMPTS[field](answer);
+    const userId = await getCurrentUserId();
 
     const response = await fetch(
       "https://xzpmmthreeyscidhwriv.supabase.co/functions/v1/ai-chat",
@@ -328,6 +331,8 @@ export async function generateOnboardingReflection(
         body: JSON.stringify({
           messages: [{ role: "user", content: "Reflect it back now." }],
           systemPrompt,
+          call_type: "reflection",
+          user_id: userId,
         }),
         signal: controller.signal,
       }
@@ -389,6 +394,8 @@ export async function parseNoGosAnswer(answer: string): Promise<string | null> {
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
     if (!supabaseAnonKey) throw new Error("Supabase key not found");
 
+    const userId = await getCurrentUserId();
+
     const response = await fetch(
       "https://xzpmmthreeyscidhwriv.supabase.co/functions/v1/ai-chat",
       {
@@ -400,6 +407,8 @@ export async function parseNoGosAnswer(answer: string): Promise<string | null> {
         body: JSON.stringify({
           messages: [{ role: "user", content: "Compose the constraints record now." }],
           systemPrompt: NO_GOS_PARSE_SYSTEM_PROMPT(answer),
+          call_type: "constraints-parse",
+          user_id: userId,
         }),
       }
     );
@@ -3069,6 +3078,8 @@ export async function enrichGroceryItems(
       body: JSON.stringify({
         systemPrompt: GROCERY_ENRICHMENT_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: JSON.stringify(inputPayload) }],
+        call_type: 'grocery-enrich',
+        user_id: userId,
       }),
     });
 
@@ -3447,6 +3458,7 @@ async function generateStepTitlesForRecipe(
   if (!supabaseUrl || !supabaseAnonKey) throw new Error('Supabase config missing');
 
   const inputPayload = instructions.map((s) => ({ index: s.index, instruction: s.instruction }));
+  const userId = await getCurrentUserId();
 
   const response = await fetch(`${supabaseUrl}/functions/v1/ai-chat`, {
     method: 'POST',
@@ -3457,6 +3469,8 @@ async function generateStepTitlesForRecipe(
     body: JSON.stringify({
       systemPrompt: STEP_TITLE_BACKFILL_SYSTEM_PROMPT,
       messages: [{ role: 'user', content: JSON.stringify(inputPayload) }],
+      call_type: 'step-title-backfill',
+      user_id: userId,
     }),
   });
 

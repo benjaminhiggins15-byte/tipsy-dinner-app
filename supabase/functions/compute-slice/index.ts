@@ -388,8 +388,10 @@ Return STRICT JSON only. No markdown, no code fences, no prose outside the JSON.
 
 // Same fetch + SSE-drain shape as parseSSEStream (src/tipsy/data.ts) /
 // generateTasteProfile / enrichGroceryItems — duplicated here for the same
-// import-boundary reason as the prompt above.
-async function callAIChatAndDrain(userMessage: string): Promise<string> {
+// import-boundary reason as the prompt above. userId here is the VERIFIED
+// caller id from this function's own JWT check (see callerId below), not a
+// self-reported value — ai-chat's cost meter trusts it as-is.
+async function callAIChatAndDrain(userMessage: string, userId: string): Promise<string> {
   const response = await fetch(`${SUPABASE_URL}/functions/v1/ai-chat`, {
     method: 'POST',
     headers: {
@@ -399,6 +401,8 @@ async function callAIChatAndDrain(userMessage: string): Promise<string> {
     body: JSON.stringify({
       messages: [{ role: 'user', content: userMessage }],
       systemPrompt: SELECTION_SYSTEM_PROMPT,
+      call_type: 'slice',
+      user_id: userId,
     }),
   })
 
@@ -772,7 +776,7 @@ Deno.serve(async (req) => {
       })),
     })
 
-    const fullText = await callAIChatAndDrain(userMessage)
+    const fullText = await callAIChatAndDrain(userMessage, callerId)
     if (!fullText.trim()) {
       return await fallbackToPriorSliceOrError('Empty response from ai-chat selection call')
     }

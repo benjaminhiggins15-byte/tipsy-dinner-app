@@ -5448,6 +5448,8 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
             body: JSON.stringify({
               messages: history,
               systemPrompt: finalSystemPrompt,
+              call_type: "build-chat",
+              user_id: profile?.id ?? null,
             }),
           }
         );
@@ -5625,6 +5627,8 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
             body: JSON.stringify({
               messages: updatedHistory,
               systemPrompt: finalSystemPrompt,
+              call_type: "build-chat",
+              user_id: profile?.id ?? null,
             }),
           }
         );
@@ -5920,6 +5924,8 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
               body: JSON.stringify({
                 messages: updatedHistory,
                 systemPrompt: finalSystemPrompt,
+                call_type: "build-chat",
+                user_id: profile?.id ?? null,
               }),
             }
           );
