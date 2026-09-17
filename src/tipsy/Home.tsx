@@ -327,7 +327,7 @@ export default function Home({
             suggestion tiles and the received card, not a peer of either. */}
         <div
           style={{
-            margin: `36px ${EDGE}px 8px`,
+            margin: `32px ${EDGE}px 8px`,
             fontFamily: fontSans,
             fontWeight: 500,
             textTransform: "uppercase",
