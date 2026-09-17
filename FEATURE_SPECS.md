@@ -1952,6 +1952,74 @@ immediate second call against the same account and date read the cached row with
 hypothetical hard shellfish allergy against that day's real candidate pool
 confirmed zero shellfish rows survive the gate.
 
+**RESOLVED 2026-09-13 — Session 2, Stage 2 payload cost-down, `compute-slice` v6,
+deployed and verified in production.** The Stage 2 AI call never included full
+ingredients/steps — it was always title/description/metadata-level — but it was
+still sending every Stage-1-gated candidate (pool sizes observed 322-715 rows in
+this session) with 18 fields each, including all 9 dietary boolean columns. Two
+changes, both cost-only:
+
+1. **Narrowing.** `narrowCandidatePool()` caps the Stage-2 candidate set at
+   `MAX_STAGE2_CANDIDATES = 60`, round-robin by cuisine bucket, applied strictly
+   downstream of the Stage-1 gate described above. Because it operates only as a
+   subset filter on an already-gated array, it cannot introduce a candidate that
+   wasn't already gate-clean — there is no code path for it to do so.
+2. **Field-slimming.** Each candidate sent to the AI dropped from 18 fields to 6:
+   `id, title, description, cuisine, effort, meal_type`. The 9 dietary boolean
+   columns (`is_vegetarian`, `contains_shellfish`, etc.) are no longer part of this
+   payload. They remain fully fetched in the Stage 1 SQL `SELECT`, unchanged, and
+   still do ALL real allergy/dietary enforcement — both at the gate (Stage 1) and
+   via `validIds` filtering of the AI's returned picks (Stage 2 output validation).
+   **The AI was never the enforcement layer for these columns before this change,
+   and still isn't after it** — removing them from what the AI sees changes cost,
+   not safety. Any future change must not re-add these columns to the Stage 2
+   payload "so the AI can check them" — that would mistake a display/ranking input
+   for a safety surface it was never designed to be.
+
+**Cost result**, measured on real `llm_usage` meter rows (not synthetic): ~$0.35 →
+~$0.025 per slice compute, roughly a 93% reduction. Isolating the two changes
+across three real profiles, narrowing alone accounts for ~89-90% of the total drop;
+field-slimming contributes an additional ~37-39% reduction on top of the
+already-narrowed cost — narrowing is the dominant lever, slimming is real but
+secondary.
+
+**Allergy-gate re-proof**, both structural (narrowing is a strict subset of an
+already-gated array — see point 1 above) and empirical: a full Big-9 sweep (all 9
+allergens individually, 2 stacked column combos, vegetarian/vegan prose gates) run
+against both the full pool and the narrowed-to-60 pool showed zero violations in
+either, across all 13 conditions; 9 real AI calls across 3 profiles (baseline,
+narrowed-only, narrowed+slimmed) were manually checked pick-by-pick with zero
+violations; and the live production deploy was re-checked against a real shellfish-
+allergy test account post-deploy — zero shellfish rows in the returned picks.
+
+**Sonnet 5 was evaluated and deliberately NOT adopted in this session.** It
+produced meaningfully chattier output on this call type; the extra output tokens
+ate essentially all of the additional ~6% input-side savings the swap would have
+otherwise bought. A future adoption attempt on this call type is not a free
+model-string flip — it would need `SELECTION_SYSTEM_PROMPT` retuned to constrain
+output length first, and that retuning carries its own prompt-regression risk (the
+same category of risk this doc already treats carefully for `buildSystemPrompt`
+elsewhere in this app). Budget it as measure-and-tune, not drop-in.
+
+**Banked, not fixed — carried out of this session's verification work:**
+- `parseSelectionResponse` has no pick-id dedupe guard (one baseline run returned a
+  duplicate pick). A separate parse-reliability wobble (a thin 3-pick result) was
+  also seen only in a baseline/unnarrowed run. Both anomalies, across a small
+  sample, appeared exclusively in baseline runs, never in the narrowed-to-60
+  payload — flagged as a possibility, not proven, that narrowing incidentally
+  improved parse reliability.
+- Taste-profile double-fire on onboarding completion — open, unrelated to this
+  session's changes.
+- Migration-history reconciliation gap: `pick_details`, `get_suggested_recipe`, and
+  the structured-allergy-fields columns exist live in the schema with no
+  corresponding migration-history entry.
+- **`llm_usage` can undercount — second sighting of a dropped row.** `ai-chat`'s
+  unmodified `EdgeRuntime.waitUntil` async usage-logging write dropped a row for a
+  real, fully successful AI call during this session's pre-deploy verification
+  (confirmed twice now across sessions). This means the meter can occasionally
+  undercount, which matters for any cost-floor read taken from this table — the
+  drop rate should be checked before the table's totals are trusted as complete.
+
 ---
 
 ## Suggested Recipes — Layer 4 (suggestions carousel)
