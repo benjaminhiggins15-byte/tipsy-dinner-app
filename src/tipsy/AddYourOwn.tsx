@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type CSSProperties, type KeyboardEvent } from "react";
-import { saveRecipe, updateSavedRecipe, deleteSavedRecipe, loadCustomCategories, addRecipeToMenuSection, type Recipe, type MenuSection, type RecipeStep, normalizeStep } from "./data";
+import { saveRecipe, updateSavedRecipe, deleteSavedRecipe, countMenusContainingRecipe, loadCustomCategories, addRecipeToMenuSection, type Recipe, type MenuSection, type RecipeStep, normalizeStep } from "./data";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 
 type Step = 1 | 2 | 3 | 4 | 6;
@@ -85,6 +85,9 @@ const trayEmoji: Record<string, string> = {
 export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, editCategoryLabel, onSaveEdit, onDeleted, clearRecipeCache, onCreateCategoryForRecipe, initialDraft }: Props) {
   const isEdit = !!(editRecipe && editRecipe.savedId);
   const [showDelete, setShowDelete] = useState(false);
+  const [deleteMenuCount, setDeleteMenuCount] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteErr, setDeleteErr] = useState(false);
   const [step, setStep] = useState<Step>(initialDraft?.step ?? 1);
   const [title, setTitle] = useState(initialDraft?.title ?? editRecipe?.title ?? "");
   const [desc, setDesc] = useState(initialDraft?.description ?? editRecipe?.description ?? "");
@@ -311,7 +314,14 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
               </Field>
               <PrimaryBtn onClick={tryAdvance1}>Continue to Ingredients →</PrimaryBtn>
               {isEdit && (
-                <button onClick={() => setShowDelete(true)} style={{
+                <button onClick={() => {
+                  setDeleteMenuCount(null);
+                  setDeleteErr(false);
+                  setShowDelete(true);
+                  if (editRecipe?.savedId) {
+                    countMenusContainingRecipe(editRecipe.savedId).then(setDeleteMenuCount);
+                  }
+                }} style={{
                   width: "100%", background: "transparent", color: C.error,
                   border: "none", padding: "12px",
                   fontFamily: fontSans, fontSize: 12, fontWeight: 600,
@@ -728,8 +738,11 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
               Delete this recipe?
             </div>
             <div style={{ fontFamily: fontSans, fontSize: 13, color: C.textLight, textAlign: "center", marginBottom: 12 }}>
-              This can't be undone.
+              {deleteMenuCount !== null && deleteMenuCount > 0
+                ? `This recipe is in ${deleteMenuCount} menu${deleteMenuCount === 1 ? "" : "s"}. Delete anyway? This can't be undone.`
+                : "This can't be undone."}
             </div>
+            {deleteErr && <ValMsg>Couldn't delete this recipe — please try again.</ValMsg>}
             <button
               onClick={() => setShowDelete(false)}
               style={{
@@ -742,9 +755,21 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
               Cancel
             </button>
             <button
+              disabled={deleting}
               onClick={async () => {
-                if (editRecipe && editRecipe.savedId) {
-                  await deleteSavedRecipe(editRecipe.savedId);
+                if (!editRecipe || !editRecipe.savedId) {
+                  setShowDelete(false);
+                  onDeleted?.();
+                  return;
+                }
+                if (deleting) return;
+                setDeleting(true);
+                setDeleteErr(false);
+                const ok = await deleteSavedRecipe(editRecipe.savedId);
+                setDeleting(false);
+                if (!ok) {
+                  setDeleteErr(true);
+                  return;
                 }
                 setShowDelete(false);
                 onDeleted?.();
@@ -753,10 +778,11 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
                 width: "100%", padding: "12px", borderRadius: 10,
                 background: C.error, border: "none",
                 color: C.bg, fontFamily: fontSans,
-                fontSize: 13, fontWeight: 500, cursor: "pointer",
+                fontSize: 13, fontWeight: 500, cursor: deleting ? "default" : "pointer",
+                opacity: deleting ? 0.6 : 1,
               }}
             >
-              Delete
+              {deleting ? "Deleting…" : "Delete"}
             </button>
           </div>
         </div>

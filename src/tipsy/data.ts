@@ -1105,24 +1105,37 @@ export async function updateSavedRecipe(
   }
 }
 
-// Delete saved recipe (handles both number and UUID)
-export async function deleteSavedRecipe(id: number | string): Promise<void> {
+// Delete saved recipe (handles both number and UUID).
+// Returns true only if a row was actually removed. A delete whose WHERE
+// clause (id + user_id, further narrowed by RLS) matches zero rows is NOT
+// a Postgres error - it's a normal empty response - so callers must check
+// this return value rather than assume success just because nothing threw.
+export async function deleteSavedRecipe(id: number | string): Promise<boolean> {
   const userId = await getCurrentUserId();
   if (!userId) {
     console.error('Cannot delete recipe: no user session');
-    return;
+    return false;
   }
 
   try {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('recipes')
       .delete()
       .eq('id', id)
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .select('id');
 
     if (error) throw error;
+
+    if (!data || data.length === 0) {
+      console.error('Delete recipe matched 0 rows (id/user_id mismatch or already deleted):', id);
+      return false;
+    }
+
+    return true;
   } catch (error) {
     console.error('Error deleting recipe:', error);
+    return false;
   }
 }
 
@@ -2594,6 +2607,29 @@ export async function removeRecipeFromMenuSection(
   } catch (error) {
     console.error('Error removing recipe from menu section:', error);
     return null;
+  }
+}
+
+// Count the distinct menus a recipe appears in (across all sections), for
+// warning the user before they delete a recipe that's in active use.
+export async function countMenusContainingRecipe(recipeId: number | string): Promise<number> {
+  const userId = await getCurrentUserId();
+  if (!userId) return 0;
+
+  try {
+    const { data, error } = await supabase
+      .from('menu_recipes')
+      .select('menu_id')
+      .eq('recipe_id', recipeId)
+      .eq('user_id', userId);
+
+    if (error) throw error;
+
+    const distinctMenuIds = new Set((data || []).map((row) => row.menu_id));
+    return distinctMenuIds.size;
+  } catch (error) {
+    console.error('Error counting menus containing recipe:', error);
+    return 0;
   }
 }
 
