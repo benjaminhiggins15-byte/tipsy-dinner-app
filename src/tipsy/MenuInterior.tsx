@@ -2,6 +2,7 @@ import { useState, useEffect, type CSSProperties, type KeyboardEvent } from "rea
 import {
   findMenu,
   updateMenu,
+  deleteMenu,
   getRecipesForMenuSection,
   removeRecipeFromMenuSection,
   findCustomCategory,
@@ -25,6 +26,12 @@ const C = {
   removeIcon: "rgba(35,60,0,0.2)",
   addText: "rgba(35,60,0,0.3)",
   chevron: "rgba(35,60,0,0.25)",
+  navy: "#233C00",
+  midBlue: "#233C00",
+  btnBlue: "#233C00",
+  muted: "rgba(35,60,0,0.3)",
+  border: "rgba(35,60,0,0.1)",
+  borderLight: "rgba(35,60,0,0.08)",
 };
 
 const fontSerif = "'Fraunces', serif";
@@ -438,6 +445,10 @@ export default function MenuInterior({ menuId, back, push }: Props) {
             setShowEdit(false);
             refreshMenu();
           }}
+          onDeleted={() => {
+            setShowEdit(false);
+            back();
+          }}
         />
       )}
     </div>
@@ -458,10 +469,12 @@ function EditMenuSheet({
   menu,
   onClose,
   onSaved,
+  onDeleted,
 }: {
   menu: Menu;
   onClose: () => void;
   onSaved: () => void;
+  onDeleted: () => void;
 }) {
   const [title, setTitle] = useState(menu.title);
   const [titleErr, setTitleErr] = useState(false);
@@ -470,6 +483,7 @@ function EditMenuSheet({
   const [sheetPhase, setSheetPhase] = useState<"entering" | "entered">("entering");
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
 
   const toggleSection = (section: MenuSection) => {
     if (enabledSections.includes(section)) {
@@ -500,6 +514,11 @@ function EditMenuSheet({
     onSaved();
   };
 
+  const tryDelete = async () => {
+    await deleteMenu(menu.id);
+    onDeleted();
+  };
+
   // Slide-up animation
   useState(() => {
     requestAnimationFrame(() => {
@@ -513,7 +532,7 @@ function EditMenuSheet({
       style={{
         position: "absolute",
         inset: 0,
-        background: "rgba(4,44,83,0.55)",
+        background: "rgba(35,60,0,0.25)",
         display: "flex",
         alignItems: "flex-end",
         zIndex: 10,
@@ -525,7 +544,7 @@ function EditMenuSheet({
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "100%",
-          background: C.white,
+          background: C.bg,
           borderTopLeftRadius: 20,
           borderTopRightRadius: 20,
           padding: "24px 20px calc(80px + env(safe-area-inset-bottom))",
@@ -641,7 +660,7 @@ function EditMenuSheet({
                       width: 20,
                       height: 20,
                       borderRadius: "50%",
-                      background: C.white,
+                      background: C.bg,
                       position: "absolute",
                       top: 2,
                       left: isOn ? 22 : 2,
@@ -672,7 +691,7 @@ function EditMenuSheet({
           style={{
             width: "100%",
             background: C.btnBlue,
-            color: C.white,
+            color: C.bg,
             border: "none",
             borderRadius: 12,
             padding: "14px",
@@ -688,6 +707,111 @@ function EditMenuSheet({
         >
           {saving ? "Saving…" : "Save changes"}
         </button>
+
+        {/* Delete button */}
+        <button
+          onClick={() => setShowDelete(true)}
+          style={{
+            width: "100%",
+            background: "transparent",
+            color: "#B85C5C",
+            border: "none",
+            padding: "12px",
+            fontFamily: fontSans,
+            fontSize: 12,
+            fontWeight: 600,
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+            cursor: "pointer",
+          }}
+        >
+          Delete menu
+        </button>
+
+        {/* Delete confirmation */}
+        {showDelete && (
+          <div
+            onClick={() => setShowDelete(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(35,60,0,0.25)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 20,
+              padding: 24,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: C.bg,
+                borderRadius: 16,
+                padding: "24px 20px",
+                width: "100%",
+                maxWidth: 280,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                border: `0.5px solid ${C.border}`,
+              }}
+            >
+              <div style={{
+                fontFamily: fontSerif,
+                fontSize: 20,
+                color: C.navy,
+                fontWeight: 400,
+                textAlign: "center",
+              }}>
+                Delete this menu?
+              </div>
+              <div style={{
+                fontFamily: fontSans,
+                fontSize: 13,
+                color: C.midBlue,
+                textAlign: "center",
+                marginBottom: 12,
+              }}>
+                This can't be undone.
+              </div>
+              <button
+                onClick={() => setShowDelete(false)}
+                style={{
+                  width: "100%",
+                  padding: "12px",
+                  borderRadius: 10,
+                  background: "transparent",
+                  border: `0.5px solid ${C.border}`,
+                  color: C.midBlue,
+                  fontFamily: fontSans,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={tryDelete}
+                style={{
+                  width: "100%",
+                  padding: "12px",
+                  borderRadius: 10,
+                  background: "#B85C5C",
+                  border: "none",
+                  color: C.bg,
+                  fontFamily: fontSans,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -726,7 +850,7 @@ function ValMsg({ children }: { children: React.ReactNode }) {
 
 const inputStyleBase: CSSProperties = {
   width: "100%",
-  background: C.white,
+  background: C.bg,
   border: `1px solid ${C.borderLight}`,
   borderRadius: 10,
   padding: "11px 14px",
