@@ -527,6 +527,7 @@ function EditMenuSheet({
   });
 
   return (
+    <>
     <div
       onClick={onClose}
       style={{
@@ -727,93 +728,96 @@ function EditMenuSheet({
         >
           Delete menu
         </button>
-
-        {/* Delete confirmation */}
-        {showDelete && (
-          <div
-            onClick={() => setShowDelete(false)}
-            style={{
-              position: "fixed",
-              inset: 0,
-              background: "rgba(35,60,0,0.25)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: 20,
-              padding: 24,
-            }}
-          >
-            <div
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                background: C.bg,
-                borderRadius: 16,
-                padding: "24px 20px",
-                width: "100%",
-                maxWidth: 280,
-                display: "flex",
-                flexDirection: "column",
-                gap: 8,
-                border: `0.5px solid ${C.border}`,
-              }}
-            >
-              <div style={{
-                fontFamily: fontSerif,
-                fontSize: 20,
-                color: C.navy,
-                fontWeight: 400,
-                textAlign: "center",
-              }}>
-                Delete this menu?
-              </div>
-              <div style={{
-                fontFamily: fontSans,
-                fontSize: 13,
-                color: C.midBlue,
-                textAlign: "center",
-                marginBottom: 12,
-              }}>
-                This can't be undone.
-              </div>
-              <button
-                onClick={() => setShowDelete(false)}
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  borderRadius: 10,
-                  background: "transparent",
-                  border: `0.5px solid ${C.border}`,
-                  color: C.midBlue,
-                  fontFamily: fontSans,
-                  fontSize: 13,
-                  fontWeight: 500,
-                  cursor: "pointer",
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={tryDelete}
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  borderRadius: 10,
-                  background: "#B85C5C",
-                  border: "none",
-                  color: C.bg,
-                  fontFamily: fontSans,
-                  fontSize: 13,
-                  fontWeight: 500,
-                  cursor: "pointer",
-                }}
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     </div>
+
+    {/* Delete confirmation — rendered outside the sheet's transformed card
+        so `position: fixed` resolves against the real viewport, not the
+        card's translateY containing block */}
+    {showDelete && (
+      <div
+        onClick={() => setShowDelete(false)}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(35,60,0,0.25)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 20,
+          padding: 24,
+        }}
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            background: C.bg,
+            borderRadius: 16,
+            padding: "24px 20px",
+            width: "100%",
+            maxWidth: 280,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            border: `0.5px solid ${C.border}`,
+          }}
+        >
+          <div style={{
+            fontFamily: fontSerif,
+            fontSize: 20,
+            color: C.navy,
+            fontWeight: 400,
+            textAlign: "center",
+          }}>
+            Delete this menu?
+          </div>
+          <div style={{
+            fontFamily: fontSans,
+            fontSize: 13,
+            color: C.midBlue,
+            textAlign: "center",
+            marginBottom: 12,
+          }}>
+            This can't be undone.
+          </div>
+          <button
+            onClick={() => setShowDelete(false)}
+            style={{
+              width: "100%",
+              padding: "12px",
+              borderRadius: 10,
+              background: "transparent",
+              border: `0.5px solid ${C.border}`,
+              color: C.midBlue,
+              fontFamily: fontSans,
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={tryDelete}
+            style={{
+              width: "100%",
+              padding: "12px",
+              borderRadius: 10,
+              background: "#B85C5C",
+              border: "none",
+              color: C.bg,
+              fontFamily: fontSans,
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: "pointer",
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
