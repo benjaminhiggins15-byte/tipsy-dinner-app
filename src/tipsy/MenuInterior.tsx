@@ -468,6 +468,8 @@ function EditMenuSheet({
   const [description, setDescription] = useState(menu.description);
   const [enabledSections, setEnabledSections] = useState<MenuSection[]>(menu.enabledSections);
   const [sheetPhase, setSheetPhase] = useState<"entering" | "entered">("entering");
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState(false);
 
   const toggleSection = (section: MenuSection) => {
     if (enabledSections.includes(section)) {
@@ -477,16 +479,24 @@ function EditMenuSheet({
     }
   };
 
-  const trySave = () => {
+  const trySave = async () => {
     if (!title.trim()) {
       setTitleErr(true);
       return;
     }
-    updateMenu(menu.id, {
+    if (saving) return;
+    setSaveErr(false);
+    setSaving(true);
+    const result = await updateMenu(menu.id, {
       title: title.trim(),
       description: description.trim(),
       enabledSections,
     });
+    setSaving(false);
+    if (!result) {
+      setSaveErr(true);
+      return;
+    }
     onSaved();
   };
 
@@ -655,8 +665,10 @@ function EditMenuSheet({
         </div>
 
         {/* Save button */}
+        {saveErr && <ValMsg>Couldn't save your changes — please try again.</ValMsg>}
         <button
           onClick={trySave}
+          disabled={saving}
           style={{
             width: "100%",
             background: C.btnBlue,
@@ -669,11 +681,12 @@ function EditMenuSheet({
             fontWeight: 600,
             letterSpacing: "0.1em",
             textTransform: "uppercase",
-            cursor: "pointer",
+            cursor: saving ? "default" : "pointer",
+            opacity: saving ? 0.6 : 1,
             marginTop: 4,
           }}
         >
-          Save changes
+          {saving ? "Saving…" : "Save changes"}
         </button>
       </div>
     </div>
