@@ -2010,9 +2010,11 @@ elsewhere in this app). Budget it as measure-and-tune, not drop-in.
   improved parse reliability.
 - Taste-profile double-fire on onboarding completion — open, unrelated to this
   session's changes.
-- Migration-history reconciliation gap: `pick_details`, `get_suggested_recipe`, and
-  the structured-allergy-fields columns exist live in the schema with no
-  corresponding migration-history entry.
+- Migration-history reconciliation gap — **corrected and expanded 2026-09-17**:
+  this note undersold the true scope. See "Repo Hygiene — Branch Audit &
+  Migration Reconciliation" below for the full accounting (16 of 18 tables and 5
+  of 10 functions have no migration file at all; this item's three named objects
+  are actually the best-documented corner of the gap, not the whole of it).
 - **`llm_usage` can undercount — second sighting of a dropped row.** `ai-chat`'s
   unmodified `EdgeRuntime.waitUntil` async usage-logging write dropped a row for a
   real, fully successful AI call during this session's pre-deploy verification
@@ -2683,6 +2685,101 @@ loop) passes 40/40 with zero fail-open findings, run against the actual
 committed `allergyMap.ts`/`App.tsx` source. Additionally verified on a real
 device across three scenarios — regenerate-to-clean, creative substitution,
 and upfront refusal — all of which keep the allergen away from the user.
+
+---
+
+## Repo Hygiene — Branch Audit & Migration Reconciliation (Session, 2026-09-17)
+
+A read-diagnostic session (git state audit + Supabase introspection) confirming
+several standing concerns as resolved or disproven, one merge landed, two stale
+branches removed, and the true scope of the migration-history gap established.
+No app code changed except the merge below; no schema/data changed at all — the
+Supabase work was `information_schema`/`pg_catalog` reads only.
+
+**main is the trustworthy base going forward.** Confirmed clean, in sync with
+`origin/main`, no stray staged/unstaged changes. `feature/home-explore-section`
+merged in (`git merge --no-ff`, one real conflict — a cosmetic margin/formatting
+diff in `Home.tsx`'s Explore-section header div, resolved keeping the 32px value
+already live in production), verified via a Vercel preview branch
+(`preview/home-explore-merge`, deleted after verification), then pushed to
+`main` and deployed live — merge commit `c408a9a`. `feature/home-explore-section`
+itself is now redundant post-merge; safe to delete locally/remotely whenever
+convenient (not deleted this session, no urgency).
+
+**`39b5128` "systemic branch-cut leak" hypothesis — disproven.** The concern:
+commit `39b5128` ("Add photo attachment to Build prompt box") appeared as a
+shared ancestor on both `feature/onboarding-conversational-flow` and
+`feature/build-photo-import`, raising the question of whether photo-attachment
+code had silently leaked into the shipped onboarding work. `git cherry -v main
+feature/onboarding-conversational-flow` showed 9 of 11 commits as already
+content-equivalent on main (shipped via the parallel `feature/onboarding-clean`
+branch) but flagged `39b5128` and `b41d476` as `+` (no main equivalent). Diffing
+`b41d476` (branch) against its shipped counterpart `006b34d` (main) via `git
+diff b41d476 006b34d --stat` showed the ONLY difference was in `App.tsx` (95
+lines, all photo-attachment plumbing — the `ContentBlock` type,
+`blobToImageContentBlock`, `attachedImageBlob` state, the hidden file input,
+`PhotoCropOverlay` wiring); `Onboarding.tsx` and `ChatUI.tsx` were byte-for-byte
+identical between the two commits. Conclusion: `006b34d` was built by taking
+`b41d476` and deliberately stripping the photo-attach code back out before
+shipping. No leak occurred; `39b5128` remains parked, isolated, on
+`feature/build-photo-import` only — not on `main`, not inherited by any
+newly-cut branch.
+
+**Account-to-account sharing — confirmed fully merged; "stranded across
+branches" concern disproven.** `git branch --merged main` includes every
+account-sharing branch (`account-sharing-receive-plumbing`,
+`account-sharing-schema-build2`, `account-sharing-send-snapshot`,
+`feature/update-vs-save-as-new`, `send-recipe-ui`, `identity-foundation-handles`,
+`frozen-shares`), and `main`'s own history contains the full Build 2–4 sequence
+(structured schema, sending, receiving, send UI) already documented in their own
+sections above. Nothing from this feature is stranded off `main`.
+
+**Branches deleted this session (local + remote), both verified fully-merged
+duplicates before deletion:**
+- `feature/onboarding-conversational-flow` — see the `39b5128` writeup above;
+  its unique onboarding commit shipped as `006b34d` on main, byte-for-byte
+  identical apart from the photo-attach code that was never meant to ship.
+- `fix/suggestion-tile-clip` — appeared in `git branch --merged main` (a true
+  ancestor merge, not just a content match).
+
+**Supabase Auth account audit.** `dfd@dfd.com` does not exist in `auth.users` —
+nothing to delete, and no evidence it ever existed on this project (11 total
+users, none matching, checked case-insensitively). `test2@test2.com` is present
+and live. Additional test/throwaway accounts were also observed present:
+`benhigginstest@test.com`, `throwaway@throwaway.com`, `testtest@test.com` —
+logged here for a possible future deliberate cleanup pass, not addressed or
+flagged urgent this session.
+
+**Migration-history reconciliation — full corrected scope.** The note logged
+during the Session 2 slice cost-down work (Suggested Recipes — Layer 3 above)
+undersold this gap by naming only its best-documented corner. The full picture,
+established via `information_schema`/`pg_catalog` reads against the linked
+project:
+- **16 of 18 live `public`-schema tables have no migration file at all** —
+  `categories, connections, cook_events, grocery_items, grocery_list_shares,
+  ingredients, menu_recipes, menus, notifications, occasions, profiles (base),
+  recipe_categories, recipe_sends, recipe_shares, recipes,
+  suggested_recipe_pool (base)`. Only `user_recipe_slices` and `llm_usage` were
+  ever created via a tracked migration file.
+- **5 of 10 live functions have no migration file at all** —
+  `enforce_recipe_sends_status_only_update`, `finish_received_recipe_save`,
+  `handle_new_user`, `handle_recipe_updated_at`, `rls_auto_enable`.
+- **3 migration files exist in the repo but are unrecorded in
+  `supabase_migrations.schema_migrations`** —
+  `add_pick_details_to_user_recipe_slices`, `get_suggested_recipe`,
+  `add_structured_allergy_fields`. Each was applied by hand (dashboard or ad hoc
+  SQL) with content matching the file exactly (the columns/function were
+  confirmed live), but never run through tracked migration application, so
+  Supabase's own bookkeeping has no record they ran.
+- **Correction to the prior note:** `pick_details` / `get_suggested_recipe` /
+  structured-allergy fields are the best-documented part of this gap (file
+  exists, just unrecorded) — not the whole of it. The much larger, previously
+  unlogged gap is the 16 tables and 5 functions with no migration file
+  whatsoever.
+
+Logged as a deferred future-maintenance item — **not a launch blocker.** No
+migration was written or applied this session; this was a read-only audit.
+
 ---
 
 ## Menus & Recipe-Delete Hardening (Session, 2026-09-19)
