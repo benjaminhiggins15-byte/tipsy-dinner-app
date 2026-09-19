@@ -2683,3 +2683,132 @@ loop) passes 40/40 with zero fail-open findings, run against the actual
 committed `allergyMap.ts`/`App.tsx` source. Additionally verified on a real
 device across three scenarios — regenerate-to-clean, creative substitution,
 and upfront refusal — all of which keep the allergen away from the user.
+---
+
+## Menus & Recipe-Delete Hardening (Session, 2026-09-19)
+
+A `fix/menus-session` branch session: four numbered items, each independently
+committed and Vercel-preview-verified on a real device (`test2@test2.com`, since
+branch previews redirect Google OAuth to production) before the branch was
+merged to `main` (fast-forward, `c408a9a..20a9a78`). Four bugs fixed, two small
+discoverability/cosmetic upgrades shipped alongside them.
+
+**Item 1 — Menu-save race condition (`MenuInterior.tsx`'s `EditMenuSheet`).**
+Symptom: editing and saving a menu intermittently looked like it had failed
+(fields reverted) even though the write had actually gone through. Root cause:
+`trySave` fired `updateMenu(...)` without `await`, then immediately triggered
+`refreshMenu()` — an independent DB re-read — which frequently won the race and
+read the pre-update row, clobbering the just-applied local state with stale data.
+There was never a real save failure; the write and the read were simply
+unordered. Fix: `trySave` made `async`, awaits `updateMenu`'s return, checks the
+returned `Menu | null`, and only calls `onSaved()` (which triggers the re-read)
+once the write is confirmed to have returned a row.
+
+**Item 2 — Menu edit-screen visual faults + missing delete flow
+(`MenuInterior.tsx`'s `EditMenuSheet`).** Three faults in the same component:
+- *Transparent sheet card.* The card's `background` referenced `C.white`, a key
+  that doesn't exist on this file's local `C` palette object (this file's `C`
+  predates the palette shape used in `Menus.tsx`/`Occasions.tsx` and was missing
+  several keys) — so the card rendered with no background at all. Combined with
+  the backdrop fault below, this read on-device as "two screens" bleeding into
+  each other rather than as an obviously-transparent panel.
+- *Wrong backdrop color.* The backdrop used a legacy blue
+  (`rgba(4,44,83,0.55)`) left over from an earlier palette, not the app's actual
+  green-family color. Fixed to `rgba(35,60,0,0.25)`, matching the rest of the
+  app's backdrop treatment.
+- *Missing delete flow.* `EditMenuSheet` had no way to delete a menu at all.
+  Added a delete button plus a confirm modal, mirroring the existing pattern in
+  `Menus.tsx`, wired through a new `onDeleted` prop.
+
+Follow-up fix in the same item: the new delete-confirm modal initially rendered
+clipped/too-high on a real phone. Root cause: an ancestor element inside the
+sheet had an active `transform`, which establishes a new CSS containing block
+for `position: fixed`/`absolute` descendants — so the modal was positioning
+against that transformed ancestor's box instead of the viewport. Fixed by moving
+the modal outside the transformed card as a `<>` fragment sibling — the same
+escape hatch as the `paddingBottom: 64` / `PhotoCropOverlay` pattern documented
+in Architecture / SSR in CLAUDE.md.
+
+**Item 3 — Deleted recipes not actually disappearing from menus (`data.ts`,
+`AddYourOwn.tsx`).** Root-caused via read-only DB introspection
+(`supabase db query --linked` against `pg_constraint`/`pg_trigger`/`pg_policy`/
+`information_schema.columns` — no docker/psql/pg_dump available in this
+environment) before any fix was attempted, per CLAUDE.md's diagnose-before-fixing
+rule. The schema was healthy the entire time: the FK from
+`menu_recipes`/`recipe_categories` to `recipes` was correctly `ON DELETE
+CASCADE`, no blocking trigger existed, and RLS was correctly configured. The
+actual mechanism: **`deleteSavedRecipe`'s `DELETE` matched zero rows, and
+Postgres/PostgREST reported that as an ordinary successful response, not an
+error** — a `DELETE ... WHERE id = ? AND user_id = ?` that matches nothing is
+indistinguishable from "1 row deleted" unless the code explicitly checks the
+returned row count. The function had no such check, so it silently no-op'd and
+its caller proceeded as if the delete had succeeded (closing the modal,
+navigating away) while the recipe — and its now-orphaned menu/category
+references — remained untouched in the DB. The most likely trigger for the
+id/user_id mismatch is session/account identity drift (a stale test account vs.
+the account that actually owns the row), consistent with the two prior
+identity-mismatch incidents already logged in the Session Rules section of
+CLAUDE.md. Fixed in two parts:
+- **Part A (root cause).** `deleteSavedRecipe` now returns `Promise<boolean>`
+  instead of `Promise<void>`, adds `.select('id')` to the delete query, and
+  returns `false` (logging the mismatch) when the returned row set is empty. See
+  the new Load-Bearing Contract entry in CLAUDE.md.
+- **Part B (defense in depth).** New `countMenusContainingRecipe(recipeId)` in
+  `data.ts` counts the distinct menus a recipe appears in; `AddYourOwn.tsx`'s
+  delete-confirm modal fires this count on open and, when > 0, warns ("This
+  recipe is in N menus. Delete anyway?") before the user can proceed. The delete
+  button now awaits the boolean result and only closes the modal / navigates away
+  on `true`; on `false` it shows an inline error and keeps the modal open, so a
+  failed delete can no longer present itself as a successful one.
+
+**Item 4 — Menus discoverability pill + occasion-icon library expansion
+(cosmetic, low-risk).**
+- `App.tsx`'s Categories header: the icon-only circular "Menus" button was
+  converted into a labeled pill matching the sibling "View all" button's exact
+  style (border, radius, font, color) — icon retained alongside the new "Menus"
+  label. `onClick`/`aria-label` unchanged.
+- `Occasions.tsx`'s and `Menus.tsx`'s shared-but-duplicated `ICON_OPTIONS` list
+  grew from 15 to 56 icons across two passes in the same item (15→29, then
+  29→56), covering holidays/seasonal, everyday/casual, celebrations/milestones,
+  and general food/drink/mood themes. Every added name was verified against the
+  installed `@tabler/icons-react` package — both file existence under
+  `node_modules/@tabler/icons-react/dist/esm/icons/` and a live
+  `require('@tabler/icons-react')` export check — before use. Several
+  plausible-sounding names do NOT exist in this package and were deliberately
+  not used: `IconTurkey`, `IconEaster`, `IconFirework`, and there is no literal
+  "toast (glass)" or "graduation cap" icon (approximated with
+  `IconGlassChampagne` and `IconSchool` respectively instead). The two files'
+  import blocks and `ICON_OPTIONS` arrays were diffed line-for-line after
+  editing to confirm byte-identical names and order — see the Standing Cleanup
+  note in CLAUDE.md on this duplication pattern.
+
+**Known-but-unfixed, flagged this session — not addressed, logged for future
+work:**
+- `MenuInterior.tsx` has two more un-awaited-`Promise` sites (~lines 323 and
+  340, same async/await failure family as Item 1's root cause):
+  `findCustomCategory(recipe.category)` is assigned to `category` without
+  `await`, then `.label` (line 323) and, separately further down the same render
+  path, `.gradient` (line 340) are read off the resulting
+  `Promise<CustomCategory | null>` rather than the resolved object. No thrown
+  error, no crash — `categoryLabel` just silently renders "Unknown" and the
+  gradient styling silently fails. Not fixed this session.
+- The sibling `C.white`-does-not-exist bug is still live in `Menus.tsx` (5 call
+  sites, confirmed via `tsc` at the time of this session) — Item 2 fixed the
+  equivalent bug in `MenuInterior.tsx`, but `Menus.tsx`'s own `C` palette object
+  still lacks the key. Not fixed this session.
+- **Latent data-loss bug in the same neighborhood as Item 3, not addressed:**
+  `addRecipeToMenuSection` is called without `await` and without a `.catch` in
+  both `RecipePicker.tsx` (`handleRecipeTap`) and `AddYourOwn.tsx` (the
+  post-save menu-attach step). In both call sites the UI proceeds (marks the
+  recipe as added / continues the save flow) regardless of whether the
+  underlying DB write actually succeeds — the same silent-failure shape as Item
+  3's root cause, just on the add path instead of the delete path.
+- **Codebase-wide risk: copy-paste-drift.** This session hand-synced two more
+  instances of the duplicated-not-shared pattern already called out elsewhere in
+  this codebase (see `chips.ts`/`compute-slice`'s duplicated occasion-window
+  timing in CLAUDE.md): a hand-duplicated delete/confirm pattern between
+  `MenuInterior.tsx`'s `EditMenuSheet` and `Menus.tsx`, and the `ICON_OPTIONS`
+  list duplicated verbatim (not imported from a shared module) across
+  `Occasions.tsx` and `Menus.tsx`. Both were kept in sync by hand this session
+  (diffed line-for-line before each commit), but nothing structurally prevents a
+  future edit to one file from silently drifting from its sibling.

@@ -32,6 +32,7 @@ pointer named — do not duplicate it here.
 - **Cook History reads from local `cookEvents` state**, not the `recipe` prop — otherwise live updates regress to stale data. Full detail: Cook History in FEATURE_SPECS.md.
 - **Public bucket ≠ SDK access permitted** — a public CDN fetch bypasses RLS; the storage SDK always enforces it regardless of the bucket's public flag. Full detail: Recipe Photos in FEATURE_SPECS.md.
 - **`updateSavedRecipe` is a known trouble function** — shared by the chat-edit Update path and AddYourOwn; test both whenever it changes. Full detail: Update vs Save-as-New below.
+- **`deleteSavedRecipe` returns `boolean`, not `void`** — callers MUST check it; a Postgres `DELETE` whose `WHERE` clause matches 0 rows returns success with no thrown error, so an unchecked call cannot distinguish a real delete from a silent no-op. Full detail: Menus & Recipe-Delete Hardening (Session, 2026-09-19) in FEATURE_SPECS.md.
 - **`paddingBottom: 64` is hard-coded nav-bar clearance** — any new full-height bottom sheet must use `position: fixed; bottom: 64`, not `absolute; inset: 0`. Full detail: Architecture / SSR below.
 - **Decode a downscaled preview for display, not the raw file** — `createImageBitmap({ resizeWidth: 1200 })`; a raw-file decode cost ~4.9s. Full detail: Recipe Photos in FEATURE_SPECS.md.
 - **Tailwind Preflight's `img { max-width: 100% }` clamps rendered width** — fix with inline `maxWidth: "none"` on that element only. Full detail: Recipe Photos in FEATURE_SPECS.md.
@@ -529,3 +530,9 @@ code defects).
   - Taste-profile double-fire on onboarding completion. Open, unrelated to the Session 2 changes.
   - Migration-history reconciliation gap: `pick_details`, `get_suggested_recipe`, and the structured-allergy-fields columns exist live in the schema with no corresponding migration-history entry — same dashboard-only-schema risk logged above.
   - **`llm_usage` can undercount — second sighting of a dropped row.** `ai-chat`'s unmodified `EdgeRuntime.waitUntil` async usage-logging write occasionally drops a row even on a fully successful, correctly-parsed AI call (confirmed twice now, most recently during Session 2 verification). Any cost-floor read taken from `llm_usage` should account for this — check the drop rate before trusting the table's totals as complete.
+- **Banked from the Menus & Recipe-Delete Hardening session (2026-09-19), flagged not fixed:**
+  - `MenuInterior.tsx` has two more un-awaited-`Promise` sites (~lines 323/340) — `findCustomCategory(recipe.category)` used without `await`, same async/await failure family as this session's menu-save-race root cause.
+  - The sibling `C.white`-undefined-palette bug (fixed in `MenuInterior.tsx` this session) is still live in `Menus.tsx` (5 call sites, confirmed via `tsc`).
+  - `addRecipeToMenuSection` is fired without `await`/`catch` in both `RecipePicker.tsx` and `AddYourOwn.tsx` — a latent data-loss bug in the same neighborhood as this session's recipe-delete no-op fix, on the add path instead of the delete path.
+  - Copy-paste-drift risk: this session hand-synced two more duplicated-not-shared structures (`EditMenuSheet`'s delete/confirm pattern between `MenuInterior.tsx`/`Menus.tsx`, and `ICON_OPTIONS` between `Occasions.tsx`/`Menus.tsx`) — nothing structurally prevents future drift.
+  Full detail: Menus & Recipe-Delete Hardening (Session, 2026-09-19) in FEATURE_SPECS.md.
