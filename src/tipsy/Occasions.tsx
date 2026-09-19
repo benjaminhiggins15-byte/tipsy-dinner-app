@@ -23,6 +23,20 @@ import {
   IconToolsKitchen2,
   IconBowlSpoon,
   IconPizza,
+  IconGift,
+  IconBalloon,
+  IconConfetti,
+  IconChristmasTree,
+  IconPumpkinScary,
+  IconGlassCocktail,
+  IconBeer,
+  IconCookie,
+  IconIceCream,
+  IconCoffee,
+  IconSalad,
+  IconMeat,
+  IconFish,
+  IconSparkles,
 } from "@tabler/icons-react";
 
 const C = {
@@ -63,6 +77,20 @@ const ICON_OPTIONS = [
   { name: "IconToolsKitchen2", component: IconToolsKitchen2 },
   { name: "IconBowlSpoon", component: IconBowlSpoon },
   { name: "IconPizza", component: IconPizza },
+  { name: "IconGift", component: IconGift },
+  { name: "IconBalloon", component: IconBalloon },
+  { name: "IconConfetti", component: IconConfetti },
+  { name: "IconChristmasTree", component: IconChristmasTree },
+  { name: "IconPumpkinScary", component: IconPumpkinScary },
+  { name: "IconGlassCocktail", component: IconGlassCocktail },
+  { name: "IconBeer", component: IconBeer },
+  { name: "IconCookie", component: IconCookie },
+  { name: "IconIceCream", component: IconIceCream },
+  { name: "IconCoffee", component: IconCoffee },
+  { name: "IconSalad", component: IconSalad },
+  { name: "IconMeat", component: IconMeat },
+  { name: "IconFish", component: IconFish },
+  { name: "IconSparkles", component: IconSparkles },
 ];
 
 // AI-assigned icon based on keywords in occasion name

@@ -1848,14 +1848,24 @@ function Categories({ push, back, isTabRoot, ensureRecipesLoaded }: { push: (s: 
             onClick={() => push({ name: "occasions" })}
             aria-label="Menus"
             style={{
-              width: 32, height: 32, borderRadius: "50%",
+              height: 32,
+              padding: "0 14px",
+              borderRadius: 16,
               border: "1px solid rgba(35,60,0,0.25)",
               background: "transparent",
               display: "flex", alignItems: "center", justifyContent: "center",
+              gap: 6,
               cursor: "pointer",
+              fontFamily: "Inter, sans-serif",
+              fontSize: 12,
+              fontWeight: 500,
+              letterSpacing: "0.04em",
+              color: "#233C00",
+              whiteSpace: "nowrap",
             }}
           >
             <IconLayoutList size={16} stroke={1.5} color="rgba(35,60,0,0.7)" />
+            Menus
           </button>
         </div>
       </div>
