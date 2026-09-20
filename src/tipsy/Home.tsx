@@ -484,16 +484,19 @@ function SuggestionsCarousel({
   // history and today's compute failed with nothing to fall back to).
   if (!result.slice) {
     return (
-      <div
-        style={{
-          margin: `14px ${EDGE}px 0`,
-          fontFamily: "Georgia, serif",
-          fontStyle: "italic",
-          fontSize: 13,
-          color: C.textLight,
-        }}
-      >
-        still learning your taste — check back soon.
+      <div>
+        {sectionLabel}
+        <div
+          style={{
+            margin: `14px ${EDGE}px 0`,
+            fontFamily: "Georgia, serif",
+            fontStyle: "italic",
+            fontSize: 13,
+            color: C.textLight,
+          }}
+        >
+          Your suggestions will appear here soon.
+        </div>
       </div>
     );
   }
