@@ -17,6 +17,7 @@ import {
   type SavedRecipe,
 } from "./data";
 import { selectDailyChips, getRecentlyShownChipIds, recordShownChipIds } from "./chips";
+import { getCuisineLabel } from "./cuisineLabels";
 import watermarkSquare from "../Logos/watermark_square.png";
 import watermarkCircle from "../Logos/watermark_circle.png";
 import SaveRecipeFlow from "./SaveRecipeFlow";
@@ -600,7 +601,7 @@ function SuggestionsCarousel({
                     flexShrink: 0,
                   }}
                 >
-                  {state === "loading" ? "loading…" : `${pick.cuisine} · ${pick.effort}`}
+                  {state === "loading" ? "loading…" : `${getCuisineLabel(pick.cuisine)} · ${pick.effort}`}
                 </div>
               )}
             </div>
@@ -1460,7 +1461,7 @@ export function SuggestionDetailView({
                 color: "rgba(35,60,0,0.5)",
               }}
             >
-              {[recipe.cuisine, recipe.effort].filter(Boolean).join(" · ")}
+              {[getCuisineLabel(recipe.cuisine), recipe.effort].filter(Boolean).join(" · ")}
             </div>
 
             {badges.length > 0 && (
