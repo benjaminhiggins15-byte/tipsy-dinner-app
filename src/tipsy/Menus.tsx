@@ -951,7 +951,7 @@ function EditMenuSheet({
           style={{
             width: "100%",
             background: C.btnBlue,
-            color: C.white,
+            color: C.bg,
             border: "none",
             borderRadius: 12,
             padding: "14px",
@@ -1116,7 +1116,7 @@ function EditOccasionSheet({
       style={{
         position: "absolute",
         inset: 0,
-        background: "rgba(4,44,83,0.55)",
+        background: "rgba(35,60,0,0.25)",
         display: "flex",
         alignItems: "flex-end",
         zIndex: 10,
@@ -1128,7 +1128,7 @@ function EditOccasionSheet({
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "100%",
-          background: C.white,
+          background: C.bg,
           borderTopLeftRadius: 20,
           borderTopRightRadius: 20,
           padding: "24px 20px calc(80px + env(safe-area-inset-bottom))",
@@ -1200,7 +1200,7 @@ function EditOccasionSheet({
               width: 56,
               height: 56,
               borderRadius: "50%",
-              background: C.white,
+              background: C.bg,
               border: `1px solid ${C.border}`,
               display: "flex",
               alignItems: "center",
@@ -1253,7 +1253,7 @@ function EditOccasionSheet({
           style={{
             width: "100%",
             background: C.btnBlue,
-            color: C.white,
+            color: C.bg,
             border: "none",
             borderRadius: 12,
             padding: "14px",
@@ -1306,7 +1306,7 @@ function ValMsg({ children }: { children: React.ReactNode }) {
 
 const inputStyleBase: CSSProperties = {
   width: "100%",
-  background: C.white,
+  background: C.bg,
   border: `1px solid ${C.borderLight}`,
   borderRadius: 10,
   padding: "11px 14px",

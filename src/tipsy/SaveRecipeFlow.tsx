@@ -387,14 +387,14 @@ function SaveStep1({ cats, selectedCategory, onSelectCategory, onNew, onYes, onS
           fontFamily: fontSans,
           fontSize: 12,
           fontWeight: 500,
-          textTransform: "lowercase",
+          textTransform: "none",
           letterSpacing: "0.02em",
           cursor: selectedCategory ? "pointer" : "not-allowed",
           opacity: selectedCategory ? 1 : 0.4,
           pointerEvents: selectedCategory ? "auto" : "none",
         }}
       >
-        save recipe for now
+        Save
       </button>
     </>
   );
@@ -629,14 +629,14 @@ function SaveStep2({ occasions, selectedOccasion, setSelectedOccasion, selectedM
             fontFamily: fontSans,
             fontSize: 12,
             fontWeight: 500,
-            textTransform: "lowercase",
+            textTransform: "none",
             letterSpacing: "0.02em",
             cursor: selectedSection ? "pointer" : "not-allowed",
             opacity: selectedSection ? 1 : 0.4,
             pointerEvents: selectedSection ? "auto" : "none",
           }}
         >
-          save recipe for now
+          Save
         </button>
       </div>
     </>

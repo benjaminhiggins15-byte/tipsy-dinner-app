@@ -105,7 +105,7 @@ logos) lives in CLAUDE.md; this file is the per-screen application of it.
 - Sheet: bg #182800, radius 24px top. Handle: 36×4px, cream 15%, centered
 - "Pick a category" label: Inter 500 uppercase cream 35%
 - Category chips: 3-col grid, cream 6% bg, cream 12% border, radius 10px, Inter 500 12px cream 60%. Selected: cream 12% bg, cream 40% border, full cream text
-- Divider 1px cream 6%. "Add to a menu" button: cream 4% bg, cream 12% border, radius 12px, Inter 500 cream 70%, chevron. "save recipe for now" CTA: full-width cream bg, green text, radius 14px, Inter 500 uppercase
+- Divider 1px cream 6%. "Add to a menu" button: cream 4% bg, cream 12% border, radius 12px, Inter 500 cream 70%, chevron. "Save" CTA: full-width cream bg, green text, radius 14px, Inter 500 uppercase
 - NOTE: when a recipe was loaded via chat-from-recipe (has `sourceId`), this sheet instead shows the two-button Update / Save-as-new choice (see CLAUDE.md Update vs Save-as-New).
 
 ## Menus — Occasions

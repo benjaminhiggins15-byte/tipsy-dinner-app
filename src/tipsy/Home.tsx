@@ -17,6 +17,7 @@ import {
   type SavedRecipe,
 } from "./data";
 import { selectDailyChips, getRecentlyShownChipIds, recordShownChipIds } from "./chips";
+import { getCuisineLabel } from "./cuisineLabels";
 import watermarkSquare from "../Logos/watermark_square.png";
 import watermarkCircle from "../Logos/watermark_circle.png";
 import SaveRecipeFlow from "./SaveRecipeFlow";
@@ -483,16 +484,19 @@ function SuggestionsCarousel({
   // history and today's compute failed with nothing to fall back to).
   if (!result.slice) {
     return (
-      <div
-        style={{
-          margin: `14px ${EDGE}px 0`,
-          fontFamily: "Georgia, serif",
-          fontStyle: "italic",
-          fontSize: 13,
-          color: C.textLight,
-        }}
-      >
-        still learning your taste — check back soon.
+      <div>
+        {sectionLabel}
+        <div
+          style={{
+            margin: `14px ${EDGE}px 0`,
+            fontFamily: "Georgia, serif",
+            fontStyle: "italic",
+            fontSize: 13,
+            color: C.textLight,
+          }}
+        >
+          Your suggestions will appear here soon.
+        </div>
       </div>
     );
   }
@@ -600,7 +604,7 @@ function SuggestionsCarousel({
                     flexShrink: 0,
                   }}
                 >
-                  {state === "loading" ? "loading…" : `${pick.cuisine} · ${pick.effort}`}
+                  {state === "loading" ? "loading…" : getCuisineLabel(pick.cuisine)}
                 </div>
               )}
             </div>
@@ -1460,7 +1464,7 @@ export function SuggestionDetailView({
                 color: "rgba(35,60,0,0.5)",
               }}
             >
-              {[recipe.cuisine, recipe.effort].filter(Boolean).join(" · ")}
+              {getCuisineLabel(recipe.cuisine)}
             </div>
 
             {badges.length > 0 && (

@@ -5043,7 +5043,7 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
               padding: "40px 0",
             }}
           >
-            nothing here yet — pour something open.
+            Your list is empty — add ingredients from a recipe, or jot down your own.
           </div>
         )}
         {heldItems.length > 0 && (
