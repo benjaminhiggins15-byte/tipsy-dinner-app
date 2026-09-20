@@ -2892,7 +2892,9 @@ work:**
 - The sibling `C.white`-does-not-exist bug is still live in `Menus.tsx` (5 call
   sites, confirmed via `tsc` at the time of this session) — Item 2 fixed the
   equivalent bug in `MenuInterior.tsx`, but `Menus.tsx`'s own `C` palette object
-  still lacks the key. Not fixed this session.
+  still lacks the key. Not fixed this session. **Status update: fixed 2026-09-20**,
+  along with a matching twin discovered in `Occasions.tsx` — see "First-Impression
+  Polish" below.
 - **Latent data-loss bug in the same neighborhood as Item 3, not addressed:**
   `addRecipeToMenuSection` is called without `await` and without a `.catch` in
   both `RecipePicker.tsx` (`handleRecipeTap`) and `AddYourOwn.tsx` (the
@@ -2909,3 +2911,133 @@ work:**
   `Occasions.tsx` and `Menus.tsx`. Both were kept in sync by hand this session
   (diffed line-for-line before each commit), but nothing structurally prevents a
   future edit to one file from silently drifting from its sibling.
+
+---
+
+## First-Impression Polish (Session, 2026-09-20)
+
+A `fix/first-impression-polish` branch session: seven small, independently
+committed and Vercel-preview-verified copy/visual/wiring fixes, aimed at rough
+edges a new user hits in their first few minutes in the app. Merged to `main`
+(`--no-ff`, merge commit `6b7c76a`) after a pre-merge audit confirmed all 8
+commits on the branch belonged to this session (no stray hitchhiker commit).
+Branch kept around post-merge until production was verified, then deleted (both
+local and `origin`).
+
+**Item 1 — "save recipe for now" → "Save" (`SaveRecipeFlow.tsx`).** Both
+`SaveStep1` and `SaveStep2`'s save CTA read the lowercase, oddly-worded "save
+recipe for now"; changed to a plain "Save" (`textTransform` also changed from
+`lowercase` to `none`, since the CTA is no longer intentionally lowercase
+styled copy). DESIGN_SPEC.md's `SaveRecipeFlow` section updated in the same
+commit.
+
+**Item 2 — Grocery empty-state copy (`App.tsx`'s `GroceryList`).** "nothing
+here yet — pour something open." replaced with "Your list is empty — add
+ingredients from a recipe, or jot down your own." — the wine-bar voice read as
+confusing rather than charming in this specific spot; see CLAUDE.md's
+Microcopy voice note for why this is a deliberate exception to that voice
+elsewhere.
+
+**Item 3 — Cuisine slugs → curated display labels (`Home.tsx`, new
+`cuisineLabels.ts`).** The suggestion tile and `SuggestionDetailView` meta line
+were rendering `pick.cuisine`/`recipe.cuisine` raw off the pool
+(`british_scottish_irish`, `jamaican_caribbean`, etc.) — a client-only
+slug-to-label map (`getCuisineLabel`) now renders curated names ("British
+Isles", "Caribbean", etc.), with a title-case fallback for any slug not yet
+added to the map. Display-only; no pool data touched. The map is
+hand-maintained against `scripts/matrix-pipeline.mjs`'s `CUISINES` list (that
+script can't be imported client-side — it's a Node-only ops CLI that imports
+the service-role Supabase client) and will drift if a cuisine is added to one
+list and not the other — flagged in CLAUDE.md's Standing Cleanup.
+
+**Item 4 — Effort tag relabeled, then removed entirely (`Home.tsx`, new
+`effortLabels.ts`).** First pass added `getEffortLabel` (quick → "Weeknight",
+moderate/project → "Worth the time") to replace the raw `pick.effort`/
+`recipe.effort` slug on both render sites. Investigation before building this
+found the moderate/project split has no real rule behind it (a soft, unguided
+AI judgment call at pool-generation time) — collapsing both into one label was
+deliberate, not a simplification for its own sake. A second pass then dropped
+the effort tag from both render sites entirely (tiles now show cuisine only):
+the collapsed label made most tiles in a slice show the same tag, so it
+carried no real signal and wasn't worth the space. `effortLabels.ts` itself
+was kept, unused, in case a future slice-composition change makes the tag
+meaningful again — flagged as dead code in CLAUDE.md's Standing Cleanup.
+
+**Item 5 — Empty-slice state gets a section label + calmer copy (`Home.tsx`'s
+`SuggestionsCarousel`).** The "no slice at all" render state (`compute-slice`
+ran but produced nothing, no prior history to fall back to) previously
+rendered ONLY the italic message with no section label above it — inconsistent
+with every other render state in the same component. Now renders
+`sectionLabel` (`"Thought starters"`) same as the other four states, and the
+message itself changed from "still learning your taste — check back soon." to
+"Your suggestions will appear here soon." — plainer, and drops the
+personalization framing ("learning your taste") that isn't really true of this
+specific failure mode (compute ran and simply had nothing to assign, not an
+in-progress learning process).
+
+**Item 6 — `C.white` palette bug, third and fourth sightings
+(`Menus.tsx`, `Occasions.tsx`).** Same underlying bug as `MenuInterior.tsx`'s
+fix in the 2026-09-19 session above: a reference to `C.white`, a key that
+doesn't exist on either file's local `C` palette object, silently rendering
+`background: undefined` (transparent) instead of throwing. Fixed 5 call sites
+in `Menus.tsx` and 1 in `Occasions.tsx` (all → `C.bg`) — the exact "still live
+in `Menus.tsx` (5 call sites)" banked item from the prior session, plus a
+previously-unnoticed twin in `Occasions.tsx` found during the same pass. A
+second, unrelated bug fixed in the same commit and file: `Menus.tsx`'s
+`EditOccasionSheet` backdrop used a leftover legacy blue
+(`rgba(4,44,83,0.55)`) instead of the app's green-family backdrop color, fixed
+to `rgba(35,60,0,0.25)` — the same fix already applied to `MenuInterior.tsx`'s
+equivalent backdrop in the prior session. Verified clean via `grep -n "C\.white"`
+across `Menus.tsx`/`Occasions.tsx`/`MenuInterior.tsx` after the fix (no
+matches) and via `tsc`.
+
+**Item 7 — Dead "Contact us" row wired to `mailto:` (`Profile.tsx`).** The
+Support section's "Contact us" `Row` had no `onClick` at all — tapping it did
+nothing. Wired to
+`mailto:info@tipsydinner.com?subject=Tipsy%20Dinner%20%E2%80%94%20question`
+(URL-encoded "Tipsy Dinner — question") via `window.location.href`, matching
+the existing `Row` `onClick` pattern used
+elsewhere on the same screen (e.g. Sign Out). Deliberately a stopgap, not a
+build: no in-app compose UI, no delivery confirmation, breaks silently on a
+device with no configured mail client. An in-app support form is logged as a
+possible post-launch upgrade, not started.
+
+**Closed by decision — Fraunces/Lazydog non-loading (no code change).**
+Investigated as part of this session's doc-accuracy pass, not fixed:
+`src/routes/__root.tsx` only loads the Inter Google Fonts stylesheet, never a
+Fraunces one, so every `fontFamily: "Fraunces, ..."` reference app-wide falls
+back to a generic serif — confirmed already known (CLAUDE.md's pre-existing
+Standing Cleanup bullet). Newly confirmed this session: Lazydog has the exact
+same problem one level worse — `src/fonts/lazydog.ttf` exists in the repo but
+is never wired via `@font-face` anywhere, AND several screens that this doc's
+Fonts section says should use Lazydog (e.g. `AddYourOwn.tsx`, `NewCategory.tsx`)
+actually hard-code `Inter` for their own local `fontDisplay` constant instead —
+so the gap here is doc-vs-code drift, not just a missing font file. Decision:
+log both as a deliberate, closed decision (not an open bug) rather than fix
+this session — see the Fonts / Standing Cleanup entries in CLAUDE.md for the
+known fix path (add a Fraunces `<link>` alongside the existing Inter one; add a
+`@font-face` block for the Lazydog `.ttf`) whenever a future session picks
+this up.
+
+**Banked follow-ups, not addressed this session:**
+- ⭐ **HIGH** — the `mailto:` Contact-us link (Item 7) is a stopgap: no delivery
+  confirmation, no in-app history, silently does nothing on a device with no
+  configured mail client.
+- ⭐ **HIGH** — `effortLabels.ts` (Item 4) is dead code in practice: written,
+  exported, and imported nowhere after the second pass dropped the effort tag
+  from both render sites. Kept deliberately for possible future reuse rather
+  than deleted.
+- `cuisineLabels.ts` (Item 3) is a hand-maintained map that will silently drift
+  from `scripts/matrix-pipeline.mjs`'s `CUISINES` list if either is edited
+  without the other — no shared import is possible (the pipeline script is
+  Node-only, service-role-gated).
+- Fraunces/Lazydog non-loading (see "Closed by decision" above) — logged as a
+  deliberate decision, not a discovered-and-ignored bug, but still unfixed code.
+- The doc-hygiene pass that produced this section surfaced (but did not fix)
+  further pre-existing DESIGN_SPEC.md/Home.tsx drift outside this session's
+  scope: the suggestions carousel's section label reads "Today's suggestions"
+  in DESIGN_SPEC.md but "Thought starters" in the actual code (renamed
+  2026-08-26, undocumented at the time), and the carousel's loading copy is
+  similarly out of sync between the two docs. Not touched this session — flagged
+  for a future doc-accuracy pass, not fixed here to avoid scope creep beyond the
+  first-impression-polish items above.

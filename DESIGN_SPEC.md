@@ -182,13 +182,27 @@ as above).**
   24px, 2-line clamp, bottom-anchored in the tile, with a small uppercase meta line
   below it ("{cuisine} · {effort}", Inter 500 10px, `rgba(35,60,0,0.45)`). Section
   label above the row: "Today's suggestions" (Inter 500 uppercase 13px).
+
+  **Superseded 2026-09-20** — the meta line is now cuisine-only, not
+  "{cuisine} · {effort}". Two client-side display maps were added: `cuisineLabels.ts`
+  (raw pool slug → curated label, e.g. `british_scottish_irish` → "British Isles";
+  unmapped slugs fall back to a title-cased render, never a raw slug) and
+  `effortLabels.ts` (quick → "Weeknight", moderate/project → "Worth the time" — the
+  moderate/project boundary turned out to be an unguided AI judgment call at
+  generation time, not a real rule, so collapsing it was deliberate). The effort tag
+  was relabeled first, then dropped entirely from both the tile and
+  `SuggestionDetailView` for being low-signal (most slices showed the same label on
+  every tile). `effortLabels.ts` is kept in the repo, unused, for possible future
+  reuse — see "First-Impression Polish" in FEATURE_SPECS.md.
   - **Five render states:** a 3-tile skeleton shimmer with "finding today's
     recipes…" (Georgia italic, muted) while the slice is computing; the populated
     carousel (above) once picks resolve; "your suggestions are refreshing — check
     back soon" when a slice row exists but predates the `pick_details` backfill (no
-    backfill, by design); "still learning your taste — check back soon" when
-    compute ran but produced no slice at all; and nothing rendered on no-session or
-    an unexpected client error (both collapse to the same silent null case).
+    backfill, by design); the section label plus "Your suggestions will appear here
+    soon." (**Superseded 2026-09-20**, was "still learning your taste — check back
+    soon" with no section label) when compute ran but produced no slice at all; and
+    nothing rendered on no-session or an unexpected client error (both collapse to
+    the same silent null case).
   - **Tapping a tile** fetches the full recipe via the `get_suggested_recipe` RPC
     (loading + a gentle inline error on that tile only, no crash) and opens a detail
     view that mirrors the received-recipe view's presentation — full writeup in
@@ -254,7 +268,10 @@ gained a fourth section; final current state:
 - Tapping the header opens one edit sheet (same chrome as the Account/Kitchen field-edit sheets below) with two labeled inputs, Name and Username, and a single Save button — see "Account Identity" in FEATURE_SPECS.md for the save/validation behavior.
 - Account section: starts at Email (the old separate Name and handle rows live in the header now, not here).
 - Your Kitchen section: Your palate / Inspiration / Constraints rows, each row's subtitle truncated to 30 chars with an ellipsis.
-- Support section: Sign Out, Contact us.
+- Support section: Sign Out, Contact us. **Superseded 2026-09-20** — "Contact us"
+  was previously a dead row with no `onClick`; it now opens
+  `mailto:info@tipsydinner.com` with a prefilled subject. Stopgap, not an in-app
+  form — see "First-Impression Polish" in FEATURE_SPECS.md.
 - Field-edit sheets (opened by tapping a row): back arrow + field label (Inter 700 uppercase) centered header, single input or textarea (cream-on-light input treatment: `rgba(35,60,0,0.05)` bg, `rgba(35,60,0,0.12)` border, radius 12px), full-width dark-green Save pill at the bottom.
 
 ## Onboarding — Conversational Flow

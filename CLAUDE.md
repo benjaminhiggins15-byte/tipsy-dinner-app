@@ -5,7 +5,7 @@ what-shipped-when live in the current-state doc — do NOT duplicate them here.
 Detailed per-screen visual spec lives in DESIGN_SPEC.md — consult it when building
 or restyling a screen.
 
-Last updated: July 2026
+Last updated: September 2026
 
 ---
 
@@ -91,8 +91,15 @@ pointer named — do not duplicate it here.
 Full per-screen detail in DESIGN_SPEC.md. The core:
 
 **Fonts**
-- **Lazydog** — `src/fonts/lazydog.ttf`, `@font-face` as `'Lazydog'`. All recipe titles, screen/section headings. Always `text-transform: uppercase`. Display font for the whole app.
-- **Fraunces italic** (Google) — AI responses, recipe descriptions, taglines, margin notes, empty-state copy, form description fields.
+- **Lazydog** — intended as the display font for recipe titles/screen headings
+  (always `text-transform: uppercase`), but there is no `@font-face` for it anywhere
+  in the codebase. `src/fonts/lazydog.ttf` exists on disk but is never loaded; every
+  `fontFamily: "Lazydog, ..."` reference (a handful, in `Home.tsx` only — several
+  other screens that should be using it per this doc use `Inter` instead) silently
+  falls back to its fallback family. **Closed by decision, 2026-09-20** — logged and
+  intentionally not fixed this session; see the Standing Cleanup bullet below for the
+  known fix path.
+- **Fraunces italic** (Google) — AI responses, recipe descriptions, taglines, margin notes, empty-state copy, form description fields. Same non-loading problem as Lazydog: `src/routes/__root.tsx` only preconnects/loads the Inter Google Fonts stylesheet, never Fraunces, so every `fontFamily: "Fraunces, ..."` reference app-wide falls back to a generic serif. **Closed by decision, 2026-09-20** — logged, not fixed; see Standing Cleanup.
 - **Inter** (Google, 400/500) — body copy, ingredient names, steps, nav labels, buttons, metadata, quantities.
 - **Playwrite US Modern** (Google) — logo assets ONLY, never in app UI.
 
@@ -296,9 +303,13 @@ different purposes (structured utility vs. conversational voice); mixing risks b
 contracts.
 
 **Microcopy voice:** "pour a glass — what are we cooking?" (placeholder); "building
-the recipe…" / "uncorking…" / "tasting…" (loading); "filed away." (save); "nothing
-here yet — pour something open." (empty); "Looking good." (preview); "what's on the
-menu?" (Build hero).
+the recipe…" / "uncorking…" / "tasting…" (loading); "filed away." (save); "Looking
+good." (preview); "what's on the menu?" (Build hero). The grocery-list empty state
+is a deliberate exception to this playful wine-bar voice — **updated 2026-09-20**,
+it now reads "Your list is empty — add ingredients from a recipe, or jot down your
+own." (was "nothing here yet — pour something open.", flagged as confusing rather
+than charming and replaced with plain, direct wording). See "First-Impression
+Polish" in FEATURE_SPECS.md.
 
 ---
 
@@ -522,7 +533,7 @@ code defects).
 - Reusable loading-spinner / "Updating…" pattern from the grocery work is a good candidate to reuse wherever async waits show poor feedback (e.g. Occasions/Menus load flash).
 - **`deleteSavedRecipe` swallows errors.** On failure it logs to `console.error` and returns — it never throws or returns a status. Its one caller (`AddYourOwn.tsx`) doesn't check a return value either, so a failed delete still closes the confirm modal and navigates away as if it had succeeded. Known, deliberately not fixed; out of scope if encountered incidentally — only fix it as its own deliberate task.
 - Account-to-account sharing's own standing cleanup/watch items (the send-sheet label, cache-clear/cook_time gaps, receiving aesthetic passes, etc. — the receive branch itself merged 2026-08-23, no longer long-lived) live in their respective FEATURE_SPECS.md build sections, not here.
-- **Fraunces italic renders as generic serif app-wide — the font never actually loads.** Known, not yet fixed; every "Fraunces italic" instruction elsewhere in this doc is aspirational until this is addressed.
+- **Fraunces italic renders as generic serif app-wide, and Lazydog renders as its plain fallback — neither font's stylesheet/`@font-face` is actually wired.** Closed by decision 2026-09-20, not a bug to re-discover: known fix path is adding a Fraunces `<link>` next to the existing Inter one in `src/routes/__root.tsx`, and a `@font-face` block for `src/fonts/lazydog.ttf`; out of scope until a session deliberately picks it up. Every "Fraunces italic"/"Lazydog" instruction elsewhere in this doc is aspirational until then. See Fonts in Design System.
 - **`get_sender_names`/`search_profiles`/`get_my_connections` (all `SECURITY DEFINER`) lack the explicit `anon` revoke that `get_suggested_recipe` added** (see Suggested Recipes — Layer 4 in FEATURE_SPECS.md for the underlying default-privilege gap) — `anon` is likely still able to call them at the grant layer, neutralized today only by their own internal `auth.uid()`-null guards. Not yet audited/fixed.
 - **FIXED 2026-09-06:** sign-out now resets `activeTab`/`tabStacks` — previously `activeTab` survived an account switch within the same tab (only exit point is Profile's Sign Out row) and could land a freshly-onboarded new account on the Profile tab instead of Home.
 - **Banked from the Session 2 slice cost-down work (2026-09-13), flagged not fixed:**
@@ -539,7 +550,13 @@ code defects).
   Full detail: Repo Hygiene — Branch Audit & Migration Reconciliation in FEATURE_SPECS.md.
 - **Banked from the Menus & Recipe-Delete Hardening session (2026-09-19), flagged not fixed:**
   - `MenuInterior.tsx` has two more un-awaited-`Promise` sites (~lines 323/340) — `findCustomCategory(recipe.category)` used without `await`, same async/await failure family as this session's menu-save-race root cause.
-  - The sibling `C.white`-undefined-palette bug (fixed in `MenuInterior.tsx` this session) is still live in `Menus.tsx` (5 call sites, confirmed via `tsc`).
+  - **FIXED 2026-09-20:** the sibling `C.white`-undefined-palette bug was still live in `Menus.tsx` (5 call sites) and, discovered the same pass, in `Occasions.tsx` too (1 call site) — both now use `C.bg`, plus an off-blue backdrop fixed alongside in `Menus.tsx`. Drift risk now spans a THIRD file beyond the original `MenuInterior.tsx` fix; the underlying copy-paste-drift pattern below is unchanged. Full detail: First-Impression Polish (Session, 2026-09-20) in FEATURE_SPECS.md.
   - `addRecipeToMenuSection` is fired without `await`/`catch` in both `RecipePicker.tsx` and `AddYourOwn.tsx` — a latent data-loss bug in the same neighborhood as this session's recipe-delete no-op fix, on the add path instead of the delete path.
   - Copy-paste-drift risk: this session hand-synced two more duplicated-not-shared structures (`EditMenuSheet`'s delete/confirm pattern between `MenuInterior.tsx`/`Menus.tsx`, and `ICON_OPTIONS` between `Occasions.tsx`/`Menus.tsx`) — nothing structurally prevents future drift.
   Full detail: Menus & Recipe-Delete Hardening (Session, 2026-09-19) in FEATURE_SPECS.md.
+- **Banked from the First-Impression Polish session (2026-09-20), flagged not fixed — two marked HIGH priority (⭐):**
+  - ⭐ Contact us is a `mailto:` stopgap, not an in-app support form — no delivery confirmation, no in-app history, breaks on devices with no configured mail client.
+  - ⭐ `effortLabels.ts` is now dead code in practice (imported nowhere) after the effort tag was dropped from both suggestion-tile render sites — kept deliberately for possible future reuse, not deleted.
+  - `cuisineLabels.ts`'s curated label map is hand-maintained and will silently drift from `scripts/matrix-pipeline.mjs`'s `CUISINES` list if a cuisine is ever added to one and not the other (the pipeline script can't be imported client-side, so this can't be a shared import — see the file's own header comment).
+  - Neither Fraunces nor Lazydog's non-loading was actually fixed this session — see the Fonts / Standing Cleanup entries above; only newly confirmed as a deliberate, logged decision rather than an open unknown.
+  Full detail: First-Impression Polish (Session, 2026-09-20) in FEATURE_SPECS.md.
