@@ -1111,7 +1111,7 @@ function ValMsg({ children }: { children: React.ReactNode }) {
 
 const inputStyleBase: CSSProperties = {
   width: "100%",
-  background: C.white,
+  background: C.bg,
   border: `1px solid ${C.borderLight}`,
   borderRadius: 10,
   padding: "11px 14px",
