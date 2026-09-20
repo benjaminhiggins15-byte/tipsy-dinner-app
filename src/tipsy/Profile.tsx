@@ -182,7 +182,12 @@ export default function Profile({ back, openEdit, isTabRoot = false, onSignOut, 
 
         <div style={sectionLabel}>Support</div>
         <Row title="Sign Out" onClick={handleSignOut} />
-        <Row title="Contact us" />
+        <Row
+          title="Contact us"
+          onClick={() => {
+            window.location.href = "mailto:info@tipsydinner.com?subject=Tipsy%20Dinner%20%E2%80%94%20question";
+          }}
+        />
       </div>
     </div>
   );
