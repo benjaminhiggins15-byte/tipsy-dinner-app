@@ -2,17 +2,104 @@
 
 Detailed visual spec for each screen. Not loaded every session — consult this when
 building or restyling a specific screen. The design system (fonts, colors, gradient,
-logos) lives in CLAUDE.md; this file is the per-screen application of it.
+logos) lives in this file (relocated from CLAUDE.md, 2026-09-21) alongside the
+per-screen application of it.
 
 ---
 
-## Design System Reference (see CLAUDE.md for full detail)
+## Design System Reference (see Design System section below for full detail)
 
 - **Display font:** Lazydog, always uppercase — recipe titles, screen/section headings
 - **Serif italic:** Fraunces italic — AI responses, descriptions, taglines, margin notes, empty states
 - **Body:** Inter (400 / 500) — body copy, ingredients, steps, nav, buttons, meta, quantities
 - **Colors:** `--green #233C00` (bg), `--green-deep #182800` (nav/sheets), `--green-mid #2E4E08` (cards), `--blue #1E3A42` (CTAs/active), `--blue-mid #2A4E5A` (borders/accents), `--cream #FEE7C0` (text), `--cream-dim rgba(254,231,192,0.55)`
 - **Gradient:** full-bleed `linear-gradient(180deg, #3a6010 0%, #2E4E08 35%, #233C00 100%)` behind every screen except splash, content above at z-index 1
+
+---
+
+## Design System
+
+Full per-screen detail in DESIGN_SPEC.md. The core:
+
+**Fonts**
+- **Lazydog** — intended as the display font for recipe titles/screen headings
+  (always `text-transform: uppercase`), but there is no `@font-face` for it anywhere
+  in the codebase. `src/fonts/lazydog.ttf` exists on disk but is never loaded; every
+  `fontFamily: "Lazydog, ..."` reference (a handful, in `Home.tsx` only — several
+  other screens that should be using it per this doc use `Inter` instead) silently
+  falls back to its fallback family. **Closed by decision, 2026-09-20** — logged and
+  intentionally not fixed this session; see the Standing Cleanup bullet in CLAUDE.md
+  for the known fix path.
+- **Fraunces italic** (Google) — AI responses, recipe descriptions, taglines, margin notes, empty-state copy, form description fields. Same non-loading problem as Lazydog: `src/routes/__root.tsx` only preconnects/loads the Inter Google Fonts stylesheet, never Fraunces, so every `fontFamily: "Fraunces, ..."` reference app-wide falls back to a generic serif. **Closed by decision, 2026-09-20** — logged, not fixed; see Standing Cleanup in CLAUDE.md.
+- **Inter** (Google, 400/500) — body copy, ingredient names, steps, nav labels, buttons, metadata, quantities.
+- **Playwrite US Modern** (Google) — logo assets ONLY, never in app UI.
+
+**Color palette**
+```css
+--green:       #233C00   /* app background — all screens */
+--green-deep:  #182800   /* nav bar, input bar */
+--green-mid:   #2E4E08   /* cards, recipe rows, section headers */
+--blue:        #1E3A42   /* CTA buttons, active states */
+--blue-mid:    #2A4E5A   /* borders, accents, secondary elements */
+--cream:       #FEE7C0   /* all text on green, hero moments */
+--cream-dim:   rgba(254,231,192,0.55)  /* secondary text, placeholders, muted labels */
+```
+Rules: cream on green for text directly on background; user bubbles cream bg + green text; AI text cream Fraunces italic on green (no bubble); CTAs cream bg + green text; no decorative red/orange/coral/terracotta — `#B85C5C` is the sole exception, reserved for error and destructive states (delete/remove actions, inline error text) and used in ~19 locations across 4 files (App.tsx, Occasions.tsx, NewCategory.tsx, Menus.tsx); never repurpose it for anything decorative. Bottom sheets (delete-confirm modals, the Cook History log/edit sheet) are light `#FAF7F2`, not a green — confirmed by grep, zero `#182800` bottom sheets exist anywhere in the codebase. Same doc-hygiene family, re-confirmed 2026-07-26: `#182800` doesn't appear anywhere in `src/` at all, not just in bottom sheets, and the "Universal gradient" block immediately below is likewise absent from every file — zero grep matches for its `#3a6010`/`180deg` string. Large parts of the app (`BottomTabBar`, `Occasions.tsx`, and others) now render on a light `#FAF7F2` background instead of the green gradient this doc describes. Treat color/background claims in this doc as unverified until grepped, not just the two flagged here.
+
+**Universal gradient** — behind every screen except splash:
+```css
+background: linear-gradient(180deg, #3a6010 0%, #2E4E08 35%, #233C00 100%);
+height: 420–480px; position: absolute; top:0; left:0; right:0;
+z-index: 0; pointer-events: none;
+```
+Content sits above at z-index 1. Gradient fades into base green — no hard edges.
+**STALE, confirmed by grep 2026-07-26: this exact CSS string does not appear anywhere
+in `src/`.** Treat as historical intent, not current fact, until a screen-by-screen
+re-audit replaces it — see the doc-hygiene note in the Color palette section above.
+
+**Logo assets** (`src/Logos/`) — path is case-sensitive on Linux/Vercel:
+- `Full_logo.png` — full "tipsy DINNER" wordmark. Splash screen only.
+- `watermark_square.png` — square tD monogram. Mini player only (Build removed it this session).
+- `watermark_circle.png` — circular tD monogram. Home header, top-right of greeting (moved off Build this session).
+```js
+import tDSquare from '../Logos/watermark_square.png'
+import fullLogo from '../Logos/Full_logo.png'
+```
+
+**Navigation** — four tabs, always visible, bottom of every screen: Build, Recipes,
+Grocery, Profile (`TAB_ORDER`, App.tsx ~line 570; icons `IconChefHat`/`IconBook`/
+`IconShoppingCart`/`IconUser` in `BottomTabBar`, App.tsx ~1694–1698). Nav bg
+`#FAF7F2` (this doc previously and incorrectly said `#182800`). Active = dark green
+`#233C00` icon + label + small `#233C00` dot below; inactive = `#233C00` at 25%
+opacity (previously and incorrectly documented here as cream/cream-25% — the nav bar
+sits on a light background, not green). All transitions slide left/right. Back
+arrows are icon-only but there is no systematic/stack-depth-driven mechanism behind
+them — every screen hardcodes its own; `Profile.tsx` is the sole screen that actually
+branches on the `isTabRoot` prop to decide whether to render one, even though
+`isTabRoot` is threaded to several other screens unused.
+
+Menus is NOT a nav tab — reached via an `IconLayoutList` icon on the
+Recipes/Categories header (App.tsx ~1847–1869) that pushes to Occasions. Grocery
+*was* reached via a cart icon in that same header slot; as of 2026-07-26 the two were
+swapped — Grocery moved onto the bottom nav (replacing Menus' old tab slot) and Menus
+took over the header icon slot (commit `254e0b5`). There is no reserved 5th slot in
+the current tab bar layout; a fifth tab remains a product idea for a future social
+feature, not a structural placeholder.
+
+**Superseded 2026-08-09**: that fifth tab now exists — `Home` (`IconHome`), added for
+the account-to-account sharing receiving surface, appended LAST in `TAB_ORDER`
+deliberately (inserting it elsewhere in the array disturbs `ScreenStage`). Moving it
+to a more prominent position in the bar is a future-session product decision, not a
+structural blocker. Full detail: Account-to-Account Sharing — Receiving in
+FEATURE_SPECS.md.
+
+**Superseded 2026-08-11**: `Home` moved from last to FIRST — `TAB_ORDER` is now
+`home, build, recipes, grocery, profile`; app launches on Home (`activeTab` inits
+`"home"`). `BottomTabBar`'s hardcoded icon array was reordered to match by hand. TD
+circle logo moved off Build's header onto Home's (top-right of greeting); Build's
+header now shows only its right-side action button.
+
+*(Relocated from CLAUDE.md, 2026-09-21 doc-reorg pass.)*
 
 ---
 

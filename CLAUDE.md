@@ -24,25 +24,25 @@ One line per invariant. Full detail is stated in full exactly once, at the
 pointer named — do not duplicate it here.
 
 - **`normalizeStep()`** — every step reader routes through it (re-count callers if precision matters; do not trust a documented number — it has drifted before); legacy plain-string steps stay supported forever. Full detail: Recipe Step Titles in FEATURE_SPECS.md.
-- **`sourceId`/`sourceTitle` always move together** — set, carried, cleared, and re-anchored together; never independently. Full detail: Update vs Save-as-New below.
-- **Anchor severs on title mismatch** — case-insensitive, trimmed, exact-match only; deliberately biased toward severing, not fuzzy matching. Full detail: Update vs Save-as-New below.
+- **`sourceId`/`sourceTitle` always move together** — set, carried, cleared, and re-anchored together; never independently. Full detail: Update vs Save-as-New in CLAUDE.md (below).
+- **Anchor severs on title mismatch** — case-insensitive, trimmed, exact-match only; deliberately biased toward severing, not fuzzy matching. Full detail: Update vs Save-as-New in CLAUDE.md (below).
 - **`CropRect` is fractional (0–1), not absolute pixels** — never convert it to absolute pixel coordinates. Full detail: Recipe Photos in FEATURE_SPECS.md.
 - **Photo path separation** — live photo `{userId}/{recipeId}.jpg` vs. share copy `{userId}/share-{token}.jpg`; no mutating function may ever construct a `share-`-prefixed filename. Full detail: Recipe Photos in FEATURE_SPECS.md.
 - **`photo_version` is a persisted cache-buster** — never replace with a render-time value like `Date.now()`. Full detail: Recipe Photos in FEATURE_SPECS.md.
 - **Cook History reads from local `cookEvents` state**, not the `recipe` prop — otherwise live updates regress to stale data. Full detail: Cook History in FEATURE_SPECS.md.
 - **Public bucket ≠ SDK access permitted** — a public CDN fetch bypasses RLS; the storage SDK always enforces it regardless of the bucket's public flag. Full detail: Recipe Photos in FEATURE_SPECS.md.
-- **`updateSavedRecipe` is a known trouble function** — shared by the chat-edit Update path and AddYourOwn; test both whenever it changes. Full detail: Update vs Save-as-New below.
+- **`updateSavedRecipe` is a known trouble function** — shared by the chat-edit Update path and AddYourOwn; test both whenever it changes. Full detail: Update vs Save-as-New in CLAUDE.md (below).
 - **`deleteSavedRecipe` returns `boolean`, not `void`** — callers MUST check it; a Postgres `DELETE` whose `WHERE` clause matches 0 rows returns success with no thrown error, so an unchecked call cannot distinguish a real delete from a silent no-op. Full detail: Menus & Recipe-Delete Hardening (Session, 2026-09-19) in FEATURE_SPECS.md.
-- **`paddingBottom: 64` is hard-coded nav-bar clearance** — any new full-height bottom sheet must use `position: fixed; bottom: 64`, not `absolute; inset: 0`. Full detail: Architecture / SSR below.
+- **`paddingBottom: 64` is hard-coded nav-bar clearance** — any new full-height bottom sheet must use `position: fixed; bottom: 64`, not `absolute; inset: 0`. Full detail: Architecture / SSR in CLAUDE.md (below).
 - **Decode a downscaled preview for display, not the raw file** — `createImageBitmap({ resizeWidth: 1200 })`; a raw-file decode cost ~4.9s. Full detail: Recipe Photos in FEATURE_SPECS.md.
 - **Tailwind Preflight's `img { max-width: 100% }` clamps rendered width** — fix with inline `maxWidth: "none"` on that element only. Full detail: Recipe Photos in FEATURE_SPECS.md.
-- **Public share route is snapshot-first with a live fallback, and must stay chrome-free.** Full detail: Architecture / SSR below.
-- **Ingredients are free-text strings, not structured `{amount, unit}`** — the AI normalizes on demand where structure is needed. Full detail: Data Layer below.
+- **Public share route is snapshot-first with a live fallback, and must stay chrome-free.** Full detail: Architecture / SSR in CLAUDE.md (below).
+- **Ingredients are free-text strings, not structured `{amount, unit}`** — the AI normalizes on demand where structure is needed. Full detail: Data Layer in CLAUDE.md (below).
 - **`clearRecipeCache` always drops `'__all__'`** — the View-all cache entry is invalidated on every mutation alongside the per-category key; never wire all-view invalidation at call sites. Full detail: View All Recipes in FEATURE_SPECS.md.
 - **`buildSystemPrompt()` conversational-prompt behaviors are settled and hard-won** — culinary posture, cuisine-direction discovery, and no-superlatives voice. Reword only deliberately; treat like the Session-3 formatting house style. Full detail: Conversational System Prompt — Elevation & Discovery in FEATURE_SPECS.md.
 - **Handle uniqueness is a hard DB-level guarantee, not app-enforced** — case-insensitive via the `profiles_handle_lower_idx` unique index on `lower(handle)`. Full detail: Account Identity in FEATURE_SPECS.md.
 - **`display_name` is the single source of truth for a user's name; handles are derived silently, never prompted** — there is no handle-capture screen anywhere in the app. Full detail: Account Identity in FEATURE_SPECS.md.
-- **The `profileInitialized` gate is shared infrastructure** — identity/signup logic (display_name backfill, silent handle derivation) is wired inside this existing gated block, not a second listener; do not disturb it when touching either. Full detail: Authentication below.
+- **The `profileInitialized` gate is shared infrastructure** — identity/signup logic (display_name backfill, silent handle derivation) is wired inside this existing gated block, not a second listener; do not disturb it when touching either. Full detail: Authentication in CLAUDE.md (below).
 - **`recipe_sends` is two-party with a status-only-update trigger** — a `BEFORE UPDATE` trigger (not RLS — Postgres RLS can't restrict which columns change) rejects any recipient write that touches the snapshot, `sender_id`, `recipient_id`, `photo_url`, or `note`; verified by violation testing. Full detail: Account-to-Account Sharing — Build 2 in FEATURE_SPECS.md.
 - **`connections`/`notifications` have no client INSERT policy — deny-all by design** — rows must be created through a trusted server-side path at send/save time, never a direct client insert. Full detail: Account-to-Account Sharing — Build 2 in FEATURE_SPECS.md.
 - **`send_recipe_to_friend` is the trusted write path for sends** — a `SECURITY DEFINER` Postgres function is the ONLY way `recipe_sends`/`notifications` rows get created for a send; it bypasses RLS on write, so its own internal guards ARE the security boundary. Do NOT add a client-side insert path to these tables; do NOT weaken the in-function guards. Full detail: Account-to-Account Sharing — Build 3 in FEATURE_SPECS.md.
@@ -67,6 +67,11 @@ pointer named — do not duplicate it here.
 - **`profiles.allergies` structured Big-9 gate takes merge priority over the unchanged prose-based `deriveDietaryGates`, with a deterministic backstop for `unparsed:true` records** — fail-closed pool columns, suggested-recipes-only enforcement. Full detail: Structured Hard-Allergy Capture & Gate in FEATURE_SPECS.md.
 - **Build/cook-chat is separately hardened against hard allergens** — a prompt-level salience layer plus a deterministic `scanRecipeDraftForBig9` backstop (title+description+ingredients+step text) at the parse choke-point, bounded 3-attempt regenerate, null-profile fail-closed to all-nine. Full detail: Build/Cook-Chat Allergy Hardening in FEATURE_SPECS.md.
 - **`compute-slice` Stage 2's narrowed-to-60 + 6-field-slimmed AI payload is a cost-down change with zero safety surface** — narrowing is a strict subset of the already Stage-1-gated candidate set (cannot introduce an ungated candidate), and dropping the 9 dietary boolean columns from what the AI sees changes nothing enforcement-wise, since the AI was never the enforcement layer for them — Stage-1 SQL + `validIds` filtering still do all real gating. Never re-add the booleans to this payload "for the AI to check." Full detail: Suggested Recipes — Layer 3 (assignment runtime) in FEATURE_SPECS.md.
+- **Design System detail (fonts, palette, nav, logo assets) now lives in DESIGN_SPEC.md, not CLAUDE.md** — CLAUDE.md no longer carries the app-wide design-system summary. Full detail: Design System in DESIGN_SPEC.md.
+- **AI Layer's conversational-behavior detail (system-prompt building, recipe-parsing consolidation, recipe context injection, formatting house style, microcopy voice) moved out of CLAUDE.md's AI Layer section** — the model/API/streaming facts and the `ai-chat`/grocery-enrichment boundary warnings stay in CLAUDE.md. Full detail: AI Layer — Conversational Behavior in FEATURE_SPECS.md.
+- **Build Conversation Persistence moved to FEATURE_SPECS.md** — Build state (`buildMessages`, `buildConversationHistory`, `buildCurrentRecipe`, etc.) lives at App level, not in Cook, and survives tab switches/nav/save. Full detail: Build Conversation Persistence in FEATURE_SPECS.md.
+- **Chat from Recipe Card moved to FEATURE_SPECS.md** — `transferToRecipeChat` is the only sanctioned path from a saved Recipe Card into Build; RecipeCard has no closure access to App-level setters. Full detail: Chat from Recipe Card in FEATURE_SPECS.md.
+- **Most Standing Cleanup / Watch Items bullets moved to FEATURE_SPECS.md** — only the genuinely universal ones (schema-is-dashboard-only, the TS-error-count-drift caution, the loading-spinner-reuse note, the Fraunces/Lazydog non-loading fact, and the A2A-sharing-items-live-elsewhere pointer) remain in CLAUDE.md. Full detail: Standing Cleanup — Relocated Items in FEATURE_SPECS.md.
 
 ---
 
@@ -83,90 +88,6 @@ pointer named — do not duplicate it here.
 **Local dev:** `bun dev` from `~/Developer/tipsy-dinner-app` → localhost:8080 or 8081
 **GitHub:** github.com/benjaminhiggins15-byte/tipsy-dinner-app
 **Deployment:** Vercel, live at tipsydinner.com. Every push to main auto-deploys.
-
----
-
-## Design System
-
-Full per-screen detail in DESIGN_SPEC.md. The core:
-
-**Fonts**
-- **Lazydog** — intended as the display font for recipe titles/screen headings
-  (always `text-transform: uppercase`), but there is no `@font-face` for it anywhere
-  in the codebase. `src/fonts/lazydog.ttf` exists on disk but is never loaded; every
-  `fontFamily: "Lazydog, ..."` reference (a handful, in `Home.tsx` only — several
-  other screens that should be using it per this doc use `Inter` instead) silently
-  falls back to its fallback family. **Closed by decision, 2026-09-20** — logged and
-  intentionally not fixed this session; see the Standing Cleanup bullet below for the
-  known fix path.
-- **Fraunces italic** (Google) — AI responses, recipe descriptions, taglines, margin notes, empty-state copy, form description fields. Same non-loading problem as Lazydog: `src/routes/__root.tsx` only preconnects/loads the Inter Google Fonts stylesheet, never Fraunces, so every `fontFamily: "Fraunces, ..."` reference app-wide falls back to a generic serif. **Closed by decision, 2026-09-20** — logged, not fixed; see Standing Cleanup.
-- **Inter** (Google, 400/500) — body copy, ingredient names, steps, nav labels, buttons, metadata, quantities.
-- **Playwrite US Modern** (Google) — logo assets ONLY, never in app UI.
-
-**Color palette**
-```css
---green:       #233C00   /* app background — all screens */
---green-deep:  #182800   /* nav bar, input bar */
---green-mid:   #2E4E08   /* cards, recipe rows, section headers */
---blue:        #1E3A42   /* CTA buttons, active states */
---blue-mid:    #2A4E5A   /* borders, accents, secondary elements */
---cream:       #FEE7C0   /* all text on green, hero moments */
---cream-dim:   rgba(254,231,192,0.55)  /* secondary text, placeholders, muted labels */
-```
-Rules: cream on green for text directly on background; user bubbles cream bg + green text; AI text cream Fraunces italic on green (no bubble); CTAs cream bg + green text; no decorative red/orange/coral/terracotta — `#B85C5C` is the sole exception, reserved for error and destructive states (delete/remove actions, inline error text) and used in ~19 locations across 4 files (App.tsx, Occasions.tsx, NewCategory.tsx, Menus.tsx); never repurpose it for anything decorative. Bottom sheets (delete-confirm modals, the Cook History log/edit sheet) are light `#FAF7F2`, not a green — confirmed by grep, zero `#182800` bottom sheets exist anywhere in the codebase. Same doc-hygiene family, re-confirmed 2026-07-26: `#182800` doesn't appear anywhere in `src/` at all, not just in bottom sheets, and the "Universal gradient" block immediately below is likewise absent from every file — zero grep matches for its `#3a6010`/`180deg` string. Large parts of the app (`BottomTabBar`, `Occasions.tsx`, and others) now render on a light `#FAF7F2` background instead of the green gradient this doc describes. Treat color/background claims in this doc as unverified until grepped, not just the two flagged here.
-
-**Universal gradient** — behind every screen except splash:
-```css
-background: linear-gradient(180deg, #3a6010 0%, #2E4E08 35%, #233C00 100%);
-height: 420–480px; position: absolute; top:0; left:0; right:0;
-z-index: 0; pointer-events: none;
-```
-Content sits above at z-index 1. Gradient fades into base green — no hard edges.
-**STALE, confirmed by grep 2026-07-26: this exact CSS string does not appear anywhere
-in `src/`.** Treat as historical intent, not current fact, until a screen-by-screen
-re-audit replaces it — see the doc-hygiene note in the Color palette section above.
-
-**Logo assets** (`src/Logos/`) — path is case-sensitive on Linux/Vercel:
-- `Full_logo.png` — full "tipsy DINNER" wordmark. Splash screen only.
-- `watermark_square.png` — square tD monogram. Mini player only (Build removed it this session).
-- `watermark_circle.png` — circular tD monogram. Home header, top-right of greeting (moved off Build this session).
-```js
-import tDSquare from '../Logos/watermark_square.png'
-import fullLogo from '../Logos/Full_logo.png'
-```
-
-**Navigation** — four tabs, always visible, bottom of every screen: Build, Recipes,
-Grocery, Profile (`TAB_ORDER`, App.tsx ~line 433; icons `IconChefHat`/`IconBook`/
-`IconShoppingCart`/`IconUser` in `BottomTabBar`, App.tsx ~1404–1409). Nav bg
-`#FAF7F2` (this doc previously and incorrectly said `#182800`). Active = dark green
-`#233C00` icon + label + small `#233C00` dot below; inactive = `#233C00` at 25%
-opacity (previously and incorrectly documented here as cream/cream-25% — the nav bar
-sits on a light background, not green). All transitions slide left/right. Back
-arrows are icon-only but there is no systematic/stack-depth-driven mechanism behind
-them — every screen hardcodes its own; `Profile.tsx` is the sole screen that actually
-branches on the `isTabRoot` prop to decide whether to render one, even though
-`isTabRoot` is threaded to several other screens unused.
-
-Menus is NOT a nav tab — reached via an `IconLayoutList` icon on the
-Recipes/Categories header (App.tsx ~1541–1553) that pushes to Occasions. Grocery
-*was* reached via a cart icon in that same header slot; as of 2026-07-26 the two were
-swapped — Grocery moved onto the bottom nav (replacing Menus' old tab slot) and Menus
-took over the header icon slot (commit `254e0b5`). There is no reserved 5th slot in
-the current tab bar layout; a fifth tab remains a product idea for a future social
-feature, not a structural placeholder.
-
-**Superseded 2026-08-09**: that fifth tab now exists — `Home` (`IconHome`), added for
-the account-to-account sharing receiving surface, appended LAST in `TAB_ORDER`
-deliberately (inserting it elsewhere in the array disturbs `ScreenStage`). Moving it
-to a more prominent position in the bar is a future-session product decision, not a
-structural blocker. Full detail: Account-to-Account Sharing — Receiving in
-FEATURE_SPECS.md.
-
-**Superseded 2026-08-11**: `Home` moved from last to FIRST — `TAB_ORDER` is now
-`home, build, recipes, grocery, profile`; app launches on Home (`activeTab` inits
-`"home"`). `BottomTabBar`'s hardcoded icon array was reordered to match by hand. TD
-circle logo moved off Build's header onto Home's (top-right of greeting); Build's
-header now shows only its right-side action button.
 
 ---
 
@@ -242,74 +163,12 @@ server-side write to protected tables; it deliberately does NOT follow `ai-chat`
 pattern — it's called via `supabase.rpc(...)`, which carries the real caller's JWT,
 so `auth.uid()` inside the function is the true authenticated sender.
 
-**System prompt is consolidated.** A single module-level
-`buildSystemPrompt(profile, currentRecipe)` (App.tsx, immediately after
-`recipeToXML`) builds the conversational system prompt. All three call sites in the
-Cook component — `fireAICall`, `sendMessage`, `handleChipClick` — call this one
-function; future prompt edits happen in one place. User profile (palate,
-inspiration, constraints) is interpolated inside it.
-
-**Recipe parsing is consolidated.** A single module-level
-`parseRecipeFromAIResponse(fullText, sourceId?, sourceTitle?)` (App.tsx, immediately
-after `buildSystemPrompt`) parses the `<recipe>` XML out of the AI's raw response
-(title/description/ingredients/steps) and carries `sourceId`/`sourceTitle` forward
-onto the result. All three call sites — `fireAICall`, `sendMessage`,
-`handleChipClick` — route through it; this was consolidated separately from (and
-later than) the prompt-building consolidation above. There is now exactly one place
-where recipe-parse and anchor carry-forward logic lives — any future change to
-either goes there. See "Update vs Save-as-New" for the carry-forward/severing
-behavior itself.
-
-**Recipe context injection.** When a saved recipe is in scope (`currentRecipe !==
-null`), it is serialized via `recipeToXML` (module-level in App.tsx) and appended to
-the **system prompt as reference material** — framed "The user is asking about this
-saved recipe; use it as reference: …". It is NOT seeded as a fake assistant message
-(that made the model believe it authored the recipe and drift into recipe-prose
-register). Travels every turn; token-neutral; scale-safe. Blank Build leaves the
-prompt unchanged. Invariants: recipe never enters the visible `messages` array;
-`<recipe>` tags stripped from AI output; XML schema unchanged; a Build-from-scratch
-AI-authored recipe legitimately stays an assistant message in history.
-
-**Formatting house style** (content-aware, all modes, recipe loaded or not): named
-dishes/items → bold-name — em-dash — description, one per line; broader clustered
-options → short framing line + bold theme labels, specifics in prose; single
-thought/judgment/yes-no → flowing prose. No headers, no bullets; asterisks only for
-bolding names/labels. Guard against both over-structuring (invented groupings) and
-under-structuring (dense paragraphs).
-
-**Conversational prompt behavior additions (elevation & discovery).**
-`buildSystemPrompt()` carries three settled behavior blocks added in a dedicated
-session — culinary posture (elevate within the ask, always on), cuisine-direction
-discovery (ask the "world" when broad; a named protein doesn't settle it; anchor the
-suggestion set to one direction), and a no-superlatives voice rule. Full detail,
-including the design reasoning behind what was cut vs. kept, lives in "Conversational
-System Prompt — Elevation & Discovery" in FEATURE_SPECS.md — reword only
-deliberately, same as the formatting house style above.
-
-The conversational call runs at temperature default 1.0 (unset in the edge
-function) — left there deliberately, not tuned; revisit only as an isolated
-one-variable dial if elevation needs more.
-
-The palate/constraints profile is injected every call but is freeform and often
-sparse; discovery is designed to lean on the asked question rather than the profile
-for that reason. A richer/structured onboarding is a latent lever — logged, not
-built; its own future session.
-
 **Grocery enrichment is a SEPARATE AI island.** `enrichGroceryItems` (data.ts) is a
 structured JSON-in/JSON-out utility with its own prompt
 (`GROCERY_ENRICHMENT_SYSTEM_PROMPT`, defined just above it). **Never merge, adapt
 from, or share code with the conversational system prompt (`buildSystemPrompt`)** —
 different purposes (structured utility vs. conversational voice); mixing risks both
 contracts.
-
-**Microcopy voice:** "pour a glass — what are we cooking?" (placeholder); "building
-the recipe…" / "uncorking…" / "tasting…" (loading); "filed away." (save); "Looking
-good." (preview); "what's on the menu?" (Build hero). The grocery-list empty state
-is a deliberate exception to this playful wine-bar voice — **updated 2026-09-20**,
-it now reads "Your list is empty — add ingredients from a recipe, or jot down your
-own." (was "nothing here yet — pour something open.", flagged as confusing rather
-than charming and replaced with plain, direct wording). See "First-Impression
-Polish" in FEATURE_SPECS.md.
 
 ---
 
@@ -351,7 +210,7 @@ invalidates on save/edit/delete; the list re-fetches via a useEffect dependency 
 **ScreenStage tree.** Unified structure: the current screen always renders in the
 same base-layer position; the outgoing screen renders as an overlay only during a
 transition. (Previously alternated between two JSX shapes, causing unmount/remount on
-every navigation.) NOTE: `paddingBottom: 64` (App.tsx ~lines 1218 & 1231) is
+every navigation.) NOTE: `paddingBottom: 64` (App.tsx ~lines 1669 & 1682) is
 hard-coded nav-bar clearance — content-box sizing, so the screen layer's actual box is
 64px taller than the true viewport. This already bit a real bottom sheet (Cook
 History's log-cook sheet): a `position: absolute; inset: 0` backdrop inherited the
@@ -396,46 +255,6 @@ field shapes. **Must stay chrome-free** (no in-app UI like the chat icon).
 `config.json` and `.vc-config.json` are written manually via a Nitro compiled hook in
 `vite.config.ts`; `tslib.es6.mjs` copied in the same hook. Output dir set to
 `.vercel/output` in Vercel settings.
-
----
-
-## Build Conversation Persistence
-
-Build state is lifted to App-level so it survives tab switches, navigation, and save
-flows (it previously lived in Cook and was destroyed on unmount). App-level state:
-`buildMessages`, `buildConversationHistory`, `buildCurrentRecipe`,
-`buildMessageIdRef`, `buildAutoFireAI`. Cook receives these as props, renders/updates
-them, does NOT own them.
-
-Clear functions: `clearBuildStateOnly()` resets state, no transition (used when
-seeding must atomically replace state); `clearBuildConversation()` calls it then runs
-a 300ms slide to a fresh Cook (new `resetKey`) — this is what the refresh button
-uses. Refresh button: top-right of Build active state, hidden when empty; confirm
-modal reuses the delete-confirm pattern.
-
----
-
-## Chat from Recipe Card
-
-A floating chat icon on the user's own saved Recipe Card (gated on `recipe.savedId`;
-NOT on the public route) opens a slide-up input bar; the user's question transfers
-them into Build with the full recipe loaded as the in-progress recipe, AI auto-fires
-on arrival. Single transfer path for empty and active Build (no collision warning —
-starting a new chat silently replaces any active one; the refresh button is the
-deliberate reset).
-
-**RecipeCard is a module-level component with NO closure access to App scope.**
-Seeding/navigation must go through props (e.g. `transferToRecipeChat`). Never call
-App-level setters (`setBuildMessages`, `switchToTab`, etc.) directly from RecipeCard —
-they're undefined there and crash silently. `transferToRecipeChat` atomically seeds
-the mini-player recipe, the user's question as the first message, and a one-entry
-conversation history, then navigates to Build. Auto-fire keys off a seeded
-single-user-message history **with `currentRecipe !== null`** (that check
-distinguishes a recipe-loaded chat from empty Build); guarded by `autoFireRef`.
-
-Full recipe (not mini-player-only) is injected so the AI can answer surgical
-questions ("can I sub X?", "how long is step 2?") correctly. See AI Layer for the
-system-prompt-reference mechanism.
 
 ---
 
@@ -527,36 +346,8 @@ code defects).
 
 ## Standing Cleanup / Watch Items
 
-- **`updateSavedRecipe` shared by two flows** — test both the chat Update path and AddYourOwn whenever it changes (see Update vs Save-as-New).
 - **Schema is dashboard-only** — no in-repo migrations. Cheap to fix now (export to a migration file), expensive to reconstruct later.
 - A standing baseline of pre-existing TypeScript errors unrelated to feature work. Re-count with `bunx tsc --noEmit` before ever claiming a change introduced zero new errors — do not trust a documented figure; this count has drifted (31 → 40) and will again.
 - Reusable loading-spinner / "Updating…" pattern from the grocery work is a good candidate to reuse wherever async waits show poor feedback (e.g. Occasions/Menus load flash).
-- **`deleteSavedRecipe` swallows errors.** On failure it logs to `console.error` and returns — it never throws or returns a status. Its one caller (`AddYourOwn.tsx`) doesn't check a return value either, so a failed delete still closes the confirm modal and navigates away as if it had succeeded. Known, deliberately not fixed; out of scope if encountered incidentally — only fix it as its own deliberate task.
 - Account-to-account sharing's own standing cleanup/watch items (the send-sheet label, cache-clear/cook_time gaps, receiving aesthetic passes, etc. — the receive branch itself merged 2026-08-23, no longer long-lived) live in their respective FEATURE_SPECS.md build sections, not here.
 - **Fraunces italic renders as generic serif app-wide, and Lazydog renders as its plain fallback — neither font's stylesheet/`@font-face` is actually wired.** Closed by decision 2026-09-20, not a bug to re-discover: known fix path is adding a Fraunces `<link>` next to the existing Inter one in `src/routes/__root.tsx`, and a `@font-face` block for `src/fonts/lazydog.ttf`; out of scope until a session deliberately picks it up. Every "Fraunces italic"/"Lazydog" instruction elsewhere in this doc is aspirational until then. See Fonts in Design System.
-- **`get_sender_names`/`search_profiles`/`get_my_connections` (all `SECURITY DEFINER`) lack the explicit `anon` revoke that `get_suggested_recipe` added** (see Suggested Recipes — Layer 4 in FEATURE_SPECS.md for the underlying default-privilege gap) — `anon` is likely still able to call them at the grant layer, neutralized today only by their own internal `auth.uid()`-null guards. Not yet audited/fixed.
-- **FIXED 2026-09-06:** sign-out now resets `activeTab`/`tabStacks` — previously `activeTab` survived an account switch within the same tab (only exit point is Profile's Sign Out row) and could land a freshly-onboarded new account on the Profile tab instead of Home.
-- **Banked from the Session 2 slice cost-down work (2026-09-13), flagged not fixed:**
-  - `compute-slice`'s `parseSelectionResponse` has no pick-id dedupe guard — a baseline (pre-narrowing) run returned a duplicate pick. Seen alongside a parse-reliability wobble (a thin 3-pick result), also baseline-only. Both anomalies appeared only in baseline/unnarrowed runs across a small sample, never in the narrowed-to-60 payload — flag, not proof, that narrowing may have incidentally improved parse reliability.
-  - Taste-profile double-fire on onboarding completion. Open, unrelated to the Session 2 changes.
-  - Migration-history reconciliation gap — **corrected and expanded 2026-09-17**: this undersold the true scope. 16 of 18 live tables and 5 of 10 live functions have no migration file at all; `pick_details`/`get_suggested_recipe`/structured-allergy fields (named here) are actually the best-documented corner of the gap, not the whole of it. Full detail: Repo Hygiene — Branch Audit & Migration Reconciliation in FEATURE_SPECS.md.
-  - **`llm_usage` can undercount — second sighting of a dropped row.** `ai-chat`'s unmodified `EdgeRuntime.waitUntil` async usage-logging write occasionally drops a row even on a fully successful, correctly-parsed AI call (confirmed twice now, most recently during Session 2 verification). Any cost-floor read taken from `llm_usage` should account for this — check the drop rate before trusting the table's totals as complete.
-- **Banked from the repo-hygiene / branch-audit session (2026-09-17):**
-  - `main` confirmed clean and in sync with `origin/main` — trustworthy base for future work. `feature/home-explore-section` merged in and live in production (merge commit `c408a9a`); that branch is now redundant, safe to delete whenever convenient.
-  - `39b5128` ("Add photo attachment to Build prompt box") confirmed NOT on `main` and not inherited by newly-cut branches — the earlier "systemic branch-cut leak" hypothesis was investigated and disproven. Stays parked, isolated, on `feature/build-photo-import`.
-  - Account-to-account sharing confirmed fully merged onto `main` — the earlier "stranded across branches" concern was investigated and disproven.
-  - Deleted branches (local + remote), both verified fully-merged duplicates before deletion: `feature/onboarding-conversational-flow`, `fix/suggestion-tile-clip`.
-  - `dfd@dfd.com` does not exist in Supabase Auth (nothing to delete). `test2@test2.com` is present and live; additional test accounts (`benhigginstest@test.com`, `throwaway@throwaway.com`, `testtest@test.com`) also observed present — logged for a possible future cleanup pass, not addressed this session.
-  Full detail: Repo Hygiene — Branch Audit & Migration Reconciliation in FEATURE_SPECS.md.
-- **Banked from the Menus & Recipe-Delete Hardening session (2026-09-19), flagged not fixed:**
-  - `MenuInterior.tsx` has two more un-awaited-`Promise` sites (~lines 323/340) — `findCustomCategory(recipe.category)` used without `await`, same async/await failure family as this session's menu-save-race root cause.
-  - **FIXED 2026-09-20:** the sibling `C.white`-undefined-palette bug was still live in `Menus.tsx` (5 call sites) and, discovered the same pass, in `Occasions.tsx` too (1 call site) — both now use `C.bg`, plus an off-blue backdrop fixed alongside in `Menus.tsx`. Drift risk now spans a THIRD file beyond the original `MenuInterior.tsx` fix; the underlying copy-paste-drift pattern below is unchanged. Full detail: First-Impression Polish (Session, 2026-09-20) in FEATURE_SPECS.md.
-  - `addRecipeToMenuSection` is fired without `await`/`catch` in both `RecipePicker.tsx` and `AddYourOwn.tsx` — a latent data-loss bug in the same neighborhood as this session's recipe-delete no-op fix, on the add path instead of the delete path.
-  - Copy-paste-drift risk: this session hand-synced two more duplicated-not-shared structures (`EditMenuSheet`'s delete/confirm pattern between `MenuInterior.tsx`/`Menus.tsx`, and `ICON_OPTIONS` between `Occasions.tsx`/`Menus.tsx`) — nothing structurally prevents future drift.
-  Full detail: Menus & Recipe-Delete Hardening (Session, 2026-09-19) in FEATURE_SPECS.md.
-- **Banked from the First-Impression Polish session (2026-09-20), flagged not fixed — two marked HIGH priority (⭐):**
-  - ⭐ Contact us is a `mailto:` stopgap, not an in-app support form — no delivery confirmation, no in-app history, breaks on devices with no configured mail client.
-  - ⭐ `effortLabels.ts` is now dead code in practice (imported nowhere) after the effort tag was dropped from both suggestion-tile render sites — kept deliberately for possible future reuse, not deleted.
-  - `cuisineLabels.ts`'s curated label map is hand-maintained and will silently drift from `scripts/matrix-pipeline.mjs`'s `CUISINES` list if a cuisine is ever added to one and not the other (the pipeline script can't be imported client-side, so this can't be a shared import — see the file's own header comment).
-  - Neither Fraunces nor Lazydog's non-loading was actually fixed this session — see the Fonts / Standing Cleanup entries above; only newly confirmed as a deliberate, logged decision rather than an open unknown.
-  Full detail: First-Impression Polish (Session, 2026-09-20) in FEATURE_SPECS.md.
