@@ -265,7 +265,7 @@ const MAX_ALLERGEN_SAFE_ATTEMPTS = 3;
 // notes/tips field — title, description, ingredients, and each step's
 // title + instruction are the only user-visible AI-generated text a
 // generated recipe has today.
-function scanRecipeDraftForBig9(recipe: RecipeDraft, targetIds: Big9Id[]): Big9Hit[] {
+export function scanRecipeDraftForBig9(recipe: RecipeDraft, targetIds: Big9Id[]): Big9Hit[] {
   const hits: Big9Hit[] = [];
   hits.push(...scanIngredientsForBig9(recipe.ingredients, targetIds));
   hits.push(...scanFreeTextForBig9(recipe.title, targetIds, "title"));
