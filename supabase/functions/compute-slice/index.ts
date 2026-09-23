@@ -365,6 +365,53 @@ function deriveUnparsedBackstopGates(allergies: unknown): { column: string; valu
 }
 
 // ---------------------------------------------------------------------------
+// GATE FINGERPRINT — Session 2026-09-23. The freshness check below used to
+// serve a cached user_recipe_slices row purely on (user_id, slice_date,
+// status='ready'), with no check against whether the profile data that drove
+// that row's gating is still current. That let a mid-day allergy edit (e.g.
+// adding a shellfish allergy at noon) keep serving a slice computed under the
+// OLD allergies for the rest of the day. This fingerprints exactly the two
+// inputs that feed Stage 1 gating — profiles.allergies (via deriveBig9Gates /
+// deriveUnparsedBackstopGates) and profiles.taste_profile (via
+// deriveDietaryGates) — so a changed input forces a recompute regardless of
+// which write path changed it (Profile edit, onboarding, or any future one),
+// rather than depending on every writer remembering to invalidate the cache.
+//
+// Deterministic by construction: big9/other are sorted before serializing
+// (input array order must not matter), and the returned object is always a
+// freshly-built literal with the SAME key order every call — JSON.stringify
+// preserves insertion order for string keys, so identical inputs always
+// produce the identical string, independent of the ORIGINAL object's own key
+// order. null allergies (never asked) canonicalizes to `null`, NOT
+// {big9:[],other:[],unparsed:false} (confirmed-empty) — these two states have
+// different Stage-1 gating outcomes (see deriveBig9Gates's NULL fail-closed
+// comment above) and must produce different fingerprints, not just different
+// gates.
+//
+// Stored in a dedicated gate_fingerprint column (NOT inside pick_details —
+// pick_details is read by the client as a plain SlicePickDetail[] array,
+// Home.tsx:481/506 call .length/.map on it directly, so nesting a fingerprint
+// key inside it would break that render path; see the deploy-plan note on
+// this in the session report for the migration this requires).
+// ---------------------------------------------------------------------------
+
+function canonicalizeAllergiesForFingerprint(allergies: unknown): unknown {
+  if (allergies === null || allergies === undefined) return null
+  if (typeof allergies !== 'object') return allergies
+  const record = allergies as { big9?: unknown; other?: unknown; unparsed?: unknown }
+  const big9 = Array.isArray(record.big9) ? [...record.big9].map(String).sort() : []
+  const other = Array.isArray(record.other) ? [...record.other].map(String).sort() : []
+  return { big9, other, unparsed: record.unparsed === true }
+}
+
+function computeGateFingerprint(allergies: unknown, tasteProfile: string): string {
+  return JSON.stringify({
+    allergies: canonicalizeAllergiesForFingerprint(allergies),
+    tasteProfile: tasteProfile ?? '',
+  })
+}
+
+// ---------------------------------------------------------------------------
 // TENTPOLE OCCASION WINDOW — COPIED from src/tipsy/chips.ts (the
 // ChipTiming fixedHoliday/floatingHoliday shapes, isInLeadInWindow, and the 5
 // tentpole timing constants, with their exact date/lead-in values). Single
@@ -602,7 +649,28 @@ Deno.serve(async (req) => {
   // WHO this is, only for WHAT DATE.
   const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
 
-  // FRESHNESS CHECK — must happen before any pool read or AI call.
+  // Profile read moved up from its old spot inside the try block below — the
+  // freshness check now needs it to compute the gate fingerprint BEFORE
+  // deciding whether to serve a cached row. Same unchecked-error handling as
+  // before this move: a failed/missing read leaves profileRow undefined,
+  // which flows into the SAME fail-closed defaults deriveBig9Gates /
+  // deriveDietaryGates already had (taste_profile '', allergies null ->
+  // ALL_BIG9_IDS gated) — not a new behavior, just relocated.
+  const { data: profileRow } = await adminClient
+    .from('profiles')
+    .select('taste_profile, allergies')
+    .eq('id', callerId)
+    .maybeSingle()
+
+  const tasteProfile = profileRow?.taste_profile ?? ''
+  const currentGateFingerprint = computeGateFingerprint(profileRow?.allergies, tasteProfile)
+
+  // FRESHNESS CHECK — must happen before any pool read or AI call. A cached
+  // row is only served if its OWN stored gate_fingerprint (set at the write
+  // below) exactly matches the fingerprint of the CURRENT profile data. Any
+  // other case — no fingerprint on the row (every pre-fingerprint row today),
+  // a mismatch, or a malformed/non-string stored value — falls through to a
+  // full recompute. Never serve on uncertainty.
   const { data: existingSlice, error: existingError } = await adminClient
     .from('user_recipe_slices')
     .select('*')
@@ -614,7 +682,19 @@ Deno.serve(async (req) => {
   if (existingError) {
     return jsonResponse({ error: `freshness check failed: ${existingError.message}`, computed: false }, 200)
   }
+
+  let cacheIsFresh = false
   if (existingSlice) {
+    try {
+      cacheIsFresh =
+        typeof existingSlice.gate_fingerprint === 'string' &&
+        existingSlice.gate_fingerprint === currentGateFingerprint
+    } catch {
+      cacheIsFresh = false
+    }
+  }
+
+  if (cacheIsFresh) {
     return jsonResponse({ slice: existingSlice, computed: false }, 200)
   }
 
@@ -635,13 +715,8 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { data: profileRow } = await adminClient
-      .from('profiles')
-      .select('taste_profile, allergies')
-      .eq('id', callerId)
-      .maybeSingle()
-
-    const tasteProfile = profileRow?.taste_profile ?? ''
+    // profileRow/tasteProfile already read above, before the freshness
+    // check — reused here, not re-fetched.
     const proseGates = deriveDietaryGates(tasteProfile)
     const structuredGates = deriveBig9Gates(profileRow?.allergies)
     // Empty for every successfully-parsed record (clean big9 list, or the
@@ -918,6 +993,7 @@ Deno.serve(async (req) => {
           selection_reason: parsed.sliceReason,
           status: 'ready',
           pick_details: pickDetails,
+          gate_fingerprint: currentGateFingerprint,
         },
         { onConflict: 'user_id,slice_date' }
       )
