@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, type CSSProperties } from "react";
 import { generateTasteProfile, generateOnboardingReflection, composeConstraintsAndAllergies, type StructuredAllergies } from "./data";
+import { buildConstraintsConfirmation } from "./constraintsConfirmation";
 import { supabase } from "../lib/supabase";
 import { ChatBubble, TypingBubble, CookInputBar } from "./ChatUI";
 
@@ -324,25 +325,36 @@ function OnboardingChat({
     }
 
     if (stage === "constraints") {
-      // The parser and reflection both fire concurrently — sayReflection
-      // kicks off its own reflection call (and starts streaming it into the
-      // chat) immediately, same as before, but its own await is deferred
-      // below so it never blocks the parser. Only the parser is awaited
-      // before writing — the write needs to know whether a composed,
-      // severity-labeled string is available. On timeout or malformed
-      // output, composeConstraintsAndAllergies falls back to the user's raw
-      // typed answer for constraints, and marks allergies `unparsed` (never
-      // empty — empty means "asked, none").
-      const reflectionUIPromise = sayReflection("constraints", val, nextFallbackAck());
-      const { constraintsToWrite, allergiesToWrite } = await composeConstraintsAndAllergies(
+      // Piece 2 (2026-09-22): this stage no longer uses
+      // generateOnboardingReflection at all — an AI reflection could praise,
+      // soften, or misdescribe a safety-relevant answer in a way that
+      // disagreed with what actually got written. The confirmation shown
+      // here is instead built deterministically from
+      // composeConstraintsAndAllergies's own return value (see
+      // buildConstraintsConfirmation in constraintsConfirmation.ts), so the
+      // message and the write can never drift apart — they come from the
+      // same call. The typing indicator covers the full parser wait
+      // (bounded by CONSTRAINTS_PARSE_TIMEOUT_MS, the same ceiling the
+      // parser itself uses) rather than the shorter reflection
+      // first-token window used at the other two stages.
+      setTyping(true);
+      const { constraintsToWrite, allergiesToWrite, allergyItems, dislikeItems } = await composeConstraintsAndAllergies(
         val,
         CONSTRAINTS_PARSE_TIMEOUT_MS
       );
-      const writePromise = safeUpdate({ constraints: constraintsToWrite, allergies: allergiesToWrite });
+      setTyping(false);
 
-      // Both the write and the reflection UI settle before the recap lines,
-      // so the recap never talks past a still-in-flight write.
-      await reflectionUIPromise;
+      const writePromise = safeUpdate({ constraints: constraintsToWrite, allergies: allergiesToWrite });
+      const confirmationText = buildConstraintsConfirmation({
+        allergyItems,
+        dislikeItems,
+        unparsed: allergiesToWrite.unparsed === true,
+      });
+      const revealPromise = revealMessage(confirmationText);
+
+      // Both the write and the confirmation reveal settle before the recap
+      // lines, so the recap never talks past a still-in-flight write.
+      await revealPromise;
       await writePromise;
 
       // Single closing handoff line — no profile re-list, since the

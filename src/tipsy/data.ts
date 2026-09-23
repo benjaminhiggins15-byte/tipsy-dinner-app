@@ -452,6 +452,10 @@ interface ComposedConstraintsDetail {
   // broken out so callers can run it through the Big-9 code map without
   // re-deriving the prefix-slicing logic themselves.
   allergyContent: string;
+  // Just the DISLIKES line's content, same shape as allergyContent above —
+  // added for the onboarding confirmation-message builder (Piece 2), which
+  // needs the user's own dislike terms verbatim.
+  dislikesContent: string;
 }
 
 function parseComposedConstraintsDetailed(rawText: string): ComposedConstraintsDetail | null {
@@ -463,7 +467,18 @@ function parseComposedConstraintsDetailed(rawText: string): ComposedConstraintsD
   const allergyContent = allergyLine.slice(ALLERGY_LINE_PREFIX.length).trim();
   const dislikesContent = dislikesLine.slice(DISLIKES_LINE_PREFIX.length).trim();
   if (!allergyContent || !dislikesContent) return null;
-  return { composedText: `${allergyLine}\n${dislikesLine}`, allergyContent };
+  return { composedText: `${allergyLine}\n${dislikesLine}`, allergyContent, dislikesContent };
+}
+
+// Turns a raw ALLERGY/DISLIKES line's content (e.g. "shellfish, tree nuts" or
+// "None") into a display-ready list of the user's own terms, in the order
+// they gave them. Shared by the onboarding confirmation-message builder
+// (Piece 2) so its item lists are byte-derived from the same content
+// mapAllergyItems itself splits on — never a second, drifting split.
+export function splitConstraintItems(content: string): string[] {
+  const trimmed = content.trim();
+  if (!trimmed || trimmed.toLowerCase() === "none") return [];
+  return trimmed.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
 export function parseComposedConstraints(rawText: string): string | null {
@@ -516,7 +531,17 @@ export const CONSTRAINTS_PARSE_TIMEOUT_MS = 4000;
 export async function composeConstraintsAndAllergies(
   rawAnswer: string,
   timeoutMs: number = CONSTRAINTS_PARSE_TIMEOUT_MS
-): Promise<{ constraintsToWrite: string; allergiesToWrite: StructuredAllergies }> {
+): Promise<{
+  constraintsToWrite: string;
+  allergiesToWrite: StructuredAllergies;
+  // The user's own allergy/dislike terms, verbatim and in order — additive
+  // fields for the onboarding confirmation-message builder (Piece 2). Always
+  // [] on the unparsed fallback below, since there is nothing reliably
+  // parsed to list. Existing callers (Profile.tsx) destructure only the two
+  // fields above and are unaffected.
+  allergyItems: string[];
+  dislikeItems: string[];
+}> {
   const parsePromise = parseNoGosAnswer(rawAnswer).catch((err) => {
     console.error("No-gos parsing failed:", err);
     return null;
@@ -526,12 +551,19 @@ export async function composeConstraintsAndAllergies(
 
   if (detailed) {
     const { big9, other } = mapAllergyItems(detailed.allergyContent);
-    return { constraintsToWrite: detailed.composedText, allergiesToWrite: { big9, other } };
+    return {
+      constraintsToWrite: detailed.composedText,
+      allergiesToWrite: { big9, other },
+      allergyItems: splitConstraintItems(detailed.allergyContent),
+      dislikeItems: splitConstraintItems(detailed.dislikesContent),
+    };
   }
 
   return {
     constraintsToWrite: rawAnswer,
     allergiesToWrite: { big9: [], other: [rawAnswer], unparsed: true },
+    allergyItems: [],
+    dislikeItems: [],
   };
 }
 
