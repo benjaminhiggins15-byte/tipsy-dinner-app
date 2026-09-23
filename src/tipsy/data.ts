@@ -567,6 +567,65 @@ export async function composeConstraintsAndAllergies(
   };
 }
 
+// Read-side counterpart to buildConstraintsString below — turns
+// profiles.constraints back into the two display-ready item strings the
+// Profile screen's Allergies/Dislikes boxes show. Never returns machine text
+// ("ALLERGY (hard, never serve):", "None", etc.) — "None" content on either
+// line collapses to "" so the box renders its own light placeholder instead.
+// Conservative fallback for anything that isn't the exact two-line format
+// (legacy free text, or raw text preserved from a composer failure): the
+// whole raw string goes in allergyText and dislikeText stays empty, so an
+// unstructured answer reads as "restrict everything" rather than silently
+// dropping into the unrestricted dislikes side.
+export function splitConstraintsForDisplay(constraints: string | null | undefined): {
+  allergyText: string;
+  dislikeText: string;
+} {
+  const raw = (constraints ?? "").trim();
+  if (!raw) return { allergyText: "", dislikeText: "" };
+
+  const detailed = parseComposedConstraintsDetailed(raw);
+  if (detailed) {
+    return {
+      allergyText: detailed.allergyContent.toLowerCase() === "none" ? "" : detailed.allergyContent,
+      dislikeText: detailed.dislikesContent.toLowerCase() === "none" ? "" : detailed.dislikesContent,
+    };
+  }
+  return { allergyText: raw, dislikeText: "" };
+}
+
+// Write-side counterpart to splitConstraintsForDisplay above — rebuilds the
+// two-line profiles.constraints string from the Profile screen's current box
+// values. An empty box writes its line's "None" content, exactly matching
+// what splitConstraintsForDisplay reads back as "".
+export function buildConstraintsString(allergyText: string, dislikeText: string): string {
+  const allergyContent = allergyText.trim() || "None";
+  const dislikeContent = dislikeText.trim() || "None";
+  return `${ALLERGY_LINE_PREFIX} ${allergyContent}\n${DISLIKES_LINE_PREFIX} ${dislikeContent}`;
+}
+
+// Piece 4's Profile-edit entry point for the Allergies box specifically.
+// Whatever the shared composer decides to bucket as a "dislike" is FORCED
+// back onto the allergy side here — text typed into the Allergies box must
+// never be able to end up excluded from the hard-allergy gate just because
+// the composer's own heuristics read its wording as a preference rather than
+// a hard allergy (e.g. "shellfish doesn't really agree with me"). An empty
+// box is a confirmed-none answer, not a call worth making to the composer.
+export async function composeAllergyBoxEdit(
+  allergyBoxText: string,
+  timeoutMs: number = CONSTRAINTS_PARSE_TIMEOUT_MS
+): Promise<StructuredAllergies> {
+  const trimmed = allergyBoxText.trim();
+  if (!trimmed) return { big9: [], other: [] };
+
+  const composed = await composeConstraintsAndAllergies(trimmed, timeoutMs);
+  if (composed.allergiesToWrite.unparsed) {
+    return { big9: [], other: [trimmed], unparsed: true };
+  }
+  const forcedItems = [...composed.allergyItems, ...composed.dislikeItems];
+  return mapAllergyItems(forcedItems.join(", "));
+}
+
 function localDateString(): string {
   const d = new Date();
   const year = d.getFullYear();

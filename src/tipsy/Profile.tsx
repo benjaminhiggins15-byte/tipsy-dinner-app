@@ -1,6 +1,6 @@
 import { useState, type CSSProperties } from "react";
 import { supabase } from "../lib/supabase";
-import { isValidHandleFormat, generateTasteProfile, composeConstraintsAndAllergies, CONSTRAINTS_PARSE_TIMEOUT_MS, type StructuredAllergies } from "./data";
+import { isValidHandleFormat, generateTasteProfile, splitConstraintsForDisplay, buildConstraintsString, composeAllergyBoxEdit, type StructuredAllergies } from "./data";
 
 type ProfileType = {
   id: string;
@@ -178,7 +178,15 @@ export default function Profile({ back, openEdit, isTabRoot = false, onSignOut, 
         <div style={sectionLabel}>Your Kitchen</div>
         <Row title="Your palate" subtitle={trim30(profile?.palate || "")} onClick={() => openEdit("palate")} />
         <Row title="Inspiration" subtitle={trim30(profile?.inspiration || "")} onClick={() => openEdit("inspiration")} />
-        <Row title="Constraints" subtitle={trim30(profile?.constraints || "")} onClick={() => openEdit("constraints")} />
+        {(() => {
+          const { allergyText, dislikeText } = splitConstraintsForDisplay(profile?.constraints);
+          return (
+            <>
+              <Row title="Allergies" subtitle={allergyText ? trim30(allergyText) : "None added"} onClick={() => openEdit("constraints")} />
+              <Row title="Dislikes" subtitle={dislikeText ? trim30(dislikeText) : "None added"} onClick={() => openEdit("constraints")} />
+            </>
+          );
+        })()}
 
         <div style={sectionLabel}>Support</div>
         <Row title="Sign Out" onClick={handleSignOut} />
@@ -288,9 +296,121 @@ function ProfileEditIdentity({ back, profile, onUpdate }: { back: () => void; pr
   );
 }
 
+// Piece 3+4's dedicated two-box editor for the Allergies/Dislikes split.
+// Mirrors ProfileEditIdentity's pattern (a standalone sub-component with its
+// own multi-field state) rather than living inside the generic single-value
+// ProfileEdit below — the save logic here is fundamentally different (two
+// independently-tracked values, one of which triggers an AI composer call
+// and one of which never does).
+function ProfileEditConstraints({ back, profile, onUpdate }: { back: () => void; profile: ProfileType | null; onUpdate: (updates: Partial<ProfileType>) => Promise<void> }) {
+  const initial = splitConstraintsForDisplay(profile?.constraints);
+  const [allergyVal, setAllergyVal] = useState(initial.allergyText);
+  const [dislikeVal, setDislikeVal] = useState(initial.dislikeText);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const inputBase: CSSProperties = {
+    width: "100%",
+    background: "rgba(35,60,0,0.05)",
+    border: "1px solid rgba(35,60,0,0.12)",
+    borderRadius: 12,
+    padding: "12px 14px",
+    fontFamily: "'Inter', sans-serif",
+    fontSize: 16,
+    color: "#233C00",
+    outline: "none",
+    lineHeight: 1.6,
+    boxSizing: "border-box",
+  };
+
+  const handleSave = async () => {
+    const allergyChanged = allergyVal !== initial.allergyText;
+    const dislikeChanged = dislikeVal !== initial.dislikeText;
+    if (!allergyChanged && !dislikeChanged) {
+      back();
+      return;
+    }
+    setIsSaving(true);
+    try {
+      const constraintsToWrite = buildConstraintsString(allergyVal, dislikeVal);
+      const updates: Partial<ProfileType> = { constraints: constraintsToWrite };
+      // Only touch profiles.allergies when the Allergies box itself changed —
+      // a dislikes-only edit must never turn a legacy NULL (never asked) into
+      // a confirmed value, and updateProfile's upsert only writes keys that
+      // are actually present, so omitting it here leaves the column alone.
+      if (allergyChanged) {
+        updates.allergies = await composeAllergyBoxEdit(allergyVal);
+      }
+      await onUpdate(updates);
+      if (profile) {
+        generateTasteProfile(profile.id, {
+          palate: profile.palate,
+          inspiration: profile.inspiration,
+          constraints: constraintsToWrite,
+        });
+      }
+    } finally {
+      setIsSaving(false);
+    }
+    back();
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#FAF7F2" }}>
+      <div style={{
+        display: "grid", gridTemplateColumns: "44px 1fr 44px", alignItems: "center",
+        padding: "20px 16px 14px",
+      }}>
+        <button onClick={back} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(35,60,0,0.6)", fontSize: 22, padding: 0, textAlign: "left" }}>‹</button>
+        <div style={{ textAlign: "center", fontFamily: "'Inter', sans-serif", fontSize: 20, fontWeight: 700, textTransform: "uppercase", color: "#233C00" }}>
+          Constraints
+        </div>
+        <div />
+      </div>
+      <div style={{ flex: 1, padding: "12px 24px 24px", display: "flex", flexDirection: "column", gap: 20 }}>
+        <div>
+          <div style={fieldLabelStyle}>Allergies</div>
+          <textarea
+            value={allergyVal}
+            onChange={(e) => setAllergyVal(e.target.value)}
+            placeholder="None added"
+            style={{ ...inputBase, height: 100, resize: "none" }}
+          />
+        </div>
+        <div>
+          <div style={fieldLabelStyle}>Dislikes</div>
+          <textarea
+            value={dislikeVal}
+            onChange={(e) => setDislikeVal(e.target.value)}
+            placeholder="None added"
+            style={{ ...inputBase, height: 100, resize: "none" }}
+          />
+        </div>
+        <div style={{ flex: 1 }} />
+        <button
+          disabled={isSaving}
+          onClick={handleSave}
+          style={{
+            background: "#233C00", color: "#FAF7F2", border: "none",
+            borderRadius: 100, padding: "14px 0",
+            fontFamily: "'Inter', sans-serif", fontSize: 12, fontWeight: 500,
+            letterSpacing: "0.12em", textTransform: "uppercase",
+            width: "100%", cursor: isSaving ? "default" : "pointer",
+            opacity: isSaving ? 0.6 : 1,
+          }}
+        >
+          {isSaving ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function ProfileEdit({ fieldKey, back, profile, onUpdate }: { fieldKey: FieldKey; back: () => void; profile: ProfileType | null; onUpdate: (updates: Partial<ProfileType>) => Promise<void> }) {
   if (fieldKey === "identity") {
     return <ProfileEditIdentity back={back} profile={profile} onUpdate={onUpdate} />;
+  }
+  if (fieldKey === "constraints") {
+    return <ProfileEditConstraints back={back} profile={profile} onUpdate={onUpdate} />;
   }
   const meta = FIELD_META[fieldKey];
   const storageKey = KEYS[fieldKey];
@@ -299,7 +419,6 @@ export function ProfileEdit({ fieldKey, back, profile, onUpdate }: { fieldKey: F
   const getInitialValue = () => {
     if (fieldKey === "palate") return profile?.palate || "";
     if (fieldKey === "inspiration") return profile?.inspiration || "";
-    if (fieldKey === "constraints") return profile?.constraints || "";
     return read(storageKey);
   };
 
@@ -352,42 +471,17 @@ export function ProfileEdit({ fieldKey, back, profile, onUpdate }: { fieldKey: F
             setIsSaving(true);
             try {
               // Use Supabase for migrated fields, localStorage for legacy fields
-              if (fieldKey === "palate" || fieldKey === "inspiration" || fieldKey === "constraints") {
-                const previousValue =
-                  fieldKey === "palate" ? (profile?.palate || "") :
-                  fieldKey === "inspiration" ? (profile?.inspiration || "") :
-                  (profile?.constraints || "");
+              if (fieldKey === "palate" || fieldKey === "inspiration") {
+                const previousValue = fieldKey === "palate" ? (profile?.palate || "") : (profile?.inspiration || "");
                 const changed = val !== previousValue;
 
-                if (fieldKey === "constraints" && changed) {
-                  // Route the edit through the SAME composer + Big-9 code map
-                  // as onboarding capture, so a hand-edit here can never
-                  // silently desync profiles.allergies from profiles.constraints.
-                  // Fail-closed: on composer failure, constraintsToWrite falls
-                  // back to the raw edited text and allergiesToWrite is marked
-                  // `unparsed` (see composeConstraintsAndAllergies) — never a
-                  // silent empty overwrite.
-                  const { constraintsToWrite, allergiesToWrite } = await composeConstraintsAndAllergies(
-                    val,
-                    CONSTRAINTS_PARSE_TIMEOUT_MS
-                  );
-                  await onUpdate({ constraints: constraintsToWrite, allergies: allergiesToWrite });
-                  if (profile) {
-                    generateTasteProfile(profile.id, {
-                      palate: profile.palate,
-                      inspiration: profile.inspiration,
-                      constraints: constraintsToWrite,
-                    });
-                  }
-                } else {
-                  await onUpdate({ [fieldKey]: val });
-                  if (changed && profile) {
-                    generateTasteProfile(profile.id, {
-                      palate: fieldKey === "palate" ? val : profile.palate,
-                      inspiration: fieldKey === "inspiration" ? val : profile.inspiration,
-                      constraints: fieldKey === "constraints" ? val : profile.constraints,
-                    });
-                  }
+                await onUpdate({ [fieldKey]: val });
+                if (changed && profile) {
+                  generateTasteProfile(profile.id, {
+                    palate: fieldKey === "palate" ? val : profile.palate,
+                    inspiration: fieldKey === "inspiration" ? val : profile.inspiration,
+                    constraints: profile.constraints,
+                  });
                 }
               } else {
                 // Legacy fields (email, table) still use localStorage
