@@ -49,6 +49,20 @@ function isCacheFresh(existingSlice, currentGateFingerprint) {
   }
 }
 
+// Mirrors fallbackToPriorSliceOrError's query exactly (Session 2026-09-23
+// fix): status='ready' AND gate_fingerprint = current, ordered by
+// slice_date desc, take the top one. `rows` stands in for what a real
+// `.select('*').eq('user_id',...).eq('status','ready').eq('gate_fingerprint',
+// currentGateFingerprint).order('slice_date',{ascending:false}).limit(1)`
+// query would return — filtering + sort done here in JS since this is a
+// pure decision-logic mirror, not a live DB call.
+function simulateFallbackQuery(rows, userId, currentGateFingerprint) {
+  const matches = rows
+    .filter((r) => r.user_id === userId && r.status === "ready" && r.gate_fingerprint === currentGateFingerprint)
+    .sort((a, b) => (a.slice_date < b.slice_date ? 1 : a.slice_date > b.slice_date ? -1 : 0));
+  return matches[0] ?? null;
+}
+
 // Verbatim copy of BIG9_TO_POOL_GATE + deriveBig9Gates (index.ts:117-161),
 // used only for the no-regression re-run of the Piece 1 cases (g).
 const BIG9_TO_POOL_GATE = {
@@ -215,6 +229,78 @@ console.log("=".repeat(80), "\n");
     deriveBig9Gates({ big9: ["shellfish"], other: [] }),
     [{ column: "contains_shellfish", value: false }]
   );
+}
+
+// (i) Allergy edit + forced Stage-2 failure -> user is NOT served the
+// pre-edit slice. This is the exact fail-open the prior version of
+// fallbackToPriorSliceOrError had: today's freshness check correctly
+// rejects the stale row (mismatch), recompute is attempted, but the AI call
+// fails (Stage 2 error) before the row is overwritten — the stale row is
+// still sitting there with status='ready' and TODAY's date, which used to
+// make it the unconditional top pick of "most recent ready row."
+{
+  const userId = "u1";
+  const today = "2026-09-23";
+  const fpPreEdit = computeGateFingerprint({ big9: ["peanut"], other: [] }, "");
+  const fpPostEdit = computeGateFingerprint({ big9: ["peanut", "sesame"], other: [] }, "");
+  const rows = [
+    { user_id: userId, slice_date: today, status: "ready", gate_fingerprint: fpPreEdit, recipe_ids: ["stale-sesame-dish"] },
+  ];
+  const fallback = simulateFallbackQuery(rows, userId, fpPostEdit);
+  check("(i) forced Stage-2 failure after allergy edit -> no fallback slice served", fallback, null);
+}
+
+// (ii) Fallback with a matching fingerprint still works as before — a prior
+// day's row computed under allergies/taste_profile that HAVEN'T changed
+// since is still a legitimate degrade-gracefully candidate.
+{
+  const userId = "u1";
+  const fpCurrent = computeGateFingerprint({ big9: ["peanut"], other: [] }, "Leans Italian.");
+  const rows = [
+    { user_id: userId, slice_date: "2026-09-20", status: "ready", gate_fingerprint: fpCurrent, recipe_ids: ["still-good-dish"] },
+    { user_id: "other-user", slice_date: "2026-09-23", status: "ready", gate_fingerprint: fpCurrent, recipe_ids: ["not-this-users-row"] },
+  ];
+  const fallback = simulateFallbackQuery(rows, userId, fpCurrent);
+  check("(ii) matching-fingerprint prior-day fallback still served", fallback?.recipe_ids, ["still-good-dish"]);
+}
+
+// (iii) Profile-read failure -> must fail closed (NULL -> all nine gates)
+// and the freshness check must treat it as a mismatch, never a cache hit,
+// against any OTHER real profile state.
+{
+  // profileRow undefined (as if the read failed) collapses to the same
+  // fingerprint as a genuinely-null allergies profile — both feed
+  // deriveBig9Gates(undefined/null) -> ALL_BIG9_IDS, so this IS the
+  // fail-closed path, not a silent skip.
+  const fpOnReadFailure = computeGateFingerprint(undefined, "");
+  const fpGenuineNull = computeGateFingerprint(null, "");
+  check("(iii) profile-read failure fingerprints identically to genuine NULL allergies", fpOnReadFailure === fpGenuineNull, true);
+  check(
+    "(iii) read-failure gate set is the fail-closed ALL_BIG9 set",
+    deriveBig9Gates(undefined).length,
+    Object.keys(BIG9_TO_POOL_GATE).length
+  );
+
+  // It must NOT spuriously match a real, non-null profile's stored
+  // fingerprint (no false "cache is fresh" off a read failure).
+  const fpRealPeanutProfile = computeGateFingerprint({ big9: ["peanut"], other: [] }, "");
+  const existingSlice = { gate_fingerprint: fpRealPeanutProfile };
+  check(
+    "(iii) read-failure fingerprint does NOT match a real allergy profile's cached row -> NOT fresh",
+    isCacheFresh(existingSlice, fpOnReadFailure),
+    false
+  );
+
+  // Safety proof for the one case where a collision COULD occur: if the
+  // matching cached row was itself genuinely computed under null allergies
+  // (also all-nine-gated), serving it is still safe on a read failure,
+  // because the read-failure fallback gate set (all nine) is always a
+  // superset of any real, narrower allergy gate set — it can only be MORE
+  // restrictive, never less.
+  const allNineColumns = new Set(deriveBig9Gates(null).map((g) => g.column));
+  const narrowerColumns = new Set(deriveBig9Gates({ big9: ["peanut", "sesame"], other: [] }).map((g) => g.column));
+  const isSuperset = [...narrowerColumns].every((c) => allNineColumns.has(c));
+  check("(iii) fail-closed ALL_BIG9 gate set is a superset of any narrower real gate set", isSuperset, true);
 }
 
 console.log("\n" + "=".repeat(80));

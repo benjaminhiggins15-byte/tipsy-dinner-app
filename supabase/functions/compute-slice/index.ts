@@ -698,12 +698,27 @@ Deno.serve(async (req) => {
     return jsonResponse({ slice: existingSlice, computed: false }, 200)
   }
 
+  // Session 2026-09-23 fix: this used to fall back to the single most recent
+  // 'ready' row with NO fingerprint check at all — which meant a user who
+  // just added an allergy (triggering a same-request recompute via the
+  // freshness check above) could still end up served the exact pre-edit
+  // slice the freshness check had just correctly rejected, if that recompute
+  // then failed for any reason (Stage 1/2 error, AI failure, write failure).
+  // Now scoped to gate_fingerprint = currentGateFingerprint — a fallback can
+  // ONLY serve a slice proven computed under the user's CURRENT allergies/
+  // taste_profile, never merely "the most recent one." If no ready row
+  // carries a matching fingerprint (including every pre-fingerprint row,
+  // which is all of them until each user's next successful recompute), this
+  // fails honest with no slice — Home.tsx already renders that as "Your
+  // suggestions will appear here soon." (see its `!result.slice` branch),
+  // not an error.
   async function fallbackToPriorSliceOrError(reason: string) {
     const { data: priorSlice } = await adminClient
       .from('user_recipe_slices')
       .select('*')
       .eq('user_id', callerId)
       .eq('status', 'ready')
+      .eq('gate_fingerprint', currentGateFingerprint)
       .order('slice_date', { ascending: false })
       .limit(1)
       .maybeSingle()
