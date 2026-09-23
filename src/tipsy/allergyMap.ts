@@ -246,7 +246,10 @@ export const BIG9_DISPLAY_NAMES: Record<Big9Id, string> = {
 // sibling of compute-slice/index.ts's scanTextForBig9Ids — duplicated, not
 // imported, same cross-boundary convention as this file's other exports
 // (compute-slice is Deno/Edge Function code, a different runtime and build
-// system from this client bundle).
+// system from this client bundle). This file (allergyMap.ts) is the MASTER
+// copy of ALLERGEN_SYNONYM_MAP — compute-slice/index.ts's copy was found
+// drifted 17 entries behind on 2026-09-22 and re-synced by hand; there is no
+// automated check, so any addition/removal here must be mirrored there too.
 export function scanTextForBig9Ids(text: string): Big9Id[] {
   const normalized = text.toLowerCase();
   const found = new Set<Big9Id>();

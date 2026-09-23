@@ -136,8 +136,19 @@ const BIG9_TO_POOL_GATE: Record<Big9Id, { column: string; value: boolean }> = {
 // covers that case). Unrecognized ids are skipped rather than thrown on: the
 // shape CHECK constraint guarantees the envelope, not that every string
 // inside `big9` is one of the nine known ids.
+//
+// NULL fail-closed (Session, 2026-09-22): a true NULL/undefined `allergies`
+// means "never asked," not "asked and confirmed none" — mirrors
+// allergyMap.ts's effectiveAllergensForScan, which resolves the same case to
+// ALL_BIG9_IDS. Previously this returned [] for NULL too, so a never-asked
+// user's Stage 1 query added zero allergen gates and the full pool passed
+// through unfiltered (documented gap, FEATURE_SPECS.md boundary #4). Only
+// literal null/undefined takes this branch — a confirmed-empty
+// {big9:[],other:[]} record (asked, answered none) is NOT null, falls
+// through to the array check below, and correctly still yields no gates.
 function deriveBig9Gates(allergies: unknown): { column: string; value: boolean }[] {
-  if (!allergies || typeof allergies !== 'object') return []
+  if (allergies === null || allergies === undefined) return Object.values(BIG9_TO_POOL_GATE)
+  if (typeof allergies !== 'object') return []
   const big9 = (allergies as { big9?: unknown }).big9
   if (!Array.isArray(big9)) return []
 
@@ -167,15 +178,20 @@ function deriveBig9Gates(allergies: unknown): { column: string; value: boolean }
 //
 // ALLERGEN_SYNONYM_MAP/scanTextForBig9Ids are DUPLICATED (not imported) from
 // src/tipsy/allergyMap.ts's ALLERGEN_SYNONYM_MAP/matchAllergyItem, same
-// cross-boundary convention as every other copied block in this file — same
-// synonym set, same longest-key-first + word-boundary regex matching, just
-// run directly against the raw failed-answer sentence instead of one
-// pre-split comma item (the regex scan has no such length assumption, so it
-// works unchanged on a full sentence). Fail-closed bias inherited from
-// allergyMap.ts: this scan finding nothing does NOT mean "safe" — it means
-// "no known synonym recognized" — which is exactly why the same raw text is
-// ALSO passed to Stage 2 as a soft AI hint (see below), rather than treating
-// a clean scan as a green light.
+// cross-boundary convention as every other copied block in this file — SAME
+// synonym set (re-synced 2026-09-22; this copy had silently drifted 17
+// hidden-carrier entries behind allergyMap.ts's — worcestershire, ghee,
+// paneer, and the egg/wheat/soy dish-name carriers — despite this comment
+// having claimed parity the whole time; there is no automated check, so any
+// future edit to allergyMap.ts's map must be mirrored here by hand), same
+// longest-key-first + word-boundary regex matching, just run directly
+// against the raw failed-answer sentence instead of one pre-split comma item
+// (the regex scan has no such length assumption, so it works unchanged on a
+// full sentence). Fail-closed bias inherited from allergyMap.ts: this scan
+// finding nothing does NOT mean "safe" — it means "no known synonym
+// recognized" — which is exactly why the same raw text is ALSO passed to
+// Stage 2 as a soft AI hint (see below), rather than treating a clean scan
+// as a green light.
 // ---------------------------------------------------------------------------
 
 const ALLERGEN_SYNONYM_MAP: Record<string, Big9Id> = {
@@ -217,6 +233,8 @@ const ALLERGEN_SYNONYM_MAP: Record<string, Big9Id> = {
   sardine: 'fish',
   sardines: 'fish',
   herring: 'fish',
+  // hidden carrier: Worcestershire sauce is traditionally anchovy-based
+  worcestershire: 'fish',
 
   // milk
   milk: 'milk',
@@ -227,6 +245,9 @@ const ALLERGEN_SYNONYM_MAP: Record<string, Big9Id> = {
   cream: 'milk',
   yogurt: 'milk',
   yoghurt: 'milk',
+  // hidden carriers
+  ghee: 'milk',
+  paneer: 'milk',
 
   // egg
   egg: 'egg',
@@ -234,6 +255,17 @@ const ALLERGEN_SYNONYM_MAP: Record<string, Big9Id> = {
   albumen: 'egg',
   mayonnaise: 'egg',
   mayo: 'egg',
+  // hidden carriers — dish/product names that reliably contain egg even when
+  // "egg" itself never appears in the ingredient text. Known-carriers list,
+  // not exhaustive.
+  brioche: 'egg',
+  aioli: 'egg',
+  carbonara: 'egg',
+  custard: 'egg',
+  meringue: 'egg',
+  hollandaise: 'egg',
+  frittata: 'egg',
+  quiche: 'egg',
 
   // peanut
   peanut: 'peanut',
@@ -269,6 +301,10 @@ const ALLERGEN_SYNONYM_MAP: Record<string, Big9Id> = {
   // closest Big-9 id is wheat — same simplification allergyMap.ts makes)
   wheat: 'wheat',
   gluten: 'wheat',
+  // hidden carriers
+  panko: 'wheat',
+  couscous: 'wheat',
+  seitan: 'wheat',
 
   // soy
   soy: 'soy',
@@ -277,6 +313,10 @@ const ALLERGEN_SYNONYM_MAP: Record<string, Big9Id> = {
   soybeans: 'soy',
   edamame: 'soy',
   tofu: 'soy',
+  // hidden carriers
+  miso: 'soy',
+  tempeh: 'soy',
+  tamari: 'soy',
 
   // sesame
   sesame: 'sesame',
