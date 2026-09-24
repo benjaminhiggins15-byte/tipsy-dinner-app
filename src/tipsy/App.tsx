@@ -521,6 +521,8 @@ function renderScreen(
         menuId={s.menuId}
         section={s.section}
         onClose={back}
+        recipesByCategory={recipesByCategory ?? {}}
+        ensureRecipesLoaded={ensureRecipesLoaded}
       />
     );
     case "profile": return <Profile back={back} openEdit={(k) => push({ name: "profileedit", fieldKey: k })} isTabRoot={isTabRoot} onSignOut={onSignOut!} profile={profile || null} onUpdate={onUpdate || (async () => {})} />;

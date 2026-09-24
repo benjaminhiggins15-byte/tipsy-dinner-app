@@ -1,5 +1,5 @@
 import { useState, useEffect, type CSSProperties } from "react";
-import { loadCustomCategories, getRecipesForCategory, addRecipeToMenuSection, getRecipesForMenuSection, type MenuSection } from "./data";
+import { loadCustomCategories, addRecipeToMenuSection, getRecipesForMenuSection, type MenuSection } from "./data";
 
 const C = {
   bg: "#FAF7F2",
@@ -24,9 +24,11 @@ type Props = {
   menuId: string;
   section: MenuSection;
   onClose: () => void;
+  recipesByCategory?: Record<string, any[]>;
+  ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void>;
 };
 
-export default function RecipePicker({ menuId, section, onClose }: Props) {
+export default function RecipePicker({ menuId, section, onClose, recipesByCategory, ensureRecipesLoaded }: Props) {
   const [view, setView] = useState<View>("categories");
   const [transition, setTransition] = useState<{ from: View; to: View; direction: "forward" | "back" } | null>(null);
   const [addedInSession, setAddedInSession] = useState<Set<string>>(new Set());
@@ -228,6 +230,8 @@ export default function RecipePicker({ menuId, section, onClose }: Props) {
             addedInSession={addedInSession}
             onCategoryTap={handleCategoryTap}
             onRecipeTap={handleRecipeTap}
+            recipesByCategory={recipesByCategory}
+            ensureRecipesLoaded={ensureRecipesLoaded}
           />
         ) : (
           <>
@@ -239,6 +243,8 @@ export default function RecipePicker({ menuId, section, onClose }: Props) {
               addedInSession={addedInSession}
               onCategoryTap={handleCategoryTap}
               onRecipeTap={handleRecipeTap}
+              recipesByCategory={recipesByCategory}
+              ensureRecipesLoaded={ensureRecipesLoaded}
               transform={getTransform(transition.direction, "from", animPhase)}
               transitionStyle={animPhase === "start" ? "none" : `transform ${DURATION}ms ${EASE}`}
               zIndex={transition.direction === "forward" ? 1 : 2}
@@ -251,6 +257,8 @@ export default function RecipePicker({ menuId, section, onClose }: Props) {
               addedInSession={addedInSession}
               onCategoryTap={handleCategoryTap}
               onRecipeTap={handleRecipeTap}
+              recipesByCategory={recipesByCategory}
+              ensureRecipesLoaded={ensureRecipesLoaded}
               transform={getTransform(transition.direction, "to", animPhase)}
               transitionStyle={animPhase === "start" ? "none" : `transform ${DURATION}ms ${EASE}`}
               zIndex={transition.direction === "forward" ? 2 : 1}
@@ -312,7 +320,9 @@ function renderView(
   existingRecipeIds: string[],
   addedInSession: Set<string>,
   onCategoryTap: (key: string, label: string) => void,
-  onRecipeTap: (id: string) => void
+  onRecipeTap: (id: string) => void,
+  recipesByCategory?: Record<string, any[]>,
+  ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void>
 ) {
   if (view === "categories") {
     if (categoriesLoading) {
@@ -372,6 +382,8 @@ function renderView(
         existingRecipeIds={existingRecipeIds}
         addedInSession={addedInSession}
         onRecipeTap={onRecipeTap}
+        recipesByCategory={recipesByCategory}
+        ensureRecipesLoaded={ensureRecipesLoaded}
       />
     );
   }
@@ -385,6 +397,8 @@ function ViewContent({
   addedInSession,
   onCategoryTap,
   onRecipeTap,
+  recipesByCategory,
+  ensureRecipesLoaded,
 }: {
   view: View;
   categories: any[];
@@ -393,6 +407,8 @@ function ViewContent({
   addedInSession: Set<string>;
   onCategoryTap: (key: string, label: string) => void;
   onRecipeTap: (id: string) => void;
+  recipesByCategory?: Record<string, any[]>;
+  ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void>;
 }) {
   return (
     <div style={{
@@ -407,7 +423,7 @@ function ViewContent({
         overflowY: "auto",
         padding: "20px 16px",
       }}>
-        {renderView(view, categories, categoriesLoading, existingRecipeIds, addedInSession, onCategoryTap, onRecipeTap)}
+        {renderView(view, categories, categoriesLoading, existingRecipeIds, addedInSession, onCategoryTap, onRecipeTap, recipesByCategory, ensureRecipesLoaded)}
       </div>
     </div>
   );
@@ -421,6 +437,8 @@ function ViewLayer({
   addedInSession,
   onCategoryTap,
   onRecipeTap,
+  recipesByCategory,
+  ensureRecipesLoaded,
   transform,
   transitionStyle,
   zIndex,
@@ -432,6 +450,8 @@ function ViewLayer({
   addedInSession: Set<string>;
   onCategoryTap: (key: string, label: string) => void;
   onRecipeTap: (id: string) => void;
+  recipesByCategory?: Record<string, any[]>;
+  ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void>;
   transform: string;
   transitionStyle: string;
   zIndex: number;
@@ -454,7 +474,7 @@ function ViewLayer({
         overflowY: "auto",
         padding: "20px 16px",
       }}>
-        {renderView(view, categories, categoriesLoading, existingRecipeIds, addedInSession, onCategoryTap, onRecipeTap)}
+        {renderView(view, categories, categoriesLoading, existingRecipeIds, addedInSession, onCategoryTap, onRecipeTap, recipesByCategory, ensureRecipesLoaded)}
       </div>
     </div>
   );
@@ -466,31 +486,30 @@ function RecipeList({
   existingRecipeIds,
   addedInSession,
   onRecipeTap,
+  recipesByCategory,
+  ensureRecipesLoaded,
 }: {
   categoryKey: string;
   categoryLabel: string;
   existingRecipeIds: string[];
   addedInSession: Set<string>;
   onRecipeTap: (id: string) => void;
+  recipesByCategory?: Record<string, any[]>;
+  ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void>;
 }) {
-  const [recipes, setRecipes] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cached = recipesByCategory?.[categoryKey];
 
   useEffect(() => {
-    let ignore = false;
-    const loadRecipes = async () => {
-      const data = await getRecipesForCategory(categoryKey, categoryLabel);
-      if (ignore) return;
-      setRecipes(data);
-      setLoading(false);
-    };
-    loadRecipes();
-    return () => { ignore = true; };
-  }, [categoryKey, categoryLabel]);
+    if (!cached) {
+      ensureRecipesLoaded?.(categoryKey, categoryLabel);
+    }
+  }, [categoryKey, categoryLabel, cached, ensureRecipesLoaded]);
 
-  if (loading) {
+  if (!cached) {
     return <div />;
   }
+
+  const recipes = cached;
 
   if (recipes.length === 0) {
     return (
