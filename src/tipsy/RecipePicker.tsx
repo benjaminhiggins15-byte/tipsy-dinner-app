@@ -32,13 +32,18 @@ export default function RecipePicker({ menuId, section, onClose }: Props) {
   const [addedInSession, setAddedInSession] = useState<Set<string>>(new Set());
   const [existingRecipeIds, setExistingRecipeIds] = useState<string[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
 
   useEffect(() => {
+    let ignore = false;
     const loadCategories = async () => {
       const cats = await loadCustomCategories();
+      if (ignore) return;
       setCategories(cats);
+      setCategoriesLoading(false);
     };
     loadCategories();
+    return () => { ignore = true; };
   }, []);
 
   useEffect(() => {
@@ -210,6 +215,7 @@ export default function RecipePicker({ menuId, section, onClose }: Props) {
           <ViewContent
             view={view}
             categories={categories}
+            categoriesLoading={categoriesLoading}
             existingRecipeIds={existingRecipeIds}
             addedInSession={addedInSession}
             onCategoryTap={handleCategoryTap}
@@ -220,6 +226,7 @@ export default function RecipePicker({ menuId, section, onClose }: Props) {
             <ViewLayer
               view={transition.from}
               categories={categories}
+              categoriesLoading={categoriesLoading}
               existingRecipeIds={existingRecipeIds}
               addedInSession={addedInSession}
               onCategoryTap={handleCategoryTap}
@@ -231,6 +238,7 @@ export default function RecipePicker({ menuId, section, onClose }: Props) {
             <ViewLayer
               view={transition.to}
               categories={categories}
+              categoriesLoading={categoriesLoading}
               existingRecipeIds={existingRecipeIds}
               addedInSession={addedInSession}
               onCategoryTap={handleCategoryTap}
@@ -270,12 +278,16 @@ function getTransform(direction: "forward" | "back", layer: "from" | "to", phase
 function renderView(
   view: View,
   categories: any[],
+  categoriesLoading: boolean,
   existingRecipeIds: string[],
   addedInSession: Set<string>,
   onCategoryTap: (key: string, label: string) => void,
   onRecipeTap: (id: string) => void
 ) {
   if (view === "categories") {
+    if (categoriesLoading) {
+      return <div />;
+    }
     return (
       <div style={{
         display: "grid",
@@ -338,6 +350,7 @@ function renderView(
 function ViewContent({
   view,
   categories,
+  categoriesLoading,
   existingRecipeIds,
   addedInSession,
   onCategoryTap,
@@ -345,6 +358,7 @@ function ViewContent({
 }: {
   view: View;
   categories: any[];
+  categoriesLoading: boolean;
   existingRecipeIds: string[];
   addedInSession: Set<string>;
   onCategoryTap: (key: string, label: string) => void;
@@ -363,7 +377,7 @@ function ViewContent({
         overflowY: "auto",
         padding: "20px 16px",
       }}>
-        {renderView(view, categories, existingRecipeIds, addedInSession, onCategoryTap, onRecipeTap)}
+        {renderView(view, categories, categoriesLoading, existingRecipeIds, addedInSession, onCategoryTap, onRecipeTap)}
       </div>
     </div>
   );
@@ -372,6 +386,7 @@ function ViewContent({
 function ViewLayer({
   view,
   categories,
+  categoriesLoading,
   existingRecipeIds,
   addedInSession,
   onCategoryTap,
@@ -382,6 +397,7 @@ function ViewLayer({
 }: {
   view: View;
   categories: any[];
+  categoriesLoading: boolean;
   existingRecipeIds: string[];
   addedInSession: Set<string>;
   onCategoryTap: (key: string, label: string) => void;
@@ -408,7 +424,7 @@ function ViewLayer({
         overflowY: "auto",
         padding: "20px 16px",
       }}>
-        {renderView(view, categories, existingRecipeIds, addedInSession, onCategoryTap, onRecipeTap)}
+        {renderView(view, categories, categoriesLoading, existingRecipeIds, addedInSession, onCategoryTap, onRecipeTap)}
       </div>
     </div>
   );
@@ -428,14 +444,23 @@ function RecipeList({
   onRecipeTap: (id: string) => void;
 }) {
   const [recipes, setRecipes] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let ignore = false;
     const loadRecipes = async () => {
       const data = await getRecipesForCategory(categoryKey, categoryLabel);
+      if (ignore) return;
       setRecipes(data);
+      setLoading(false);
     };
     loadRecipes();
+    return () => { ignore = true; };
   }, [categoryKey, categoryLabel]);
+
+  if (loading) {
+    return <div />;
+  }
 
   if (recipes.length === 0) {
     return (
