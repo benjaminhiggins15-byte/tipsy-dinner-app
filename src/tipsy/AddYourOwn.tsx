@@ -108,6 +108,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
   const [trayOpen, setTrayOpen] = useState(!!initialDraft?.trayOpen);
   const [newCategorySelection, setNewCategorySelection] = useState<{ key: string; label: string } | null>((initialDraft as any)?.newCategory || null);
   const [savedCategory, setSavedCategory] = useState<{ key: string; label: string } | null>(null);
+  const [menuAddErr, setMenuAddErr] = useState(false);
 
   // Inline edit state
   const [editing, setEditing] = useState<
@@ -223,7 +224,11 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
     }, 'manual', key); // Manual recipe from Write Your Own with category association
 
     if (menuInfo) {
-      addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, id);
+      const result = await addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, id);
+      if (!result) {
+        setMenuAddErr(true);
+        setTimeout(() => setMenuAddErr(false), 2000);
+      }
     }
 
     // Clear recipe cache for this category
@@ -785,6 +790,28 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
               {deleting ? "Deleting…" : "Delete"}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Menu-add failure toast */}
+      {menuAddErr && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "80px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "#233C00",
+            color: "#FEE7C0",
+            padding: "8px 16px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            fontFamily: "Inter, sans-serif",
+            fontWeight: 500,
+            zIndex: 1000,
+          }}
+        >
+          Recipe saved, but couldn't add it to the menu — add it from the menu instead.
         </div>
       )}
     </div>

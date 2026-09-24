@@ -521,6 +521,8 @@ function renderScreen(
         menuId={s.menuId}
         section={s.section}
         onClose={back}
+        recipesByCategory={recipesByCategory ?? {}}
+        ensureRecipesLoaded={ensureRecipesLoaded}
       />
     );
     case "profile": return <Profile back={back} openEdit={(k) => push({ name: "profileedit", fieldKey: k })} isTabRoot={isTabRoot} onSignOut={onSignOut!} profile={profile || null} onUpdate={onUpdate || (async () => {})} />;
@@ -5431,8 +5433,8 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
 
       // Create AI message immediately — shared across allergen-retry attempts
       // below, so a regeneration updates this same bubble rather than
-      // stacking a new one.
-      setTyping(false);
+      // stacking a new one. `typing` stays true (TypingBubble keeps showing)
+      // until the first streamed chunk actually arrives, below.
       const aiMessageId = ++messageIdRef.current;
       setMessages((m) => [...m, { id: aiMessageId, role: "ai", text: "" }]);
 
@@ -5475,6 +5477,8 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
 
         for await (const chunk of stream) {
           if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
+            // First real content of the response — stop showing TypingBubble.
+            setTyping(false);
             fullText += chunk.delta.text;
 
             // Detect if recipe generation has started
@@ -5610,8 +5614,8 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
 
       // Create AI message immediately — shared across allergen-retry attempts
       // below, so a regeneration updates this same bubble rather than
-      // stacking a new one.
-      setTyping(false);
+      // stacking a new one. `typing` stays true (TypingBubble keeps showing)
+      // until the first streamed chunk actually arrives, below.
       const aiMessageId = ++messageIdRef.current;
       setMessages((m) => [...m, { id: aiMessageId, role: "ai", text: "" }]);
 
@@ -5654,6 +5658,8 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
 
         for await (const chunk of stream) {
           if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
+            // First real content of the response — stop showing TypingBubble.
+            setTyping(false);
             fullText += chunk.delta.text;
 
             // Detect if recipe generation has started
@@ -5908,8 +5914,8 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
 
         // Create AI message immediately — shared across allergen-retry
         // attempts below, so a regeneration updates this same bubble rather
-        // than stacking a new one.
-        setTyping(false);
+        // than stacking a new one. `typing` stays true (TypingBubble keeps
+        // showing) until the first streamed chunk actually arrives, below.
         const aiMessageId = ++messageIdRef.current;
         setMessages((m) => [...m, { id: aiMessageId, role: "ai", text: "" }]);
 
@@ -5951,6 +5957,8 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
 
           for await (const chunk of stream) {
             if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
+              // First real content of the response — stop showing TypingBubble.
+              setTyping(false);
               fullText += chunk.delta.text;
 
               if (!generatingRecipe && fullText.includes("<recipe>")) {

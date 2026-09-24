@@ -1,5 +1,5 @@
 import { useState, useEffect, type CSSProperties } from "react";
-import { loadCustomCategories, getRecipesForCategory, addRecipeToMenuSection, getRecipesForMenuSection, type MenuSection } from "./data";
+import { loadCustomCategories, addRecipeToMenuSection, getRecipesForMenuSection, type MenuSection } from "./data";
 
 const C = {
   bg: "#FAF7F2",
@@ -24,21 +24,29 @@ type Props = {
   menuId: string;
   section: MenuSection;
   onClose: () => void;
+  recipesByCategory?: Record<string, any[]>;
+  ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void>;
 };
 
-export default function RecipePicker({ menuId, section, onClose }: Props) {
+export default function RecipePicker({ menuId, section, onClose, recipesByCategory, ensureRecipesLoaded }: Props) {
   const [view, setView] = useState<View>("categories");
   const [transition, setTransition] = useState<{ from: View; to: View; direction: "forward" | "back" } | null>(null);
   const [addedInSession, setAddedInSession] = useState<Set<string>>(new Set());
   const [existingRecipeIds, setExistingRecipeIds] = useState<string[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [addError, setAddError] = useState(false);
 
   useEffect(() => {
+    let ignore = false;
     const loadCategories = async () => {
       const cats = await loadCustomCategories();
+      if (ignore) return;
       setCategories(cats);
+      setCategoriesLoading(false);
     };
     loadCategories();
+    return () => { ignore = true; };
   }, []);
 
   useEffect(() => {
@@ -66,11 +74,18 @@ export default function RecipePicker({ menuId, section, onClose }: Props) {
     }, 0);
   };
 
-  const handleRecipeTap = (recipeId: string) => {
+  const handleRecipeTap = async (recipeId: string) => {
     if (existingRecipeIds.includes(recipeId)) return; // Already in section, ignore
 
-    addRecipeToMenuSection(menuId, section, recipeId);
-    setAddedInSession(prev => new Set([...prev, recipeId]));
+    try {
+      const result = await addRecipeToMenuSection(menuId, section, recipeId);
+      if (!result) throw new Error("addRecipeToMenuSection returned null");
+      setAddedInSession(prev => new Set([...prev, recipeId]));
+    } catch (err) {
+      console.error("Error adding recipe to menu section:", err);
+      setAddError(true);
+      setTimeout(() => setAddError(false), 2000);
+    }
   };
 
   const handleBack = () => {
@@ -210,20 +225,26 @@ export default function RecipePicker({ menuId, section, onClose }: Props) {
           <ViewContent
             view={view}
             categories={categories}
+            categoriesLoading={categoriesLoading}
             existingRecipeIds={existingRecipeIds}
             addedInSession={addedInSession}
             onCategoryTap={handleCategoryTap}
             onRecipeTap={handleRecipeTap}
+            recipesByCategory={recipesByCategory}
+            ensureRecipesLoaded={ensureRecipesLoaded}
           />
         ) : (
           <>
             <ViewLayer
               view={transition.from}
               categories={categories}
+              categoriesLoading={categoriesLoading}
               existingRecipeIds={existingRecipeIds}
               addedInSession={addedInSession}
               onCategoryTap={handleCategoryTap}
               onRecipeTap={handleRecipeTap}
+              recipesByCategory={recipesByCategory}
+              ensureRecipesLoaded={ensureRecipesLoaded}
               transform={getTransform(transition.direction, "from", animPhase)}
               transitionStyle={animPhase === "start" ? "none" : `transform ${DURATION}ms ${EASE}`}
               zIndex={transition.direction === "forward" ? 1 : 2}
@@ -231,10 +252,13 @@ export default function RecipePicker({ menuId, section, onClose }: Props) {
             <ViewLayer
               view={transition.to}
               categories={categories}
+              categoriesLoading={categoriesLoading}
               existingRecipeIds={existingRecipeIds}
               addedInSession={addedInSession}
               onCategoryTap={handleCategoryTap}
               onRecipeTap={handleRecipeTap}
+              recipesByCategory={recipesByCategory}
+              ensureRecipesLoaded={ensureRecipesLoaded}
               transform={getTransform(transition.direction, "to", animPhase)}
               transitionStyle={animPhase === "start" ? "none" : `transform ${DURATION}ms ${EASE}`}
               zIndex={transition.direction === "forward" ? 2 : 1}
@@ -242,6 +266,28 @@ export default function RecipePicker({ menuId, section, onClose }: Props) {
           </>
         )}
       </div>
+
+      {/* Add-to-menu failure toast */}
+      {addError && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "80px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "#233C00",
+            color: "#FEE7C0",
+            padding: "8px 16px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            fontFamily: "Inter, sans-serif",
+            fontWeight: 500,
+            zIndex: 1000,
+          }}
+        >
+          Couldn't add recipe — try again
+        </div>
+      )}
     </div>
   );
 }
@@ -270,12 +316,18 @@ function getTransform(direction: "forward" | "back", layer: "from" | "to", phase
 function renderView(
   view: View,
   categories: any[],
+  categoriesLoading: boolean,
   existingRecipeIds: string[],
   addedInSession: Set<string>,
   onCategoryTap: (key: string, label: string) => void,
-  onRecipeTap: (id: string) => void
+  onRecipeTap: (id: string) => void,
+  recipesByCategory?: Record<string, any[]>,
+  ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void>
 ) {
   if (view === "categories") {
+    if (categoriesLoading) {
+      return <div />;
+    }
     return (
       <div style={{
         display: "grid",
@@ -330,6 +382,8 @@ function renderView(
         existingRecipeIds={existingRecipeIds}
         addedInSession={addedInSession}
         onRecipeTap={onRecipeTap}
+        recipesByCategory={recipesByCategory}
+        ensureRecipesLoaded={ensureRecipesLoaded}
       />
     );
   }
@@ -338,17 +392,23 @@ function renderView(
 function ViewContent({
   view,
   categories,
+  categoriesLoading,
   existingRecipeIds,
   addedInSession,
   onCategoryTap,
   onRecipeTap,
+  recipesByCategory,
+  ensureRecipesLoaded,
 }: {
   view: View;
   categories: any[];
+  categoriesLoading: boolean;
   existingRecipeIds: string[];
   addedInSession: Set<string>;
   onCategoryTap: (key: string, label: string) => void;
   onRecipeTap: (id: string) => void;
+  recipesByCategory?: Record<string, any[]>;
+  ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void>;
 }) {
   return (
     <div style={{
@@ -363,7 +423,7 @@ function ViewContent({
         overflowY: "auto",
         padding: "20px 16px",
       }}>
-        {renderView(view, categories, existingRecipeIds, addedInSession, onCategoryTap, onRecipeTap)}
+        {renderView(view, categories, categoriesLoading, existingRecipeIds, addedInSession, onCategoryTap, onRecipeTap, recipesByCategory, ensureRecipesLoaded)}
       </div>
     </div>
   );
@@ -372,20 +432,26 @@ function ViewContent({
 function ViewLayer({
   view,
   categories,
+  categoriesLoading,
   existingRecipeIds,
   addedInSession,
   onCategoryTap,
   onRecipeTap,
+  recipesByCategory,
+  ensureRecipesLoaded,
   transform,
   transitionStyle,
   zIndex,
 }: {
   view: View;
   categories: any[];
+  categoriesLoading: boolean;
   existingRecipeIds: string[];
   addedInSession: Set<string>;
   onCategoryTap: (key: string, label: string) => void;
   onRecipeTap: (id: string) => void;
+  recipesByCategory?: Record<string, any[]>;
+  ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void>;
   transform: string;
   transitionStyle: string;
   zIndex: number;
@@ -408,7 +474,7 @@ function ViewLayer({
         overflowY: "auto",
         padding: "20px 16px",
       }}>
-        {renderView(view, categories, existingRecipeIds, addedInSession, onCategoryTap, onRecipeTap)}
+        {renderView(view, categories, categoriesLoading, existingRecipeIds, addedInSession, onCategoryTap, onRecipeTap, recipesByCategory, ensureRecipesLoaded)}
       </div>
     </div>
   );
@@ -420,22 +486,30 @@ function RecipeList({
   existingRecipeIds,
   addedInSession,
   onRecipeTap,
+  recipesByCategory,
+  ensureRecipesLoaded,
 }: {
   categoryKey: string;
   categoryLabel: string;
   existingRecipeIds: string[];
   addedInSession: Set<string>;
   onRecipeTap: (id: string) => void;
+  recipesByCategory?: Record<string, any[]>;
+  ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void>;
 }) {
-  const [recipes, setRecipes] = useState<any[]>([]);
+  const cached = recipesByCategory?.[categoryKey];
 
   useEffect(() => {
-    const loadRecipes = async () => {
-      const data = await getRecipesForCategory(categoryKey, categoryLabel);
-      setRecipes(data);
-    };
-    loadRecipes();
-  }, [categoryKey, categoryLabel]);
+    if (!cached) {
+      ensureRecipesLoaded?.(categoryKey, categoryLabel);
+    }
+  }, [categoryKey, categoryLabel, cached, ensureRecipesLoaded]);
+
+  if (!cached) {
+    return <div />;
+  }
+
+  const recipes = cached;
 
   if (recipes.length === 0) {
     return (
