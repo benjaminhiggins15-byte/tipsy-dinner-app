@@ -2527,7 +2527,9 @@ wheat/milk/shellfish were recorded as judgment calls during vetting but
 never written back to the pool rows — those 35 rows currently carry their
 original (pre-vetting) tag value, not the reviewer's judgment.
 
-**The gate.** `compute-slice` (now at production version v4) filters the
+**The gate.** `compute-slice` (now at production version v8 — see "Gate
+Fingerprint, Profile Allergy UI & Deterministic Confirmation" below for the v6
+cost-down and v8 NULL-gap-closure/fingerprint history) filters the
 pool deterministically in Stage 1, before any AI call, from three gate
 sources merged in a fixed, first-source-wins priority order:
 `deriveBig9Gates` (reads `profiles.allergies.big9` directly — the primary,
@@ -2582,10 +2584,14 @@ natural next step.
    caught (the hint depends on the model reading and honoring it).
 3. Sulfites and nightshades are deliberately untagged — no schema column,
    no gate, no soft hint. Out of scope for this feature.
-4. A `NULL` `allergies` value (a legacy profile that predates this feature
-   and was never asked) produces zero gates from every source — such a
-   user is completely unprotected until they pass through the composer at
-   least once.
+4. **CLOSED as of `compute-slice` v8 (Session, 2026-09-23) — no longer an
+   open gap.** A `NULL` `allergies` value (a legacy profile that predates
+   this feature and was never asked) used to produce zero gates from every
+   source, leaving such a user completely unprotected until they passed
+   through the composer at least once. `compute-slice` now fails closed on
+   `NULL` — the full Big-9 set is gated, matching the Build/cook-chat path's
+   existing null-profile posture below. Full detail: "Gate Fingerprint,
+   Profile Allergy UI & Deterministic Confirmation" below.
 5. `wheat`, `milk`, and `shellfish` rely on three REUSED pre-existing pool
    columns rather than dedicated ones, inheriting whatever tagging accuracy
    those columns already had from Build 1 — including the ~35 unresolved
@@ -2648,10 +2654,12 @@ true` record falls back to a deterministic `scanTextForBig9Ids` scan of its
 raw failed-answer text (same mechanism as `compute-slice`'s
 `deriveUnparsedBackstopGates`, independently duplicated here). A `NULL`
 profile (never asked) resolves to the **full Big-9 set** —
-fail-closed, deliberately diverging from `compute-slice`'s own null-user
-posture (see boundary 4 above): this is the live generation path, not the
-offline suggestion pool, and an adversarial test proved that an empty scan
-set here meant Layer 2 scanned for nothing, relying entirely on the
+fail-closed. **This no longer diverges from `compute-slice`'s own null-user
+posture as of v8** (see boundary 4 above, CLOSED 2026-09-23) — the two paths
+independently arrived at, and now share, the same fail-closed default for a
+never-asked user; this is still the live generation path, not the offline
+suggestion pool, and an adversarial test originally proved that an empty
+scan set here meant Layer 2 scanned for nothing, relying entirely on the
 non-deterministic Layer 1 instruction. A confirmed-no-allergies profile
 (`{big9: [], other: []}`, no `unparsed` flag) still resolves to an empty
 scan set and passes through unblocked — this distinction from `NULL` is
@@ -2672,11 +2680,13 @@ load-bearing and must not collapse; the two states are never conflated.
    best-effort only, carried through Layer 1's prompt instruction if the
    user mentions them in conversation, same honest limit as the
    suggested-recipes gate above.
-3. The null-profile fail-closed default described above applies to THIS
-   path only. `compute-slice`'s own null-user gap (boundary 4 above — a
-   never-asked user gets zero gates from every pool-side source) is a
-   separate, already-documented, and still-unchanged limitation; this work
-   did not touch it.
+3. **Stale as of `compute-slice` v8 (Session, 2026-09-23) — no longer a
+   divergence.** This point originally noted that the null-profile
+   fail-closed default described above applied to THIS path only, while
+   `compute-slice`'s own null-user gap (boundary 4 above) remained separate
+   and unchanged. `compute-slice` v8 closed that gap independently (see
+   "Gate Fingerprint, Profile Allergy UI & Deterministic Confirmation"
+   below) — both paths now fail closed on a `NULL` profile.
 
 **Verification.** A 40-case adversarial test suite (named-allergen detection,
 all known hidden carriers, null/unparsed/confirmed-empty fail-closed
@@ -2685,6 +2695,132 @@ loop) passes 40/40 with zero fail-open findings, run against the actual
 committed `allergyMap.ts`/`App.tsx` source. Additionally verified on a real
 device across three scenarios — regenerate-to-clean, creative substitution,
 and upfront refusal — all of which keep the allergen away from the user.
+**Correction (Session, 2026-09-23): this 40-case suite was never actually
+committed to the repo** — the 40/40 result was real when it was run, but the
+test file itself was lost/never saved, and no re-runnable copy exists today.
+See "Gate Fingerprint, Profile Allergy UI & Deterministic Confirmation"
+below for the full accounting and the 12-case real-function re-proof that
+exists today in its place.
+
+## Gate Fingerprint, Profile Allergy UI & Deterministic Confirmation (Session, 2026-09-23)
+
+Closes the `compute-slice` NULL-allergy gap documented as boundary 4 above,
+adds a staleness guard for cached/fallback slices, reshapes the Profile
+allergy-editing UI, and replaces the onboarding constraints-confirmation
+copy with a deterministic template. `deriveBig9Gates`/
+`deriveUnparsedBackstopGates`/`deriveDietaryGates` priority order, pool
+tagging, and the Build/cook-chat hardening above are all untouched by this
+work.
+
+**`compute-slice` is now v8; boundary 4 above is CLOSED, not just
+narrowed.** A `NULL` `profiles.allergies` (never-asked/legacy) now resolves
+to the full Big-9 set at the Stage-1 gate — the same fail-closed posture the
+Build/cook-chat path (`effectiveAllergensForScan`) already used. The two
+paths' null-user postures no longer diverge; see the corrected notes under
+"Build/Cook-Chat Allergy Hardening" above.
+
+**`gate_fingerprint` column + freshness/fallback rule.** `user_recipe_slices`
+gained a `gate_fingerprint` text column (migration
+`20260923000001_add_gate_fingerprint_to_user_recipe_slices.sql`).
+`compute-slice` computes a canonical fingerprint from the two live gate
+inputs — `canonicalizeAllergiesForFingerprint(allergies)` (sorted
+`big9`/`other`, plus `unparsed`) and `taste_profile` — and writes it
+alongside every slice it upserts. Both the same-day cache-hit path
+(freshness check, step 1 under "Suggested Recipes — Layer 3" above) and the
+AI-failure fallback path (step 4) now compare the candidate slice's stored
+fingerprint against a freshly-computed one for the user's CURRENT
+`allergies`/`taste_profile` before returning it: a match serves the slice as
+before; a mismatch means the user's allergy/taste profile changed since that
+slice was computed, so the function recomputes instead of serving stale
+gates, and if no fresh slice can be computed either, returns no slice rather
+than a mismatched one. This is what let the 2026-09-23 phone test (add
+"rabbit" mid-session in Profile, return to Home) show the rabbit dish
+disappear on the very next Home load instead of waiting out the calendar-day
+cache. Note: `user_recipe_slices` has no `updated_at` column — the upsert's
+`created_at` reflects the FIRST insert for that `slice_date`, not the most
+recent recompute, so `created_at` alone cannot be used as recompute
+evidence; the fingerprint match/mismatch is the correct signal for that.
+
+**`ALLERGEN_SYNONYM_MAP` copies resynced.** `compute-slice`'s duplicate
+synonym map (used by its own `scanTextForBig9Ids`, described above under
+"The gate") had drifted from `allergyMap.ts`'s master copy; both were
+resynced to the same 17 entries this session. `allergyMap.ts` remains the
+master, `compute-slice`'s copy remains a duplicate, not an import (Edge
+Functions can't import from `src/`) — **there is no automated parity check
+between the two**, so a future edit to one without the other will silently
+drift again. Re-diffing the two lists by hand is the only way to catch that
+today.
+
+**Onboarding allergy confirmation is now a deterministic template, not an AI
+call.** `constraintsConfirmation.ts` builds the user-facing confirmation
+line directly from `parseComposedConstraints`'s already-structured result
+(the ALLERGY/DISLIKES severity-labeled lines described under "Onboarding —
+Conversational Flow" above) via a fixed string template — no AI call, no
+`generateOnboardingReflection`-style prompt, nothing to fail-quiet-fallback
+on. This makes the confirmation copy fully predictable and testable (see
+`constraintsConfirmation.test.ts` below), at the cost of the warmer,
+answer-specific phrasing an AI reflection could produce; the per-field
+warmth reflections (`generateOnboardingReflection`) elsewhere in onboarding
+are untouched — this change is scoped to the constraints-confirmation line
+only.
+
+**Profile — two-box Allergies/Dislikes UI over the unchanged constraints
+string.** The Profile edit screen (`Profile.tsx`) now renders the single
+`constraints` prose string as two visually separate boxes, split via
+`splitConstraintsForDisplay()` (new, in `Profile.tsx`) reading the same
+`ALLERGY (hard, never serve): ... / DISLIKES (prefer to avoid): ...`
+severity-labeled shape `parseComposedConstraints` produces at onboarding
+time. The underlying `profiles.constraints` string and its severity-labeled
+format are unchanged — this is a display/edit split, not a schema change.
+Editing behavior, by design:
+- Editing anything in the **Allergies box** forces the ENTIRE edited item
+  back onto the allergy side on save (never split an edited allergy item
+  into the dislike bucket), and re-derives `profiles.allergies.big9`/`other`
+  from the edited text via `mapAllergyItems`, the same structuring function
+  used everywhere else.
+- Editing the **Dislikes box only** never writes `profiles.allergies` at
+  all — a dislike-only edit only ever touches the dislike half of the
+  composed `constraints` string, never the structured allergy gate.
+- **Legacy free text** (a `constraints` value that predates the
+  severity-labeled format and doesn't parse into the two-line shape)
+  displays whole in the Allergies box rather than being silently dropped or
+  guessed at — biased toward showing everything as a potential hard allergy
+  rather than under-showing, consistent with this doc's existing
+  allergy-vs-dislike safety bias elsewhere.
+
+**Test files now exist and are re-runnable.** This repo has no test
+framework configured (`bun:test` types aren't set up) — all of these run via
+`bun run <file>`, using a hand-rolled `pass`/`fail` counter printed to
+stdout, not `bun test`:
+- `src/tipsy/big9BuildChatHardening.test.ts` — `bun run
+  src/tipsy/big9BuildChatHardening.test.ts`. Re-proof of the Build/cook-chat
+  allergy-hardening path against this session's new write-path allergy
+  shapes plus 5 historical fail-open cases, importing and running the real
+  `scanRecipeDraftForBig9` (exported from `App.tsx` for this purpose — a
+  one-word, zero-behavior-change addition) and `effectiveAllergensForScan`,
+  not a reimplementation. 12/12 passing. **This is NOT the 40-case suite
+  referenced above — see the correction there.**
+- `src/tipsy/constraintsConfirmation.test.ts` — `bun run
+  src/tipsy/constraintsConfirmation.test.ts`.
+- `src/tipsy/splitConstraintsForDisplay.test.ts` — `bun run
+  src/tipsy/splitConstraintsForDisplay.test.ts`.
+- `src/tipsy/constraintsEditE2E.test.ts` — `bun run
+  src/tipsy/constraintsEditE2E.test.ts`.
+- `scripts/gate-fingerprint-freshness.test.mjs` — `bun run
+  scripts/gate-fingerprint-freshness.test.mjs`. Proves the fingerprint
+  match/mismatch freshness rule described above.
+
+**Correction — the Build 4 "40/40" verification record.** The
+"Build/Cook-Chat Allergy Hardening" section's own Verification paragraph
+above states a 40-case adversarial suite "passes 40/40 … run against the
+actual committed `allergyMap.ts`/`App.tsx` source." **That suite was never
+actually committed to the repo** — confirmed by exhaustive search
+(`git log --all --diff-filter=A`, full-repo grep) this session; the 40/40
+result was real at the time it was run, but the test file itself was
+lost/never saved. `big9BuildChatHardening.test.ts` above is a focused
+re-proof against the real functions, not a replacement — it does not cover
+the full 40-case adversarial matrix. **Reconstructing the full 40-case suite
+and committing it is an open follow-up**, not done in this session.
 
 ---
 
