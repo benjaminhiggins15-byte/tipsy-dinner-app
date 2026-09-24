@@ -33,6 +33,7 @@ export default function RecipePicker({ menuId, section, onClose }: Props) {
   const [existingRecipeIds, setExistingRecipeIds] = useState<string[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [addError, setAddError] = useState(false);
 
   useEffect(() => {
     let ignore = false;
@@ -71,11 +72,18 @@ export default function RecipePicker({ menuId, section, onClose }: Props) {
     }, 0);
   };
 
-  const handleRecipeTap = (recipeId: string) => {
+  const handleRecipeTap = async (recipeId: string) => {
     if (existingRecipeIds.includes(recipeId)) return; // Already in section, ignore
 
-    addRecipeToMenuSection(menuId, section, recipeId);
-    setAddedInSession(prev => new Set([...prev, recipeId]));
+    try {
+      const result = await addRecipeToMenuSection(menuId, section, recipeId);
+      if (!result) throw new Error("addRecipeToMenuSection returned null");
+      setAddedInSession(prev => new Set([...prev, recipeId]));
+    } catch (err) {
+      console.error("Error adding recipe to menu section:", err);
+      setAddError(true);
+      setTimeout(() => setAddError(false), 2000);
+    }
   };
 
   const handleBack = () => {
@@ -250,6 +258,28 @@ export default function RecipePicker({ menuId, section, onClose }: Props) {
           </>
         )}
       </div>
+
+      {/* Add-to-menu failure toast */}
+      {addError && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "80px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "#233C00",
+            color: "#FEE7C0",
+            padding: "8px 16px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            fontFamily: "Inter, sans-serif",
+            fontWeight: 500,
+            zIndex: 1000,
+          }}
+        >
+          Couldn't add recipe — try again
+        </div>
+      )}
     </div>
   );
 }

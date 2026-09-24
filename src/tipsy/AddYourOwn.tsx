@@ -223,7 +223,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
     }, 'manual', key); // Manual recipe from Write Your Own with category association
 
     if (menuInfo) {
-      addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, id);
+      await addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, id);
     }
 
     // Clear recipe cache for this category
