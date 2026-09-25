@@ -579,6 +579,9 @@ function CreateOccasionSheet({
   const [nameErr, setNameErr] = useState(false);
   const [selectedIcon, setSelectedIcon] = useState("IconChefHat");
   const [sheetPhase, setSheetPhase] = useState<"entering" | "entered">("entering");
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState(false);
+  const savingRef = useRef(false);
 
   // Auto-assign icon when name changes
   const handleNameChange = (value: string) => {
@@ -590,13 +593,25 @@ function CreateOccasionSheet({
     }
   };
 
-  const trySave = () => {
+  const trySave = async () => {
     if (!name.trim()) {
       setNameErr(true);
       return;
     }
-    const occasion = saveOccasion(name.trim(), selectedIcon);
-    onSaved(occasion);
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      const occasion = await saveOccasion(name.trim(), selectedIcon);
+      onSaved(occasion);
+    } catch (err) {
+      console.error("Error saving occasion:", err);
+      setSaveErr(true);
+      setTimeout(() => setSaveErr(false), 2000);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   };
 
   // Slide-up animation
@@ -609,6 +624,7 @@ function CreateOccasionSheet({
   const SelectedIconComponent = getIconComponent(selectedIcon);
 
   return (
+    <>
     <div
       onClick={onClose}
       style={{
@@ -745,6 +761,7 @@ function CreateOccasionSheet({
         {/* Save button */}
         <button
           onClick={trySave}
+          disabled={saving}
           style={{
             width: "100%",
             background: C.btnBlue,
@@ -757,7 +774,8 @@ function CreateOccasionSheet({
             fontWeight: 600,
             letterSpacing: "0.1em",
             textTransform: "uppercase",
-            cursor: "pointer",
+            cursor: saving ? "not-allowed" : "pointer",
+            opacity: saving ? 0.6 : 1,
             marginTop: 4,
           }}
         >
@@ -765,6 +783,27 @@ function CreateOccasionSheet({
         </button>
       </div>
     </div>
+    {saveErr && (
+      <div
+        style={{
+          position: "fixed",
+          bottom: "80px",
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "#233C00",
+          color: "#FEE7C0",
+          padding: "8px 16px",
+          borderRadius: "8px",
+          fontSize: "12px",
+          fontFamily: "Inter, sans-serif",
+          fontWeight: 500,
+          zIndex: 1000,
+        }}
+      >
+        Couldn't create occasion — try again
+      </div>
+    )}
+    </>
   );
 }
 
@@ -786,14 +825,29 @@ function EditOccasionSheet({
   const [selectedIcon, setSelectedIcon] = useState(occasion.icon);
   const [sheetPhase, setSheetPhase] = useState<"entering" | "entered">("entering");
   const [showDelete, setShowDelete] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState(false);
+  const savingRef = useRef(false);
 
-  const trySave = () => {
+  const trySave = async () => {
     if (!name.trim()) {
       setNameErr(true);
       return;
     }
-    updateOccasion(occasion.id, { name: name.trim(), icon: selectedIcon });
-    onSaved();
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      await updateOccasion(occasion.id, { name: name.trim(), icon: selectedIcon });
+      onSaved();
+    } catch (err) {
+      console.error("Error updating occasion:", err);
+      setSaveErr(true);
+      setTimeout(() => setSaveErr(false), 2000);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   };
 
   const tryDelete = () => {
@@ -811,6 +865,7 @@ function EditOccasionSheet({
   const SelectedIconComponent = getIconComponent(selectedIcon);
 
   return (
+    <>
     <div
       onClick={onClose}
       style={{
@@ -950,6 +1005,7 @@ function EditOccasionSheet({
         {/* Save button */}
         <button
           onClick={trySave}
+          disabled={saving}
           style={{
             width: "100%",
             background: C.btnBlue,
@@ -962,7 +1018,8 @@ function EditOccasionSheet({
             fontWeight: 600,
             letterSpacing: "0.1em",
             textTransform: "uppercase",
-            cursor: "pointer",
+            cursor: saving ? "not-allowed" : "pointer",
+            opacity: saving ? 0.6 : 1,
             marginTop: 4,
           }}
         >
@@ -1075,6 +1132,27 @@ function EditOccasionSheet({
         )}
       </div>
     </div>
+    {saveErr && (
+      <div
+        style={{
+          position: "fixed",
+          bottom: "80px",
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "#233C00",
+          color: "#FEE7C0",
+          padding: "8px 16px",
+          borderRadius: "8px",
+          fontSize: "12px",
+          fontFamily: "Inter, sans-serif",
+          fontWeight: 500,
+          zIndex: 1000,
+        }}
+      >
+        Couldn't save changes — try again
+      </div>
+    )}
+    </>
   );
 }
 
