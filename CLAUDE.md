@@ -206,7 +206,14 @@ belongs here too, not in a parallel listener.
 component: `recipesByCategory` state (keyed by category); `ensureRecipesLoaded()`
 fetches/caches before nav and on list mount when empty; `clearRecipeCache()`
 invalidates on save/edit/delete; the list re-fetches via a useEffect dependency on
-`recipesByCategory[categoryKey]`.
+`recipesByCategory[categoryKey]`. **`RecipePicker.tsx` also reads from this same
+cache** (passed down as props) rather than fetching independently — its category
+view genuinely double-mounts on every tap (not the Lovable dev-only double-mount
+below): the body ternary swaps from a single `ViewContent` to a transitioning pair
+of `ViewLayer`s and back to a fresh `ViewContent` once the transition ends, so the
+tapped category's list mounts once inside the transition's `ViewLayer` and again
+inside the post-transition `ViewContent`. Reading from the shared cache means the
+second mount reuses already-fetched data instead of re-fetching or flashing blank.
 
 **ScreenStage tree.** Unified structure: the current screen always renders in the
 same base-layer position; the outgoing screen renders as an overlay only during a
@@ -348,7 +355,7 @@ code defects).
 ## Standing Cleanup / Watch Items
 
 - **Schema is dashboard-only** — no in-repo migrations. Cheap to fix now (export to a migration file), expensive to reconstruct later.
-- A standing baseline of pre-existing TypeScript errors unrelated to feature work. Re-count with `bunx tsc --noEmit` before ever claiming a change introduced zero new errors — do not trust a documented figure; this count has drifted before (31 → 40) and will again. Confirmed at 29 on `main` as of 2026-09-23 (`bunx tsc --noEmit` on `main` HEAD `13bebb7`, byte-identical to the `allergy-constraints` branch it was merged from) — treat 29 as the new snapshot, not a permanent number.
-- Reusable loading-spinner / "Updating…" pattern from the grocery work is a good candidate to reuse wherever async waits show poor feedback (e.g. Occasions/Menus load flash).
+- A standing baseline of pre-existing TypeScript errors unrelated to feature work. Re-count with `bunx tsc --noEmit` before ever claiming a change introduced zero new errors — do not trust a documented figure; this count has drifted before (31 → 40 → 29) and will again. Confirmed at 12 on `main` as of 2026-09-24 (`bunx tsc --noEmit` on `main` HEAD `d62b107`) — treat 12 as the new snapshot, not a permanent number, and re-run `bunx tsc --noEmit` yourself before trusting it. **Baseline errors are not noise by default — one (`Occasions.tsx`'s un-awaited `saveOccasion` call, previously counted here as harmless baseline) turned out to be a real launch-blocking bug** (first-tap create-menu silently failing; fixed 2026-09-24, merge `d62b107`). Treat each baseline error as a possible real bug until checked, not a number to wave away.
+- **Correction:** there is no reusable loading-spinner component. `Spinner.tsx` exists but has zero imports anywhere in the app (dead code). The "Updating…" pattern is inline in `GroceryList` (`App.tsx`), not a shared component — reusing it elsewhere (e.g. Occasions/Menus load flash) means copying the inline pattern, not importing something.
 - Account-to-account sharing's own standing cleanup/watch items (the send-sheet label, cache-clear/cook_time gaps, receiving aesthetic passes, etc. — the receive branch itself merged 2026-08-23, no longer long-lived) live in their respective FEATURE_SPECS.md build sections, not here.
 - **Fraunces italic renders as generic serif app-wide, and Lazydog renders as its plain fallback — neither font's stylesheet/`@font-face` is actually wired.** Closed by decision 2026-09-20, not a bug to re-discover: known fix path is adding a Fraunces `<link>` next to the existing Inter one in `src/routes/__root.tsx`, and a `@font-face` block for `src/fonts/lazydog.ttf`; out of scope until a session deliberately picks it up. Every "Fraunces italic"/"Lazydog" instruction elsewhere in this doc is aspirational until then. See Fonts in Design System.

@@ -2226,7 +2226,11 @@ constraints → done`), paced with `TypingBubble` for a natural feel.
 **Reveal cadence matches Build, presentationally only.** Build's real AI text
 reveals progressively because it's driven by actual token arrival over the
 `ai-chat` SSE stream — there is no timing constant in Build to reuse, since it
-never artificially paces text. Because onboarding's lines are hard-coded, a
+never artificially paces text. (Separately, **fixed 2026-09-23:** Build's own
+`TypingBubble` used to turn off synchronously right after being set, before
+React ever painted it — a silent beat during the real fetch + first-token wait.
+`typing` now stays true until the first streamed `text_delta` chunk actually
+arrives, across all three call sites in `Cook`. Commit `9613893`.) Because onboarding's lines are hard-coded, a
 brief on-phone check surfaced the intro line snapping in as a full block
 instead of matching that feel, most visible before the natural pauses of a
 back-and-forth conversation mask it. `sayAI()`'s reveal step was changed from
@@ -3031,13 +3035,14 @@ work:**
   still lacks the key. Not fixed this session. **Status update: fixed 2026-09-20**,
   along with a matching twin discovered in `Occasions.tsx` — see "First-Impression
   Polish" below.
-- **Latent data-loss bug in the same neighborhood as Item 3, not addressed:**
-  `addRecipeToMenuSection` is called without `await` and without a `.catch` in
-  both `RecipePicker.tsx` (`handleRecipeTap`) and `AddYourOwn.tsx` (the
-  post-save menu-attach step). In both call sites the UI proceeds (marks the
-  recipe as added / continues the save flow) regardless of whether the
-  underlying DB write actually succeeds — the same silent-failure shape as Item
-  3's root cause, just on the add path instead of the delete path.
+- **Latent data-loss bug in the same neighborhood as Item 3, `addRecipeToMenuSection`
+  called without `await`/`.catch` in `RecipePicker.tsx` (`handleRecipeTap`) and
+  `AddYourOwn.tsx` (the post-save menu-attach step) — same silent-failure shape as
+  Item 3's root cause, just on the add path instead of the delete path. FIXED
+  2026-09-23:** `RecipePicker.tsx` now awaits the result and only marks a recipe
+  added on success (toast on failure); `AddYourOwn.tsx` now awaits it and surfaces
+  failure via the same toast pattern instead of routing to "Saved!" as if the
+  attach had succeeded. Commits `6500bef`/`819670f`, merged to `main` in `543b598`.
 - **Codebase-wide risk: copy-paste-drift.** This session hand-synced two more
   instances of the duplicated-not-shared pattern already called out elsewhere in
   this codebase (see `chips.ts`/`compute-slice`'s duplicated occasion-window
@@ -3320,7 +3325,7 @@ genuinely universal items. See CLAUDE.md for what stayed.)*
 - **Banked from the Menus & Recipe-Delete Hardening session (2026-09-19), flagged not fixed:**
   - `MenuInterior.tsx` has two more un-awaited-`Promise` sites (~lines 323/340) — `findCustomCategory(recipe.category)` used without `await`, same async/await failure family as this session's menu-save-race root cause.
   - **FIXED 2026-09-20:** the sibling `C.white`-undefined-palette bug was still live in `Menus.tsx` (5 call sites) and, discovered the same pass, in `Occasions.tsx` too (1 call site) — both now use `C.bg`, plus an off-blue backdrop fixed alongside in `Menus.tsx`. Drift risk now spans a THIRD file beyond the original `MenuInterior.tsx` fix; the underlying copy-paste-drift pattern below is unchanged. Full detail: First-Impression Polish (Session, 2026-09-20) in FEATURE_SPECS.md.
-  - `addRecipeToMenuSection` is fired without `await`/`catch` in both `RecipePicker.tsx` and `AddYourOwn.tsx` — a latent data-loss bug in the same neighborhood as this session's recipe-delete no-op fix, on the add path instead of the delete path.
+  - **FIXED 2026-09-23:** `addRecipeToMenuSection` was fired without `await`/`catch` in both `RecipePicker.tsx` and `AddYourOwn.tsx` — a latent data-loss bug in the same neighborhood as this session's recipe-delete no-op fix, on the add path instead of the delete path. Both now await the result and surface failure via toast instead of proceeding as if it had succeeded. Commits `6500bef`/`819670f`, merged `543b598`.
   - Copy-paste-drift risk: this session hand-synced two more duplicated-not-shared structures (`EditMenuSheet`'s delete/confirm pattern between `MenuInterior.tsx`/`Menus.tsx`, and `ICON_OPTIONS` between `Occasions.tsx`/`Menus.tsx`) — nothing structurally prevents future drift.
   Full detail: Menus & Recipe-Delete Hardening (Session, 2026-09-19) in FEATURE_SPECS.md.
 - **Banked from the First-Impression Polish session (2026-09-20), flagged not fixed — two marked HIGH priority (⭐):**
