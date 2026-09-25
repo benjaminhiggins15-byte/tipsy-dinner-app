@@ -523,6 +523,7 @@ function CreateMenuSheet({
   const [description, setDescription] = useState("");
   const [enabledSections, setEnabledSections] = useState<MenuSection[]>([]);
   const [sheetPhase, setSheetPhase] = useState<"entering" | "entered">("entering");
+  const [menuErr, setMenuErr] = useState(false);
 
   const toggleSection = (section: MenuSection) => {
     if (enabledSections.includes(section)) {
@@ -542,6 +543,8 @@ function CreateMenuSheet({
       onSaved(menu);
     } catch (err) {
       console.error('saveMenu failed:', err);
+      setMenuErr(true);
+      setTimeout(() => setMenuErr(false), 2000);
     }
   };
 
@@ -553,6 +556,7 @@ function CreateMenuSheet({
   });
 
   return (
+    <>
     <div
       onClick={onClose}
       style={{
@@ -732,6 +736,27 @@ function CreateMenuSheet({
         </button>
       </div>
     </div>
+    {menuErr && (
+      <div
+        style={{
+          position: "fixed",
+          bottom: "80px",
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "#233C00",
+          color: "#FEE7C0",
+          padding: "8px 16px",
+          borderRadius: "8px",
+          fontSize: "12px",
+          fontFamily: "Inter, sans-serif",
+          fontWeight: 500,
+          zIndex: 1000,
+        }}
+      >
+        Couldn't save menu — try again
+      </div>
+    )}
+    </>
   );
 }
 
