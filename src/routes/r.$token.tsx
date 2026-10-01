@@ -96,7 +96,7 @@ function PublicRecipePage() {
               Made with Tipsy Dinner
             </div>
             <a
-              href="https://tipsy-dinner-app.vercel.app"
+              href="/"
               style={{
                 fontFamily: "Inter, sans-serif",
                 fontWeight: 500,
@@ -397,12 +397,10 @@ function PublicRecipePage() {
             // signup/save flow can pick it up (chunk 2+ — unbuilt today, so
             // this is inert for now). Legacy live-path shares have no
             // recipe_shares row to anchor a save to, so that link is left
-            // exactly as it was.
-            href={
-              isSnapshotShare
-                ? `https://tipsy-dinner-app.vercel.app/?share=${token}`
-                : "https://tipsy-dinner-app.vercel.app"
-            }
+            // exactly as it was. Relative hrefs so the link stays on whatever
+            // origin served the page (prod vs. a Vercel preview) rather than
+            // hardcoding production.
+            href={isSnapshotShare ? `/?share=${token}` : "/"}
             style={{
               fontFamily: "Inter, sans-serif",
               fontWeight: 500,
