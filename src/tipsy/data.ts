@@ -1627,6 +1627,12 @@ export type RecipeShareSnapshot = {
   cookTime: string | null;
   serves: string | null;
   photoUrl: string | null;
+  // Sharer's display name at share time, captured so the public page and a
+  // later save-into-library flow can credit "inspired by X" without a
+  // trusted lookup. Optional and omitted (not null) when unavailable, so
+  // older snapshots minted before this field existed simply lack the key —
+  // never backfilled. Never lets a lookup failure fail the share itself.
+  sharerName?: string;
 };
 
 export async function shareRecipeSnapshot(recipeId: number | string): Promise<string | null> {
@@ -1667,6 +1673,24 @@ export async function shareRecipeSnapshot(recipeId: number | string): Promise<st
     // Minted before the photo copy below because the copy's destination
     // path is keyed by this token.
     const token = crypto.randomUUID();
+
+    // Best-effort: read the sharer's own display name to freeze into the
+    // snapshot. Owner-scoped read (profiles RLS is owner-only SELECT, and
+    // userId here is the caller's own id), so this never needs a trusted
+    // RPC. Any failure is swallowed — a share must never fail over this.
+    let sharerName: string | undefined;
+    try {
+      const { data: sharerProfile } = await supabase
+        .from('profiles')
+        .select('display_name')
+        .eq('id', userId)
+        .maybeSingle();
+      if (sharerProfile?.display_name) {
+        sharerName = sharerProfile.display_name;
+      }
+    } catch (profileError) {
+      console.error('Could not read sharer display name (sharing without it):', profileError);
+    }
 
     // If the recipe has a photo, freeze an independent byte-copy under this
     // share's own token-keyed path — never a reference to the owner's
@@ -1711,6 +1735,7 @@ export async function shareRecipeSnapshot(recipeId: number | string): Promise<st
       cookTime: recipe.cook_time ?? null,
       serves: recipe.serves ?? null,
       photoUrl,
+      ...(sharerName ? { sharerName } : {}),
     };
 
     const { error: insertError } = await supabase
