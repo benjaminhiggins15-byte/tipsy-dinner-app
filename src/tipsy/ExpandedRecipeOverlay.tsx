@@ -14,6 +14,7 @@ export default function ExpandedRecipeOverlay({
   saveLabel = "Save",
   sharerName,
   onSignIn,
+  photoUrl,
 }: {
   open: boolean;
   bottomOffset: number;
@@ -29,6 +30,7 @@ export default function ExpandedRecipeOverlay({
   saveLabel?: string;
   sharerName?: string;
   onSignIn?: () => void;
+  photoUrl?: string | null;
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
   const [mounted, setMounted] = useState(open);
@@ -104,7 +106,23 @@ export default function ExpandedRecipeOverlay({
       {/* Scrollable content */}
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto" }}>
         {/* Hero section - scrolls normally */}
-        <div style={{ height: 120, background: "#FAF7F2" }} />
+        {photoUrl ? (
+          <div style={{
+            width: "100%",
+            aspectRatio: "4 / 3",
+            borderRadius: 30,
+            overflow: "hidden",
+            background: "rgba(35,60,0,0.06)",
+          }}>
+            <img
+              src={photoUrl}
+              alt=""
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+            />
+          </div>
+        ) : (
+          <div style={{ height: 120, background: "#FAF7F2" }} />
+        )}
         <div style={{ padding: "16px 24px 14px" }}>
           <div style={{
             fontFamily: "Inter, sans-serif",

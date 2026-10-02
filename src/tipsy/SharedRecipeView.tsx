@@ -9,9 +9,8 @@ import type { RecipeShareSnapshot } from "./data";
 // public share page. Read-only: no save action lives here (chunk 3), no AI
 // calls, no writes.
 //
-// ExpandedRecipeOverlay has no photo treatment at all in Build (the preview
-// never shows a recipe photo there), so this view intentionally doesn't show
-// snapshot.photoUrl either — not invented here, flagged for a product call.
+// photoUrl is passed through for display only (public URL fetch) — no
+// storage/SDK access here; the real photo copy happens at save time (chunk 3).
 
 type Props = {
   snapshot: RecipeShareSnapshot;
@@ -27,6 +26,7 @@ export default function SharedRecipeView({ snapshot, onSignUp, onSignIn }: Props
       bottomOffset={0}
       recipe={snapshot}
       sharerName={snapshot.sharerName}
+      photoUrl={snapshot.photoUrl}
       saveLabel="Sign up to save"
       onSave={() => {
         // FUNNEL HOOK: share_view_signup_tap — "Sign up to save" tapped from the logged-out share view
