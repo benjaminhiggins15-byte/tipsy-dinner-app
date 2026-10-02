@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName, sendRecipeToFriends, searchProfiles, getMyConnections, type ProfileSearchResult, type PendingReceivedRecipe, getPendingReceivedRecipes, type SuggestedRecipeDetail, getSuggestedRecipeDetail, type StructuredAllergies } from "./data";
+import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName, sendRecipeToFriends, searchProfiles, getMyConnections, type ProfileSearchResult, type PendingReceivedRecipe, getPendingReceivedRecipes, type SuggestedRecipeDetail, getSuggestedRecipeDetail, type StructuredAllergies, getRecipeSnapshotByToken, type RecipeShareSnapshot, PENDING_SHARE_TOKEN_KEY } from "./data";
 import { type CropRect } from "./image";
 import { type Big9Id, BIG9_DISPLAY_NAMES, effectiveAllergensForScan, scanIngredientsForBig9, scanFreeTextForBig9, type Big9Hit } from "./allergyMap";
 import AddYourOwn from "./AddYourOwn";
@@ -12,6 +12,7 @@ import MenuInterior from "./MenuInterior";
 import RecipePicker from "./RecipePicker";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 import AuthFlow from "./AuthFlow";
+import SharedRecipeView from "./SharedRecipeView";
 import Home, { ReceivedPending, ReceivedRecipeView, SuggestionDetailView } from "./Home";
 import { supabase } from "../lib/supabase";
 import type { Session } from "@supabase/supabase-js";
@@ -594,6 +595,42 @@ export default function App() {
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
   const [profile, setProfile] = useState<ProfileType | null>(null);
   const [recipesByCategory, setRecipesByCategory] = useState<Record<string, Recipe[]>>({});
+
+  // Logged-out arrival with ?share={token} (a stranger tapping "View in app"
+  // from a public share page). undefined = not read yet, null = no token (or
+  // the visitor dismissed the view into AuthFlow). Read once on mount —
+  // client-only, since SSR has no window.
+  const [sharedToken, setSharedToken] = useState<string | null | undefined>(undefined);
+  // undefined = loading/not applicable yet, null = resolved to nothing (bad
+  // token, legacy token with no recipe_shares row, or a fetch failure) —
+  // either case falls through silently to the normal auth screen.
+  const [sharedSnapshot, setSharedSnapshot] = useState<RecipeShareSnapshot | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setSharedToken(new URLSearchParams(window.location.search).get("share"));
+  }, []);
+
+  useEffect(() => {
+    // Logged-in arrivals ignore the param entirely (today's behavior,
+    // unchanged) — only resolve the snapshot once we know the visitor is
+    // logged out, so a signed-in tap of a share link never triggers this
+    // fetch at all.
+    if (session === undefined) return;
+    if (session !== null) return;
+    if (sharedToken === undefined) return;
+    if (!sharedToken) {
+      setSharedSnapshot(null);
+      return;
+    }
+    let ignore = false;
+    getRecipeSnapshotByToken(sharedToken).then((snapshot) => {
+      if (!ignore) setSharedSnapshot(snapshot);
+    });
+    return () => {
+      ignore = true;
+    };
+  }, [session, sharedToken]);
 
   // Build conversation state - lifted to survive tab switches
   const [buildMessages, setBuildMessages] = useState<BuildMessage[]>([]);
@@ -1335,7 +1372,42 @@ export default function App() {
     // Onboarding check will happen automatically
   };
 
-  const renderTopLevelView = (view: "auth" | "onboarding" | "app") => {
+  // Tapping either CTA on the logged-out share view writes the pending token
+  // (last write wins — a single key, no queue) then drops straight into
+  // AuthFlow on the matching screen. localStorage, not URL params or
+  // in-memory state, because this hold must survive a full OAuth redirect
+  // round-trip (chunk 3 reads it back after signup/onboarding completes).
+  // Setting sharedSnapshot to null is what moves getCurrentView() off
+  // "shared-recipe" and onto "auth" — no topLevelTransition animation, same
+  // as the plain swap used elsewhere when view-determining state changes.
+  const handleShareSignUpTap = () => {
+    if (sharedToken) localStorage.setItem(PENDING_SHARE_TOKEN_KEY, sharedToken);
+    setAuthScreen("signup");
+    // Clear both, not just the snapshot — sharedToken feeds the
+    // session-resolving effect's dependency array, so leaving it set would
+    // re-trigger a fetch (and resurface this view) on a later, unrelated
+    // sign-out in the same tab.
+    setSharedToken(null);
+    setSharedSnapshot(null);
+  };
+
+  const handleShareSignInTap = () => {
+    if (sharedToken) localStorage.setItem(PENDING_SHARE_TOKEN_KEY, sharedToken);
+    setAuthScreen("signin");
+    setSharedToken(null);
+    setSharedSnapshot(null);
+  };
+
+  const renderTopLevelView = (view: "auth" | "onboarding" | "app" | "shared-recipe") => {
+    if (view === "shared-recipe") {
+      return (
+        <SharedRecipeView
+          snapshot={sharedSnapshot as RecipeShareSnapshot}
+          onSignUp={handleShareSignUpTap}
+          onSignIn={handleShareSignInTap}
+        />
+      );
+    }
     if (view === "auth") {
       return (
         <AuthFlow
@@ -1388,9 +1460,21 @@ export default function App() {
     );
   };
 
-  const getCurrentView = (): "auth" | "onboarding" | "app" | null => {
+  const getCurrentView = (): "auth" | "onboarding" | "app" | "shared-recipe" | null => {
     if (session === undefined) return null;
-    if (session === null) return "auth";
+    if (session === null) {
+      // Logged-in arrivals with ?share= ignore the param entirely (unchanged
+      // today's behavior) — this branch only ever runs for a logged-out
+      // visitor. A bad/legacy token or a failed fetch resolves sharedSnapshot
+      // to null, which falls through silently to the normal auth screen —
+      // never an error wall.
+      if (sharedToken === undefined) return null;
+      if (sharedToken) {
+        if (sharedSnapshot === undefined) return null;
+        if (sharedSnapshot) return "shared-recipe";
+      }
+      return "auth";
+    }
     if (showOnboarding === null) return null;
     if (showOnboarding) return "onboarding";
     return "app";

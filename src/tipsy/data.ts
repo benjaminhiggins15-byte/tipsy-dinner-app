@@ -1619,6 +1619,14 @@ export async function removeRecipePhoto(recipeId: string | number): Promise<numb
 // shareRecipe/getPublicRecipeByToken pair above, which is left untouched
 // pending a routing decision — see BUILD 2 report.
 
+// localStorage key for the pending-share-token hold: a logged-out visitor who
+// taps "Sign up to save"/"Sign in" from the in-app share view writes the
+// token here before entering AuthFlow, since it must survive a full OAuth
+// redirect round-trip (URL params and in-memory state don't). Last write
+// wins — a single key, no queue. Shared constant so the write site (App.tsx)
+// and a later chunk's post-auth read site never drift on the literal string.
+export const PENDING_SHARE_TOKEN_KEY = "tipsyDinnerPendingShareToken";
+
 export type RecipeShareSnapshot = {
   title: string;
   description: string;
