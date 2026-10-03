@@ -8,6 +8,11 @@ import {
   computeMySlice,
   getSuggestedRecipeDetail,
   saveRecipe,
+  recordSharedRecipeDiscovery,
+  dismissSharedRecipeDiscovery,
+  getPendingDiscoveredRecipes,
+  saveSharedRecipe,
+  PENDING_SHARE_TOKEN_KEY,
   type PendingReceivedRecipe,
   type Recipe,
   type RecipeSendSnapshot,
@@ -15,12 +20,14 @@ import {
   type ComputeSliceResult,
   type SuggestedRecipeDetail,
   type SavedRecipe,
+  type DiscoveredRecipe,
 } from "./data";
 import { selectDailyChips, getRecentlyShownChipIds, recordShownChipIds } from "./chips";
 import { getCuisineLabel } from "./cuisineLabels";
 import watermarkSquare from "../Logos/watermark_square.png";
 import watermarkCircle from "../Logos/watermark_circle.png";
 import SaveRecipeFlow from "./SaveRecipeFlow";
+import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
 
 // ScreenStage renders the outgoing screen in a separate overlay-layer JSX
 // position during transitions (App.tsx), which mounts a fresh
@@ -36,6 +43,8 @@ type HomePush = (
     | { name: "newcategoryforreceived"; item: PendingReceivedRecipe }
     | { name: "suggestionDetail"; recipe: SuggestedRecipeDetail; newCategory?: { key: string; label: string } }
     | { name: "newcategoryforsuggestion"; recipe: SuggestedRecipeDetail }
+    | { name: "discoveredDetail"; recipe: DiscoveredRecipe; newCategory?: { key: string; label: string } }
+    | { name: "newcategoryfordiscovered"; recipe: DiscoveredRecipe }
 ) => void;
 
 type ProfileType = {
@@ -107,6 +116,15 @@ export default function Home({
   // shared/lifted state; each fetch is separate on purpose. getPendingReceivedRecipes
   // already orders by created_at descending, so items[0] is the most recent.
   const [pendingSummary, setPendingSummary] = useState<{ title: string; senderName: string; count: number } | null>(null);
+  // Discovered shelf (public-share chunk 3). Recorded as pending here too,
+  // not only in Onboarding's Loader — this is the "View in app" path for an
+  // already-signed-in user re-opening the same share link, where the token
+  // lands in the SAME localStorage key via App.tsx's logged-in-?share=
+  // handoff effect rather than going through Onboarding at all.
+  // PENDING_SHARE_TOKEN_KEY is single-consumption: read once, recorded, then
+  // removed, so a later remount never re-records (recordSharedRecipeDiscovery
+  // is idempotent regardless, but there's no reason to call it twice).
+  const [discovered, setDiscovered] = useState<DiscoveredRecipe[]>([]);
   // Layer 4 carousel state. sliceResult stays null until computeMySlice
   // resolves; sliceLoading gates the carousel region only — it never blocks
   // the greeting/chips/received-card above/below it from rendering immediately.
@@ -146,6 +164,25 @@ export default function Home({
           ? { title: items[0].title, senderName: items[0].senderName, count: items.length }
           : null
       );
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  // FUNNEL HOOK: discovered_shelf_mount — Home mounted, about to resolve any
+  // pending share-token handoff and load the Discovered shelf.
+  useEffect(() => {
+    let ignore = false;
+    (async () => {
+      const pendingToken = localStorage.getItem(PENDING_SHARE_TOKEN_KEY);
+      if (pendingToken) {
+        localStorage.removeItem(PENDING_SHARE_TOKEN_KEY);
+        await recordSharedRecipeDiscovery(pendingToken);
+      }
+      const items = await getPendingDiscoveredRecipes();
+      if (ignore) return;
+      setDiscovered(items);
     })();
     return () => {
       ignore = true;
@@ -247,6 +284,116 @@ export default function Home({
         </div>
 
         <SuggestionsCarousel loading={sliceLoading} result={sliceResult} push={push} />
+
+        {discovered.length > 0 && (
+          <div
+            style={{
+              margin: `36px ${EDGE}px 8px`,
+              fontFamily: fontSans,
+              fontWeight: 500,
+              textTransform: "uppercase",
+              fontSize: 13,
+              letterSpacing: "0.1em",
+              color: C.text,
+            }}
+          >
+            Discovered
+          </div>
+        )}
+        {discovered.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "row",
+              overflowX: "auto",
+              padding: `4px ${EDGE}px 4px`,
+              gap: 12,
+              WebkitOverflowScrolling: "touch",
+            }}
+          >
+            {discovered.map((item) => (
+              <div
+                key={item.shareToken}
+                onClick={() => push({ name: "discoveredDetail", recipe: item })}
+                style={{
+                  position: "relative",
+                  width: 160,
+                  height: 120,
+                  borderRadius: 16,
+                  overflow: "hidden",
+                  cursor: "pointer",
+                  flexShrink: 0,
+                  background: "#2E4E08",
+                }}
+              >
+                {item.photoUrl ? (
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: -10,
+                      backgroundImage: `url(${item.photoUrl})`,
+                      backgroundSize: "cover",
+                      backgroundPosition: "center",
+                      filter: "blur(6px)",
+                      transform: "scale(1.1)",
+                    }}
+                  />
+                ) : (
+                  <PlaceholderArt />
+                )}
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    background: "linear-gradient(0deg, rgba(24,40,0,0.85) 0%, rgba(24,40,0,0.15) 55%, rgba(24,40,0,0) 100%)",
+                  }}
+                />
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 12,
+                    right: 12,
+                    bottom: 10,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 2,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontFamily: "Lazydog, sans-serif",
+                      textTransform: "uppercase",
+                      fontSize: 13,
+                      lineHeight: 1.2,
+                      color: "#FEE7C0",
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {item.title}
+                  </div>
+                  {item.sharerName && (
+                    <div
+                      style={{
+                        fontFamily: fontSans,
+                        fontSize: 10,
+                        fontWeight: 500,
+                        color: "rgba(254,231,192,0.75)",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      from {item.sharerName}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {pendingSummary && (
           <div
@@ -1788,6 +1935,110 @@ export function SuggestionDetailView({
           onNew={() => {
             setTrayOpen(false);
             push({ name: "newcategoryforsuggestion", recipe });
+          }}
+          initialSelectedCategory={newCategory || null}
+        />
+      )}
+    </div>
+  );
+}
+
+// Discovered detail — the public-share chunk 3 preview. Unlike
+// ReceivedRecipeView/SuggestionDetailView above (both hand-matched to
+// RecipeCard), this one REUSES ExpandedRecipeOverlay directly — same
+// component Build's mini-player and the logged-out SharedRecipeView already
+// use — so a discovered share previews with the exact same look as the
+// in-app Build creation experience, per that component's own doc comment.
+// Save is CONNECTION-FREE via saveSharedRecipe (standard saveRecipe +
+// finish_shared_recipe_save, no recipe_sends/connection) — mirrors the
+// Suggested Recipes save pattern, not saveReceivedRecipe's.
+export function DiscoveredDetailView({
+  recipe,
+  newCategory,
+  back,
+  push,
+  finishSaveRecipe,
+  clearRecipeCache,
+}: {
+  recipe: DiscoveredRecipe;
+  newCategory?: { key: string; label: string };
+  back: () => void;
+  push: HomePush;
+  finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
+  clearRecipeCache: (categoryKey: string) => void;
+}) {
+  const [trayOpen, setTrayOpen] = useState(!!newCategory);
+  const [saving, setSaving] = useState(false);
+  const [dismissing, setDismissing] = useState(false);
+
+  const handleDismiss = async () => {
+    if (dismissing || saving) return;
+    setDismissing(true);
+    await dismissSharedRecipeDiscovery(recipe.shareToken);
+    back();
+  };
+
+  const handlePickCategory = async (
+    catKey: string,
+    catLabel: string,
+    menuInfo?: { menuId: string; section: MenuSection }
+  ) => {
+    setTrayOpen(false);
+    setSaving(true);
+
+    // FUNNEL HOOK: discovered_save_category_picked — category chosen, about to save a discovered share
+    const result = await saveSharedRecipe(
+      recipe.shareToken,
+      { title: recipe.title, description: recipe.description, ingredients: recipe.ingredients, steps: recipe.steps },
+      catKey,
+    );
+
+    if (menuInfo) {
+      await addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, result.recipeId);
+    }
+
+    const saved: Recipe = {
+      title: recipe.title,
+      description: recipe.description,
+      color: "linear-gradient(135deg, #C5DCF4 0%, #85B7EB 100%)",
+      category: catLabel.toLowerCase(),
+      ingredients: recipe.ingredients,
+      steps: recipe.steps,
+      savedId: result.recipeId,
+      categoryKey: catKey,
+      photo_url: result.photoCopied ? result.photoUrl : undefined,
+      photo_version: result.photoCopied ? result.photoVersion : undefined,
+    };
+
+    clearRecipeCache(catKey);
+    // FUNNEL HOOK: discovered_save_complete — discovered share saved to the library
+    finishSaveRecipe(saved, catKey, catLabel);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg, position: "relative" }}>
+      <ExpandedRecipeOverlay
+        open={true}
+        bottomOffset={0}
+        recipe={recipe}
+        sharerName={recipe.sharerName}
+        photoUrl={recipe.photoUrl}
+        onBack={back}
+        onDismiss={dismissing || saving ? undefined : handleDismiss}
+        onSave={() => {
+          if (dismissing || saving) return;
+          // FUNNEL HOOK: discovered_save_tap — "Save" tapped on a discovered share's preview
+          setTrayOpen(true);
+        }}
+      />
+
+      {trayOpen && (
+        <SaveRecipeFlow
+          onClose={() => setTrayOpen(false)}
+          onPick={handlePickCategory}
+          onNew={() => {
+            setTrayOpen(false);
+            push({ name: "newcategoryfordiscovered", recipe });
           }}
           initialSelectedCategory={newCategory || null}
         />

@@ -20,6 +20,7 @@ export const Route = createFileRoute("/r/$token")({
 
 function PublicRecipePage() {
   const { recipe } = Route.useLoaderData();
+  const { token } = Route.useParams();
   const [photoFailed, setPhotoFailed] = useState(false);
 
   if (!recipe) {
@@ -95,7 +96,7 @@ function PublicRecipePage() {
               Made with Tipsy Dinner
             </div>
             <a
-              href="https://tipsy-dinner-app.vercel.app"
+              href="/"
               style={{
                 fontFamily: "Inter, sans-serif",
                 fontWeight: 500,
@@ -118,6 +119,13 @@ function PublicRecipePage() {
   // field at all — 'in' narrows the union so this stays a no-op for them,
   // deliberately leaving that path untouched.
   const photoUrl = "photoUrl" in recipe ? recipe.photoUrl : null;
+  // Same narrowing for sharerName — only present on snapshot-based shares,
+  // and only on snapshots minted after this field existed. Legacy live
+  // shares and older snapshots alike just render nothing.
+  const sharerName = "sharerName" in recipe ? recipe.sharerName : undefined;
+  // Snapshot-based share only — the legacy live path has no share_token to
+  // carry, so its "View in app" link stays exactly as it is today.
+  const isSnapshotShare = "photoUrl" in recipe;
 
   return (
     <div
@@ -175,6 +183,24 @@ function PublicRecipePage() {
         >
           {recipe.title}
         </h1>
+
+        {/* Inspired-by attribution — quiet, matches the meta row's secondary
+            text treatment. Only ever rendered for snapshot shares that
+            captured a sharer name; absent for everything else (legacy live
+            shares, and snapshots minted before this field existed). */}
+        {sharerName && (
+          <div
+            style={{
+              fontFamily: "Inter, sans-serif",
+              fontSize: "13px",
+              fontWeight: 500,
+              color: "rgba(35,60,0,0.5)",
+              marginBottom: "12px",
+            }}
+          >
+            inspired by {sharerName}
+          </div>
+        )}
 
         {/* Description */}
         {recipe.description && (
@@ -367,7 +393,14 @@ function PublicRecipePage() {
             Made with Tipsy Dinner
           </div>
           <a
-            href="https://tipsy-dinner-app.vercel.app"
+            // Snapshot-based shares carry the token forward so a future
+            // signup/save flow can pick it up (chunk 2+ — unbuilt today, so
+            // this is inert for now). Legacy live-path shares have no
+            // recipe_shares row to anchor a save to, so that link is left
+            // exactly as it was. Relative hrefs so the link stays on whatever
+            // origin served the page (prod vs. a Vercel preview) rather than
+            // hardcoding production.
+            href={isSnapshotShare ? `/?share=${token}` : "/"}
             style={{
               fontFamily: "Inter, sans-serif",
               fontWeight: 500,

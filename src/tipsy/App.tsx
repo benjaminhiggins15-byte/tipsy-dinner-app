@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName, sendRecipeToFriends, searchProfiles, getMyConnections, type ProfileSearchResult, type PendingReceivedRecipe, getPendingReceivedRecipes, type SuggestedRecipeDetail, getSuggestedRecipeDetail, type StructuredAllergies } from "./data";
+import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName, sendRecipeToFriends, searchProfiles, getMyConnections, type ProfileSearchResult, type PendingReceivedRecipe, getPendingReceivedRecipes, type SuggestedRecipeDetail, getSuggestedRecipeDetail, type StructuredAllergies, getRecipeSnapshotByToken, type RecipeShareSnapshot, PENDING_SHARE_TOKEN_KEY, type DiscoveredRecipe } from "./data";
 import { type CropRect } from "./image";
 import { type Big9Id, BIG9_DISPLAY_NAMES, effectiveAllergensForScan, scanIngredientsForBig9, scanFreeTextForBig9, type Big9Hit } from "./allergyMap";
 import AddYourOwn from "./AddYourOwn";
@@ -12,7 +12,9 @@ import MenuInterior from "./MenuInterior";
 import RecipePicker from "./RecipePicker";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 import AuthFlow from "./AuthFlow";
-import Home, { ReceivedPending, ReceivedRecipeView, SuggestionDetailView } from "./Home";
+import SharedRecipeView from "./SharedRecipeView";
+import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
+import Home, { ReceivedPending, ReceivedRecipeView, SuggestionDetailView, DiscoveredDetailView } from "./Home";
 import { supabase } from "../lib/supabase";
 import type { Session } from "@supabase/supabase-js";
 import watermarkSquare from "../Logos/watermark_square.png";
@@ -62,6 +64,7 @@ type ProfileType = {
   onboarding_complete: boolean;
   taste_profile: string | null;
   allergies: StructuredAllergies | null;
+  share_show_name: boolean;
 };
 
 // Helper: Convert recipe to XML format for AI context (used in App and Cook components)
@@ -320,7 +323,9 @@ type Screen =
   | { name: "receivedRecipe"; item: PendingReceivedRecipe; newCategory?: { key: string; label: string } }
   | { name: "newcategoryforreceived"; item: PendingReceivedRecipe }
   | { name: "suggestionDetail"; recipe: SuggestedRecipeDetail; newCategory?: { key: string; label: string } }
-  | { name: "newcategoryforsuggestion"; recipe: SuggestedRecipeDetail };
+  | { name: "newcategoryforsuggestion"; recipe: SuggestedRecipeDetail }
+  | { name: "discoveredDetail"; recipe: DiscoveredRecipe; newCategory?: { key: string; label: string } }
+  | { name: "newcategoryfordiscovered"; recipe: DiscoveredRecipe };
 
 type TabId = "build" | "recipes" | "grocery" | "profile" | "home";
 
@@ -372,6 +377,8 @@ function screenKey(s: Screen): string {
     case "newcategoryforreceived": return `newcategoryforreceived:${s.item.sendId}`;
     case "suggestionDetail": return `suggestionDetail:${s.recipe.id}`;
     case "newcategoryforsuggestion": return `newcategoryforsuggestion:${s.recipe.id}`;
+    case "discoveredDetail": return `discoveredDetail:${s.recipe.shareToken}`;
+    case "newcategoryfordiscovered": return `newcategoryfordiscovered:${s.recipe.shareToken}`;
   }
 }
 
@@ -407,6 +414,7 @@ function renderScreen(
   seedBuildFromChip?: (prompt: string) => void,
   goToReceivedShelf?: () => void,
   switchToTab?: (tab: TabId, screen?: Screen) => void,
+  finishCreateCategoryForDiscovered?: (catKey: string, catLabel: string, recipe: DiscoveredRecipe) => void,
 ) {
   switch (s.name) {
     case "cook": return (
@@ -491,6 +499,8 @@ function renderScreen(
         push={push}
         clearRecipeCache={clearRecipeCache}
         transferToRecipeChat={transferToRecipeChat}
+        profile={profile}
+        onUpdate={onUpdate}
       />
     );
     case "grocerylist": return <GroceryList push={push} back={back} />;
@@ -566,6 +576,24 @@ function renderScreen(
         }}
       />
     );
+    case "discoveredDetail": return (
+      <DiscoveredDetailView
+        recipe={s.recipe}
+        newCategory={s.newCategory}
+        back={back}
+        push={push}
+        finishSaveRecipe={(r, k, l) => finishSaveRecipe?.(r, k, l)}
+        clearRecipeCache={clearRecipeCache || (() => {})}
+      />
+    );
+    case "newcategoryfordiscovered": return (
+      <NewCategory
+        back={back}
+        onSaved={(cat) => {
+          if (cat) finishCreateCategoryForDiscovered?.(cat.key, cat.label, s.recipe);
+        }}
+      />
+    );
   }
 }
 
@@ -594,6 +622,55 @@ export default function App() {
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
   const [profile, setProfile] = useState<ProfileType | null>(null);
   const [recipesByCategory, setRecipesByCategory] = useState<Record<string, Recipe[]>>({});
+
+  // Logged-out arrival with ?share={token} (a stranger tapping "View in app"
+  // from a public share page). undefined = not read yet, null = no token (or
+  // the visitor dismissed the view into AuthFlow). Read once on mount —
+  // client-only, since SSR has no window.
+  const [sharedToken, setSharedToken] = useState<string | null | undefined>(undefined);
+  // undefined = loading/not applicable yet, null = resolved to nothing (bad
+  // token, legacy token with no recipe_shares row, or a fetch failure) —
+  // either case falls through silently to the normal auth screen.
+  const [sharedSnapshot, setSharedSnapshot] = useState<RecipeShareSnapshot | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setSharedToken(new URLSearchParams(window.location.search).get("share"));
+  }, []);
+
+  useEffect(() => {
+    // Logged-in arrivals ignore the param entirely (today's behavior,
+    // unchanged) — only resolve the snapshot once we know the visitor is
+    // logged out, so a signed-in tap of a share link never triggers this
+    // fetch at all.
+    if (session === undefined) return;
+    if (session !== null) return;
+    if (sharedToken === undefined) return;
+    if (!sharedToken) {
+      setSharedSnapshot(null);
+      return;
+    }
+    let ignore = false;
+    getRecipeSnapshotByToken(sharedToken).then((snapshot) => {
+      if (!ignore) setSharedSnapshot(snapshot);
+    });
+    return () => {
+      ignore = true;
+    };
+  }, [session, sharedToken]);
+
+  // Logged-in arrival with ?share={token} — same URL param as the logged-out
+  // path above, but handled separately and much more simply: there's no
+  // snapshot to fetch/render here, just a handoff to localStorage under the
+  // SAME key Onboarding's Loader already reads (PENDING_SHARE_TOKEN_KEY), so
+  // Home's own mount effect records the discovery and shows it on the
+  // Discovered shelf. This is the "View in app" path for an already-signed-in
+  // user re-opening a share link.
+  useEffect(() => {
+    if (session === undefined || session === null) return;
+    if (!sharedToken) return;
+    localStorage.setItem(PENDING_SHARE_TOKEN_KEY, sharedToken);
+  }, [session, sharedToken]);
 
   // Build conversation state - lifted to survive tab switches
   const [buildMessages, setBuildMessages] = useState<BuildMessage[]>([]);
@@ -1146,6 +1223,16 @@ export default function App() {
     });
   };
 
+  // Mirrors finishCreateCategoryForSuggestion — discovered detail's own
+  // create-category return target.
+  const finishCreateCategoryForDiscovered = (catKey: string, catLabel: string, recipe: DiscoveredRecipe) => {
+    if (transition) return;
+    updateCurrentTabStack((prev) => {
+      const newStack = prev.slice(0, -1); // Remove newcategoryfordiscovered screen
+      return [...newStack, { name: "discoveredDetail", recipe, newCategory: { key: catKey, label: catLabel } }];
+    });
+  };
+
   // Transfer to Build with a recipe and question
   const transferToRecipeChat = (recipe: SavedRecipe, question: string, onCollisionCancel: () => void) => {
     if (transition) return;
@@ -1335,7 +1422,42 @@ export default function App() {
     // Onboarding check will happen automatically
   };
 
-  const renderTopLevelView = (view: "auth" | "onboarding" | "app") => {
+  // Tapping either CTA on the logged-out share view writes the pending token
+  // (last write wins — a single key, no queue) then drops straight into
+  // AuthFlow on the matching screen. localStorage, not URL params or
+  // in-memory state, because this hold must survive a full OAuth redirect
+  // round-trip (chunk 3 reads it back after signup/onboarding completes).
+  // Setting sharedSnapshot to null is what moves getCurrentView() off
+  // "shared-recipe" and onto "auth" — no topLevelTransition animation, same
+  // as the plain swap used elsewhere when view-determining state changes.
+  const handleShareSignUpTap = () => {
+    if (sharedToken) localStorage.setItem(PENDING_SHARE_TOKEN_KEY, sharedToken);
+    setAuthScreen("signup");
+    // Clear both, not just the snapshot — sharedToken feeds the
+    // session-resolving effect's dependency array, so leaving it set would
+    // re-trigger a fetch (and resurface this view) on a later, unrelated
+    // sign-out in the same tab.
+    setSharedToken(null);
+    setSharedSnapshot(null);
+  };
+
+  const handleShareSignInTap = () => {
+    if (sharedToken) localStorage.setItem(PENDING_SHARE_TOKEN_KEY, sharedToken);
+    setAuthScreen("signin");
+    setSharedToken(null);
+    setSharedSnapshot(null);
+  };
+
+  const renderTopLevelView = (view: "auth" | "onboarding" | "app" | "shared-recipe") => {
+    if (view === "shared-recipe") {
+      return (
+        <SharedRecipeView
+          snapshot={sharedSnapshot as RecipeShareSnapshot}
+          onSignUp={handleShareSignUpTap}
+          onSignIn={handleShareSignInTap}
+        />
+      );
+    }
     if (view === "auth") {
       return (
         <AuthFlow
@@ -1362,6 +1484,7 @@ export default function App() {
           finishCreateCategoryForRecipe={finishCreateCategoryForRecipe}
           finishCreateCategoryForReceived={finishCreateCategoryForReceived}
           finishCreateCategoryForSuggestion={finishCreateCategoryForSuggestion}
+          finishCreateCategoryForDiscovered={finishCreateCategoryForDiscovered}
           finishSaveRecipe={finishSaveRecipe}
           onSignOut={handleSignOut}
           profile={profile}
@@ -1388,9 +1511,21 @@ export default function App() {
     );
   };
 
-  const getCurrentView = (): "auth" | "onboarding" | "app" | null => {
+  const getCurrentView = (): "auth" | "onboarding" | "app" | "shared-recipe" | null => {
     if (session === undefined) return null;
-    if (session === null) return "auth";
+    if (session === null) {
+      // Logged-in arrivals with ?share= ignore the param entirely (unchanged
+      // today's behavior) — this branch only ever runs for a logged-out
+      // visitor. A bad/legacy token or a failed fetch resolves sharedSnapshot
+      // to null, which falls through silently to the normal auth screen —
+      // never an error wall.
+      if (sharedToken === undefined) return null;
+      if (sharedToken) {
+        if (sharedSnapshot === undefined) return null;
+        if (sharedSnapshot) return "shared-recipe";
+      }
+      return "auth";
+    }
     if (showOnboarding === null) return null;
     if (showOnboarding) return "onboarding";
     return "app";
@@ -1528,6 +1663,7 @@ function ScreenStage({
   finishCreateCategoryForRecipe,
   finishCreateCategoryForReceived,
   finishCreateCategoryForSuggestion,
+  finishCreateCategoryForDiscovered,
   finishSaveRecipe,
   onSignOut,
   profile,
@@ -1561,6 +1697,7 @@ function ScreenStage({
   finishCreateCategoryForRecipe: (catKey: string, catLabel: string, draft: RecipeDraft, returnTo: "cook" | "addown") => void;
   finishCreateCategoryForReceived: (catKey: string, catLabel: string, item: PendingReceivedRecipe) => void;
   finishCreateCategoryForSuggestion: (catKey: string, catLabel: string, recipe: SuggestedRecipeDetail) => void;
+  finishCreateCategoryForDiscovered: (catKey: string, catLabel: string, recipe: DiscoveredRecipe) => void;
   finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
   onSignOut: () => void;
   profile: ProfileType | null;
@@ -1670,7 +1807,7 @@ function ScreenStage({
         pointerEvents: isTransitioning ? "none" : "auto",
         paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
       }}>
-        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab)}
+        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered)}
       </div>
 
       {/* Overlay layer - only during transitions, renders from screen */}
@@ -1683,7 +1820,7 @@ function ScreenStage({
           pointerEvents: "none",
           paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
         }}>
-          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab)}
+          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered)}
         </div>
       )}
     </div>
@@ -2650,6 +2787,8 @@ function RecipeCard({
   push,
   clearRecipeCache,
   transferToRecipeChat,
+  profile,
+  onUpdate,
 }: {
   recipe: Recipe;
   categoryLabel: string;
@@ -2658,10 +2797,16 @@ function RecipeCard({
   push: (s: Screen) => void;
   clearRecipeCache?: (categoryKey: string) => void;
   transferToRecipeChat?: (recipe: SavedRecipe, question: string, onCollisionCancel: () => void) => void;
+  profile?: ProfileType | null;
+  onUpdate?: (updates: Partial<ProfileType>) => Promise<void>;
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps" | "history">("ingredients");
   const [shareConfirm, setShareConfirm] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
+  // "Show my name" toggle, initialized from the persisted profile default
+  // (profiles.share_show_name) — toggling here both drives THIS share and
+  // updates that default for next time, via onUpdate.
+  const [showSharerName, setShowSharerName] = useState(() => profile?.share_show_name ?? true);
   const [groceryAddedConfirm, setGroceryAddedConfirm] = useState(false);
   const [showChatInput, setShowChatInput] = useState(false);
   const [chatQuestion, setChatQuestion] = useState("");
@@ -2893,7 +3038,8 @@ function RecipeCard({
   async function handleShare() {
     if (!recipe.savedId) return;
     setShareError(null);
-    const url = await shareRecipeSnapshot(recipe.savedId.toString());
+    // FUNNEL HOOK: share_link_created — recipe share link minted from RecipeCard
+    const url = await shareRecipeSnapshot(recipe.savedId.toString(), showSharerName);
     if (!url) {
       setShareError("Couldn't share this recipe. Try again.");
       return;
@@ -2916,6 +3062,15 @@ function RecipeCard({
         console.error('Clipboard write failed:', err);
       }
     }
+  }
+
+  // Toggling persists the new default to profiles.share_show_name (fire-and-
+  // forget — a failed write only affects next time's default, never this
+  // share, which already reads the local state synchronously).
+  function handleToggleShowSharerName() {
+    const next = !showSharerName;
+    setShowSharerName(next);
+    onUpdate?.({ share_show_name: next });
   }
 
   function openSendSheet() {
@@ -3334,6 +3489,18 @@ function RecipeCard({
               {recipe.title}
             </div>
           </div>
+
+          {recipe.inspired_by_name && (
+            <div style={{
+              fontFamily: "Inter, sans-serif",
+              fontSize: 12,
+              fontWeight: 500,
+              color: "rgba(35,60,0,0.5)",
+              marginBottom: 12,
+            }}>
+              inspired by {recipe.inspired_by_name}
+            </div>
+          )}
 
           {/* Description */}
           <div style={{
@@ -4581,6 +4748,53 @@ function RecipeCard({
                 >
                   <IconLink size={15} stroke={1.5} />
                   Share as link instead
+                </button>
+
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleToggleShowSharerName();
+                  }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    width: "100%",
+                    background: "transparent",
+                    border: "none",
+                    padding: "10px 0 0",
+                    fontFamily: "Inter, sans-serif",
+                    fontSize: 11,
+                    fontWeight: 500,
+                    color: "rgba(35,60,0,0.4)",
+                    cursor: "pointer",
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      width: 28,
+                      height: 16,
+                      borderRadius: 999,
+                      background: showSharerName ? "#233C00" : "rgba(35,60,0,0.15)",
+                      padding: 2,
+                      transition: "background 150ms ease",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: "50%",
+                        background: "#FAF7F2",
+                        transform: showSharerName ? "translateX(12px)" : "translateX(0)",
+                        transition: "transform 150ms ease",
+                      }}
+                    />
+                  </span>
+                  Show my name on the shared link
                 </button>
               </div>
             </div>
@@ -6998,269 +7212,3 @@ function PhotoCropOverlay({ file, onCancel, onConfirm }: {
   );
 }
 
-function ExpandedRecipeOverlay({ open, bottomOffset, onSave, recipe }: {
-  open: boolean;
-  bottomOffset: number;
-  onSave: () => void;
-  recipe: {
-    title: string;
-    description: string;
-    ingredients: { name: string; qty: string }[];
-    steps: RecipeStep[];
-  };
-}) {
-  const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
-  const [mounted, setMounted] = useState(open);
-  const [shown, setShown] = useState(false);
-  const [contentVisible, setContentVisible] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (open) {
-      setMounted(true);
-      requestAnimationFrame(() => requestAnimationFrame(() => setShown(true)));
-      const t = setTimeout(() => setContentVisible(true), 350);
-      return () => clearTimeout(t);
-    } else if (mounted) {
-      setContentVisible(false);
-      setShown(false);
-      const t = setTimeout(() => setMounted(false), 350);
-      return () => clearTimeout(t);
-    }
-  }, [open, mounted]);
-
-  if (!mounted) return null;
-
-  return (
-    <div
-      style={{
-        position: "absolute",
-        left: 0,
-        right: 0,
-        bottom: bottomOffset,
-        top: 0,
-        pointerEvents: shown ? "auto" : "none",
-        zIndex: 50,
-        overflow: "hidden",
-      }}
-    >
-      <div
-        style={{
-          position: "absolute",
-          left: 0,
-          right: 0,
-          bottom: 0,
-          height: shown ? "100%" : 0,
-          background: "#FAF7F2",
-          transition: "height 350ms cubic-bezier(0.22, 1, 0.36, 1)",
-          display: "flex", flexDirection: "column",
-          overflow: "hidden",
-        }}
-      >
-      <div style={{
-        opacity: contentVisible ? 1 : 0,
-        transition: "opacity 200ms ease",
-        display: "flex", flexDirection: "column", height: "100%",
-        background: "#FAF7F2",
-      }}>
-      {/* Sheet header */}
-      <div style={{ padding: "20px 16px 12px", flexShrink: 0, display: "grid", gridTemplateColumns: "32px 1fr 32px", alignItems: "center", background: "#FAF7F2" }}>
-        <span />
-        <div style={{
-          textAlign: "center",
-          fontFamily: "Inter, sans-serif",
-          fontSize: 10,
-          textTransform: "uppercase",
-          letterSpacing: "0.12em",
-          color: "rgba(35,60,0,0.35)",
-          fontWeight: 500,
-        }}>
-          RECIPE PREVIEW
-        </div>
-        <span />
-      </div>
-
-      {/* Scrollable content */}
-      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto" }}>
-        {/* Hero section - scrolls normally */}
-        <div style={{ height: 120, background: "#FAF7F2" }} />
-        <div style={{ padding: "16px 24px 14px" }}>
-          <div style={{
-            fontFamily: "Inter, sans-serif",
-            fontSize: 11,
-            textTransform: "uppercase",
-            letterSpacing: "0.12em",
-            color: "rgba(35,60,0,0.35)",
-            marginBottom: 6,
-            fontWeight: 500,
-          }}>
-            Recipe
-          </div>
-          <div style={{
-            fontFamily: "Inter, sans-serif",
-            fontSize: 28,
-            fontWeight: 700,
-            color: "#233C00",
-            lineHeight: 1.1,
-            marginBottom: 8,
-            textTransform: "uppercase",
-          }}>
-            {recipe.title}
-          </div>
-          <div style={{
-            fontFamily: "Fraunces, serif",
-            fontStyle: "italic",
-            fontWeight: 300,
-            fontSize: 15,
-            color: "rgba(35,60,0,0.55)",
-            lineHeight: 1.5,
-          }}>
-            {recipe.description}
-          </div>
-        </div>
-
-        {/* Sticky Tabs - stick to top when scrolled */}
-        <div style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 10,
-          background: "#FAF7F2",
-          borderBottom: "1px solid rgba(35,60,0,0.08)",
-        }}>
-          <div style={{
-            display: "flex",
-            gap: 28,
-            padding: "20px 24px 0",
-          }}>
-            {(["ingredients", "steps"] as const).map((t) => {
-              const active = tab === t;
-              return (
-                <button
-                  key={t}
-                  onClick={() => setTab(t)}
-                  style={{
-                    background: "transparent",
-                    color: active ? "#233C00" : "rgba(35,60,0,0.3)",
-                    border: "none",
-                    borderBottom: active ? "1.5px solid #233C00" : "1.5px solid transparent",
-                    cursor: "pointer",
-                    fontFamily: "Inter, sans-serif",
-                    fontSize: 11,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    fontWeight: 500,
-                    padding: "0 0 12px 0",
-                  }}
-                >
-                  {t}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Both tabs rendered, only one visible */}
-        <div style={{ display: tab === "ingredients" ? "block" : "none" }}>
-          {recipe.ingredients.map((item, i) => (
-            <div key={i} style={{
-              display: "flex",
-              flexDirection: "row",
-              justifyContent: "space-between",
-              alignItems: "flex-start",
-              gap: 8,
-              padding: "12px 24px",
-              borderBottom: "1px dotted rgba(35,60,0,0.1)",
-            }}>
-              <span style={{
-                fontFamily: "Inter, sans-serif",
-                fontSize: 15,
-                fontWeight: 400,
-                color: "#233C00",
-                textAlign: "left",
-                flex: 1,
-                maxWidth: "58%",
-              }}>{item.name}</span>
-              <span style={{
-                fontFamily: "Inter, sans-serif",
-                fontSize: 14,
-                fontWeight: 500,
-                fontVariantNumeric: "tabular-nums",
-                color: "rgba(35,60,0,0.4)",
-                textAlign: "right",
-                flexShrink: 0,
-                maxWidth: "40%",
-              }}>{item.qty}</span>
-            </div>
-          ))}
-        </div>
-        <div style={{ display: tab === "steps" ? "block" : "none" }}>
-          {recipe.steps.map((s, i) => (
-            <div key={i} style={{
-              display: "flex",
-              gap: 14,
-              alignItems: "flex-start",
-              padding: "12px 24px",
-              borderBottom: "1px dotted rgba(35,60,0,0.1)",
-            }}>
-              <div style={{
-                width: 28,
-                height: 28,
-                borderRadius: "50%",
-                background: "rgba(35,60,0,0.06)",
-                border: "1px solid rgba(35,60,0,0.1)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-                fontFamily: "Inter, sans-serif",
-                fontSize: 11,
-                fontWeight: 500,
-                color: "rgba(35,60,0,0.4)",
-              }}>{i + 1}</div>
-              <span style={{
-                fontFamily: "Inter, sans-serif",
-                fontSize: 14,
-                fontWeight: 400,
-                color: "#233C00",
-                lineHeight: 1.6,
-                flex: 1,
-              }}>
-                {normalizeStep(s).title && (
-                  <span style={{ fontWeight: 600 }}>
-                    {normalizeStep(s).title}
-                    {" — "}
-                  </span>
-                )}
-                {normalizeStep(s).instruction}
-              </span>
-            </div>
-          ))}
-        </div>
-        {/* Save button */}
-        <button
-          onClick={onSave}
-          style={{
-            display: "block",
-            width: "calc(100% - 32px)",
-            margin: "16px 16px",
-            padding: "12px 0",
-            background: "#233C00",
-            color: "#FAF7F2",
-            border: "none",
-            borderRadius: 100,
-            fontFamily: "Inter, sans-serif",
-            fontSize: 12,
-            textTransform: "uppercase",
-            letterSpacing: "0.1em",
-            cursor: "pointer",
-            fontWeight: 500,
-          }}
-        >
-          Save
-        </button>
-      </div>
-      </div>
-      </div>
-    </div>
-  );
-}
