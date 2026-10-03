@@ -1777,17 +1777,14 @@ export async function shareRecipeSnapshot(recipeId: number | string, showSharer:
   }
 }
 
-// Reads a frozen snapshot for the public route. No user_id filter —
-// anonymous access is governed entirely by the anon-read RLS policy on
-// recipe_shares, mirroring getPublicGroceryListByToken's reliance on
-// share_token as the sole access grant.
+// Reads a frozen snapshot for the public route via the get_recipe_share_by_token
+// SECURITY DEFINER RPC (no direct table read — recipe_shares has no open
+// anon-read policy). The RPC itself resolves access by exact share_token match
+// and strips sharerName when the sharer opted out; this wrapper just unwraps
+// the jsonb payload it returns.
 export async function getRecipeSnapshotByToken(token: string): Promise<RecipeShareSnapshot | null> {
   try {
-    const { data, error } = await supabase
-      .from('recipe_shares')
-      .select('recipe')
-      .eq('share_token', token)
-      .maybeSingle();
+    const { data, error } = await supabase.rpc('get_recipe_share_by_token', { p_share_token: token });
 
     if (error) {
       console.error('Error loading recipe snapshot:', error);
@@ -1798,7 +1795,7 @@ export async function getRecipeSnapshotByToken(token: string): Promise<RecipeSha
       return null;
     }
 
-    return data.recipe as RecipeShareSnapshot;
+    return data as RecipeShareSnapshot;
   } catch (error) {
     console.error('Error loading recipe snapshot:', error);
     return null;
@@ -1830,11 +1827,15 @@ export async function dismissSharedRecipeDiscovery(shareToken: string): Promise<
 }
 
 // Discovered-shelf tile data: the user's own pending discoveries, joined
-// against each share's live snapshot. recipe_shares carries an anon-read RLS
-// policy (it has to, for the public /r/$token route), so a direct client
-// select here needs no SECURITY DEFINER wrapper. A discovery whose
-// recipe_shares row is gone (deleted share) is dropped silently rather than
-// surfaced as a broken tile — there's nothing left to preview or save.
+// against each share's live snapshot. The discoveries read below stays a
+// direct table select (shared_recipe_discoveries keeps its owner-only
+// select policy, unaffected); the snapshot batch-read goes through the
+// get_my_discovered_shares SECURITY DEFINER RPC instead of a direct
+// recipe_shares select, since recipe_shares has no open anon-read policy —
+// the RPC scopes the result to the caller's own shared_recipe_discoveries
+// server-side via auth.uid(). A discovery whose recipe_shares row is gone
+// (deleted share) is dropped silently rather than surfaced as a broken tile
+// — there's nothing left to preview or save.
 export type DiscoveredRecipe = {
   shareToken: string;
   title: string;
@@ -1865,11 +1866,7 @@ export async function getPendingDiscoveredRecipes(): Promise<DiscoveredRecipe[]>
   }
   if (!discoveries || discoveries.length === 0) return [];
 
-  const tokens = discoveries.map((d) => d.share_token);
-  const { data: shares, error: sharesError } = await supabase
-    .from('recipe_shares')
-    .select('share_token, recipe')
-    .in('share_token', tokens);
+  const { data: shares, error: sharesError } = await supabase.rpc('get_my_discovered_shares');
 
   if (sharesError) {
     console.error('Error loading share snapshots for discovered recipes:', sharesError);
@@ -3528,20 +3525,16 @@ export async function shareGroceryList(): Promise<string | null> {
   }
 }
 
-// Reads a frozen snapshot for the public list.$token.tsx route. No user_id
-// filter — anonymous access is governed entirely by the anon-read RLS policy
-// on grocery_list_shares, mirroring getPublicRecipeByToken's reliance on
-// share_token as the sole access grant. Reconstructs GroceryItem-shaped
-// objects (synthetic index-based ids — the snapshot is read-only, so real
-// ids from the live grocery_items table were never stored) so the result can
-// be passed straight into groupGroceryItems, unmodified.
+// Reads a frozen snapshot for the public list.$token.tsx route via the
+// get_grocery_list_share_by_token SECURITY DEFINER RPC (no direct table
+// read — grocery_list_shares has no open anon-read policy). The RPC resolves
+// access by exact share_token match. Reconstructs GroceryItem-shaped objects
+// (synthetic index-based ids — the snapshot is read-only, so real ids from
+// the live grocery_items table were never stored) so the result can be
+// passed straight into groupGroceryItems, unmodified.
 export async function getPublicGroceryListByToken(token: string): Promise<GroceryItem[] | null> {
   try {
-    const { data, error } = await supabase
-      .from('grocery_list_shares')
-      .select('items')
-      .eq('share_token', token)
-      .maybeSingle();
+    const { data, error } = await supabase.rpc('get_grocery_list_share_by_token', { p_share_token: token });
 
     if (error) {
       console.error('Error loading public grocery list:', error);
@@ -3552,7 +3545,7 @@ export async function getPublicGroceryListByToken(token: string): Promise<Grocer
       return null;
     }
 
-    const snapshotItems = (data.items || []) as GroceryListSnapshotItem[];
+    const snapshotItems = (data || []) as GroceryListSnapshotItem[];
 
     return snapshotItems.map((item, idx) => ({
       id: String(idx),
