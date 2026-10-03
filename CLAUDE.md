@@ -68,6 +68,8 @@ pointer named — do not duplicate it here.
 - **A cached or fallback `user_recipe_slices` row is only served if its stored `gate_fingerprint` matches a freshly-computed one for the user's CURRENT `allergies`/`taste_profile`** — a mismatch forces a recompute (or no slice) instead of serving stale gates; `created_at` on that table is NOT recompute evidence (no `updated_at` column — it reflects the first insert for that `slice_date`, not the latest write). Full detail: Gate Fingerprint, Profile Allergy UI & Deterministic Confirmation in FEATURE_SPECS.md.
 - **Build/cook-chat is separately hardened against hard allergens** — a prompt-level salience layer plus a deterministic `scanRecipeDraftForBig9` backstop (title+description+ingredients+step text) at the parse choke-point, bounded 3-attempt regenerate, null-profile fail-closed to all-nine. Full detail: Build/Cook-Chat Allergy Hardening in FEATURE_SPECS.md.
 - **`compute-slice` Stage 2's narrowed-to-60 + 6-field-slimmed AI payload is a cost-down change with zero safety surface** — narrowing is a strict subset of the already Stage-1-gated candidate set (cannot introduce an ungated candidate), and dropping the 9 dietary boolean columns from what the AI sees changes nothing enforcement-wise, since the AI was never the enforcement layer for them — Stage-1 SQL + `validIds` filtering still do all real gating. Never re-add the booleans to this payload "for the AI to check." Full detail: Suggested Recipes — Layer 3 (assignment runtime) in FEATURE_SPECS.md.
+- **A recipe with no `recipe_categories` row is invisible in every library view** — `getSavedRecipesAll`/`getSavedRecipesForCategory` inner-join it; every save path MUST assign a category (new accounts start with zero). Full detail: Share-to-Save / Discovered in FEATURE_SPECS.md.
+- **Build's recipe preview is the shared component `ExpandedRecipeOverlay.tsx`** — reused as-is (Build-preserving optional-prop defaults) across Build, the Discovered-tile preview, and the logged-out share preview; extend it, don't re-style a new one. Full detail: Share-to-Save / Discovered in FEATURE_SPECS.md.
 - **Design System detail (fonts, palette, nav, logo assets) now lives in DESIGN_SPEC.md, not CLAUDE.md** — CLAUDE.md no longer carries the app-wide design-system summary. Full detail: Design System in DESIGN_SPEC.md.
 - **AI Layer's conversational-behavior detail (system-prompt building, recipe-parsing consolidation, recipe context injection, formatting house style, microcopy voice) moved out of CLAUDE.md's AI Layer section** — the model/API/streaming facts and the `ai-chat`/grocery-enrichment boundary warnings stay in CLAUDE.md. Full detail: AI Layer — Conversational Behavior in FEATURE_SPECS.md.
 - **Build Conversation Persistence moved to FEATURE_SPECS.md** — Build state (`buildMessages`, `buildConversationHistory`, `buildCurrentRecipe`, etc.) lives at App level, not in Cook, and survives tab switches/nav/save. Full detail: Build Conversation Persistence in FEATURE_SPECS.md.
@@ -79,7 +81,7 @@ pointer named — do not duplicate it here.
 ## Tech Stack
 
 - React + TanStack Start + Vite
-- Bun (package manager, dev server)
+- Bun (local dev server only — **Vercel builds via npm/`package-lock.json`, NOT bun**; any dependency change must keep `package-lock.json` in sync)
 - Supabase — auth, database, storage, edge functions. Client at `src/lib/supabase.ts`
 - Nitro — Vercel deployment adapter
 - Anthropic API — server-side via Supabase Edge Function `ai-chat` (key never in browser)
@@ -135,9 +137,13 @@ its `profiles_handle_lower_idx` unique index is the seventh dashboard-only schem
 item added this way — see "Account Identity" in FEATURE_SPECS.md.) This list keeps
 growing; treat any specific count as stale on sight rather than trusting a documented
 number, same caution as the TypeScript error count below. Account-to-account
-sharing's own schema-addition inventory (Builds 2–4) and the `supabase/migrations/`
-tracked-exception history live in each build's own section of FEATURE_SPECS.md, not
-here.
+sharing's own schema-addition inventory (Builds 2–4) and share-to-save's own tracked
+migration (`20261002000001_shared_recipe_save.sql`) — the `supabase/migrations/`
+tracked-exception history — live in each build's own section of FEATURE_SPECS.md,
+not here.
+
+**Any write to the shared Supabase DB — including migration bookkeeping (e.g.
+`supabase migration repair`) — requires explicit founder approval first.**
 
 **Legacy localStorage keys still in use:** `tipsyDinnerEmail`, `tipsyDinnerTable`.
 `tipsyDinnerName` is no longer a name source — `display_name` is authoritative (see
@@ -183,6 +189,10 @@ contracts.
   OAuth, and silently derives a unique `handle` alongside it for genuinely new
   profiles — no handle-capture screen. Full detail: "Account Identity" in
   FEATURE_SPECS.md.
+- `getCurrentView()` has a fourth, logged-out `"shared-recipe"` state, for a
+  stranger with no session on a share link. `PENDING_SHARE_TOKEN_KEY`
+  (localStorage) carries the token through signup/sign-in, including the OAuth
+  round-trip. Full detail: Share-to-Save / Discovered in FEATURE_SPECS.md.
 
 **Duplicate SIGNED_IN event.** `onAuthStateChange` fires a duplicate SIGNED_IN when
 the browser tab regains focus. A `profileInitialized` ref prevents re-running
@@ -258,6 +268,15 @@ to the legacy `getPublicRecipeByToken(token)` (fetches recipe + ingredients live
 OR'd with owner-only policies) so tokens minted before the frozen-snapshot model keep
 resolving. Component body is unchanged either way — both paths produce compatible
 field shapes. **Must stay chrome-free** (no in-app UI like the chat icon).
+
+**"View in app" and share-to-save.** "View in app" carries `?share={token}`
+(relative href) for snapshot shares; legacy links keep the bare link. A snapshot
+may carry `sharerName`/`showSharer`; when `showSharer` is `false` the name must
+never render or backfill from `profiles` — that fallback applies ONLY to legacy
+snapshots with no `showSharer` key, never an explicit opt-out. Share-to-save
+saves are deliberately separate from the A2A send system — no `recipe_sends`,
+`connections`, or `notifications` row. Full detail: Share-to-Save / Discovered
+in FEATURE_SPECS.md.
 
 **Vercel quirks.** Nitro generates `.vercel/output` during build (gitignored).
 `config.json` and `.vc-config.json` are written manually via a Nitro compiled hook in
@@ -359,3 +378,6 @@ code defects).
 - **Correction:** there is no reusable loading-spinner component. `Spinner.tsx` exists but has zero imports anywhere in the app (dead code). The "Updating…" pattern is inline in `GroceryList` (`App.tsx`), not a shared component — reusing it elsewhere (e.g. Occasions/Menus load flash) means copying the inline pattern, not importing something.
 - Account-to-account sharing's own standing cleanup/watch items (the send-sheet label, cache-clear/cook_time gaps, receiving aesthetic passes, etc. — the receive branch itself merged 2026-08-23, no longer long-lived) live in their respective FEATURE_SPECS.md build sections, not here.
 - **Fraunces italic renders as generic serif app-wide, and Lazydog renders as its plain fallback — neither font's stylesheet/`@font-face` is actually wired.** Closed by decision 2026-09-20, not a bug to re-discover: known fix path is adding a Fraunces `<link>` next to the existing Inter one in `src/routes/__root.tsx`, and a `@font-face` block for `src/fonts/lazydog.ttf`; out of scope until a session deliberately picks it up. Every "Fraunces italic"/"Lazydog" instruction elsewhere in this doc is aspirational until then. See Fonts in Design System.
+- **Funnel hook comment markers (`// FUNNEL HOOK: ...`) exist as placeholders only** — no instrumentation is wired yet. Full marker list (file + name): Share-to-Save / Discovered in FEATURE_SPECS.md.
+- **Known security issue — `recipe_shares`'s anon SELECT policy is `qual = true` (not token-scoped)**, so any anon client can enumerate every shared-recipe snapshot, not just the one it holds the token for. Fix (scope to an exact `share_token` match) before beta link distribution.
+- **Dual lockfile:** `package-lock.json` (Vercel's build source) and `bun.lockb` (local dev) are both committed. Reconciling to one is a known open item.

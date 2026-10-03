@@ -3334,3 +3334,249 @@ genuinely universal items. See CLAUDE.md for what stayed.)*
   - `cuisineLabels.ts`'s curated label map is hand-maintained and will silently drift from `scripts/matrix-pipeline.mjs`'s `CUISINES` list if a cuisine is ever added to one and not the other (the pipeline script can't be imported client-side, so this can't be a shared import — see the file's own header comment).
   - Neither Fraunces nor Lazydog's non-loading was actually fixed this session — see Fonts in DESIGN_SPEC.md and the Fraunces/Lazydog bullet in CLAUDE.md's Standing Cleanup section; only newly confirmed as a deliberate, logged decision rather than an open unknown.
   Full detail: First-Impression Polish (Session, 2026-09-20) in FEATURE_SPECS.md.
+
+---
+
+## Share-to-Save / Discovered
+
+Merged to `main` 2026-10-03 (`6cfd9f8`), on top of the TanStack security patch
+(`88c5ade`). Lets a logged-out stranger who opens a public share link (`/r/$token`)
+end up with the recipe in their own library — without ever auto-saving anything on
+their behalf. Full design history, violation-test results, and teardown accounting
+live in `docs/proposals/share-to-save-chunk3.md` (the approved redesign proposal)
+and `docs/proposals/share-to-save-chunk3-results.md` (migration/edge-function diff,
+pre-build checks, 15/15 live violation tests, Step B(c) implementation +
+independent re-verification) — this section summarizes what shipped, not the full
+narrative.
+
+### The stranger flow, end to end, as built
+
+1. **Public page** (`r.$token.tsx`) renders the snapshot. "View in app" is a
+   relative link: `href={isSnapshotShare ? `/?share={token}` : "/"}` — snapshot
+   shares carry the token forward, legacy live-path shares (pre-dating
+   `recipe_shares`) keep the bare `/` link unchanged.
+2. **Logged-out preview** — a stranger with no session lands on `getCurrentView()`'s
+   `"shared-recipe"` state (`App.tsx`), which renders `SharedRecipeView.tsx`. This
+   reuses `ExpandedRecipeOverlay` (Build's own recipe-preview component — see
+   "Component reuse" below) rather than hand-matching its styles, so the preview the
+   stranger sees is exactly Build's creation-experience preview, not a second
+   implementation of it. Read-only: no save action here, no AI calls, no writes.
+3. **Pending token** — the share token is written to `localStorage` under
+   `PENDING_SHARE_TOKEN_KEY` (`App.tsx`), the same key read back by both
+   `Onboarding.tsx`'s Loader and `Home.tsx`'s mount effect, so it survives the
+   signup/sign-in round trip including the Google OAuth redirect (which leaves and
+   re-enters the page).
+4. **Signup/sign-in** — unchanged. No share-specific branching in `SignUp.tsx`/
+   `SignIn.tsx`/`AuthFlow.tsx`.
+5. **Onboarding** — unchanged question flow (palate/inspiration/constraints). The
+   Loader's only addition is reading `PENDING_SHARE_TOKEN_KEY` and, if present,
+   calling `recordSharedRecipeDiscovery` (non-blocking relative to onboarding's own
+   handoff timing), then clearing the key regardless of outcome. No polling, no
+   retry — a failed/unknown token must never block onboarding.
+6. **Record discovery** — `record_shared_recipe_discovery(p_share_token)`
+   (`SECURITY DEFINER`) idempotently upserts a `pending` row keyed on
+   `(user_id, share_token)`. Silently no-ops on an unknown/deleted token (fire-and-
+   forget, not a concurrency primitive — there is no claim/lock/staleness-window
+   mechanism in this design, unlike the superseded draft described in
+   `share-to-save-chunk3.md`).
+7. **Discovered section on Home** — renders below the suggestions carousel
+   ("Thought Starters"), i.e. **Jump in → Thought Starters → Discovered → Sent to
+   you → Explore** (`Home.tsx`), only when at least one `pending` discovery exists,
+   newest first. This is a deliberate placement deviation from the original
+   proposal (which specified "top of Home, above Jump in") — document this section
+   as-built, not as-proposed. Tile copy matches the existing "Sent to you" tile
+   pattern: `"from {sharerName}"` when a name is present, a quiet `"tap to save"`
+   subline when the name is hidden or was never captured — never a fabricated
+   placeholder name.
+8. **Tap → preview** — opens the same `ExpandedRecipeOverlay`-based preview, with
+   `photoUrl` set.
+9. **Standard save + category** — tapping Save routes through the app's real
+   `SaveRecipeFlow` category picker, the same as every other save entry point.
+   `saveSharedRecipe()` (`data.ts`) calls the ordinary, unmodified `saveRecipe()`
+   with a real `categoryId` and `source: 'manual'` (same literal
+   `saveReceivedRecipe` already uses — no new `source` value, no constraint
+   change). This is the structural fix for the category-invisibility bug described
+   below — a Discovered save can never skip category selection, so the bug is
+   impossible by construction, not patched around.
+10. **Stamp** — `finish_shared_recipe_save(p_share_token, p_recipe_id)`
+    (`SECURITY DEFINER`) runs immediately after the save succeeds. Self-sufficient:
+    it upserts the discovery row itself (works even if step 6 never ran for this
+    token — race, cleared localStorage, direct deep link while already signed in),
+    then stamps `recipes.inspired_by_id`/`inspired_by_name` unless the share is
+    gone, it's a self-share, or the snapshot's `showSharer` is explicitly `false`.
+11. **Photo copy** — `copy-shared-recipe-photo` Edge Function, soft-fail, called
+    after the stamp (see "Schema and security model" below).
+
+### No-silent-save: the design decision and why
+
+The original design (superseded, documented in full in
+`share-to-save-chunk3-results.md`'s "Superseded" section) auto-saved the shared
+recipe the moment onboarding/sign-in finished, with no category, then tried to
+recover from the fallout afterward. Pre-build check 11 on that design found the
+fallout was unrecoverable in practice: `saveRecipe(r, source, categoryId?)` only
+inserts a `recipe_categories` row `if (categoryId)`, and every read path a user can
+actually browse — `getSavedRecipesAll`, `getSavedRecipesForCategory` — is an
+**inner join** keyed off `recipe_categories`. A recipe saved with no category
+produces zero result rows in both, and is therefore invisible everywhere a user can
+browse their library, not degraded or miscategorized. Home doesn't fetch saved
+recipes at all, so there was no path back to it either. The founder redesigned the
+product behavior itself — no save happens until the user taps Save and picks a real
+category through the standard flow — rather than patch around the gap. See the
+Load-Bearing Contracts entry in CLAUDE.md for the resulting cross-cutting rule
+(every save path must assign a category).
+
+**Attribution is a user choice made at share time, not a default.** A "Show my
+name" toggle (`profiles.share_show_name`, `boolean not null default true`,
+remembers the sharer's last choice) sits on the share action. Off means no name
+anywhere — not on the public page, not on the Discovered tile, and no
+`inspired_by` stamp on the saved recipe (see the `finish_shared_recipe_save` rules
+below). `shareRecipeSnapshot(recipeId, showSharer)` writes a `showSharer: boolean`
+key into the snapshot JSON on every new share going forward (never conditionally
+omitted), so a legacy snapshot minted before this toggle existed (no `showSharer`
+key at all) can be told apart from a snapshot where the sharer explicitly opted out
+— these are NOT the same case. The previously-considered "Inspired by others"
+auto-category idea was dropped entirely in the redesign.
+
+**Deliberately connection-free.** No `recipe_sends` row, no `connections` row, no
+`notifications` row, no `saveReceivedRecipe` call, for any part of this feature —
+the A2A friend-sharing system is completely untouched. `saveSharedRecipe()` is
+built on plain `saveRecipe()` + the attribution-stamp RPC + the existing soft-fail
+photo-copy pattern, the same shape as Suggested Recipes saves (see "Suggested
+Recipes — Layer 4" above), not `saveReceivedRecipe`'s three-actor two-party flow.
+
+### Schema and security model
+
+- **`profiles.share_show_name`** (new column, `boolean not null default true`).
+  Write-safety: every existing `profiles` write path uses a named-column
+  `.update({...})` or a `Partial`-spread `.upsert(..., {onConflict: 'id'})` — none
+  replace the full row, so none can null out a column they don't mention.
+- **`shared_recipe_discoveries`** (new table) — `id`, `user_id` (FK→`profiles.id`,
+  `ON DELETE CASCADE`), `share_token`, `recipe_id` (FK→`recipes.id`,
+  `ON DELETE SET NULL`), `status` (`'pending'|'saved'|'dismissed'`, checked),
+  `created_at`, `updated_at`. `UNIQUE (user_id, share_token)` and
+  `UNIQUE (recipe_id)`. Owner-select-only RLS; no client write policy at all —
+  every write goes through the three functions below. Unlike `recipe_sends`, this
+  table does NOT store its own copy of the recipe content — it's intentionally
+  just a pointer; `getPendingDiscoveredRecipes()` joins it client-side against
+  `recipe_shares` (already anon-readable by token) to hydrate
+  title/photo/sharerName/showSharer.
+- **Three `SECURITY DEFINER` functions, `authenticated`-only** (`PUBLIC` and `anon`
+  both explicitly revoked on each — Supabase grants `anon` execute separately from
+  `PUBLIC` by default, so both revokes are required, not just one):
+  - **`record_shared_recipe_discovery(p_share_token)`** — idempotent insert-or-
+    resurrect of a `pending` row (see stamp/resurrect rules below). Silently
+    no-ops on an unknown/deleted token.
+  - **`finish_shared_recipe_save(p_share_token, p_recipe_id)`** — called once,
+    right after `saveRecipe()` succeeds. Raises if the caller doesn't own
+    `p_recipe_id`. Self-sufficient: upserts the discovery row itself via
+    `ON CONFLICT (user_id, share_token)`, keeping whichever `recipe_id` was
+    already attached (`coalesce(existing.recipe_id, excluded.recipe_id)` — see the
+    "second save may lack its photo" edge case below for why this matters), then
+    stamps the attribution:
+    - `recipe_shares` row gone (deleted share, or sharer account cascaded away) or
+      a self-share (sharer = saver) → skip the stamp, no exception, row still
+      marked `'saved'`.
+    - Snapshot's `showSharer === false` → skip the stamp entirely, **no
+      profile-name fallback** — the sharer explicitly asked to stay anonymous.
+    - Snapshot's `showSharer === true`, or the key is **absent** (legacy snapshot
+      predating the toggle) → stamp, preferring the frozen `sharerName`, falling
+      back to the sharer's **current** `profiles.display_name` only when
+      `sharerName` was never captured. The profile-name fallback is reserved for
+      this legacy-snapshot case specifically — it never runs when `showSharer` was
+      explicitly set to `false`.
+  - **`dismiss_shared_recipe_discovery(p_share_token)`** — marks a still-`pending`
+    row `dismissed`, mirroring `dismissReceivedRecipe`. Only ever touches `pending`
+    rows, so it can never un-save an already-`saved` discovery.
+  - **Resurrect rule** (lives inside `record_shared_recipe_discovery`, since that's
+    the function every re-discovery calls): re-opening the same share link flips a
+    `dismissed` row back to `pending`, and flips a `saved` row whose `recipe_id`
+    has gone `null` (the saved recipe was since deleted) back to `pending` too — so
+    neither case is permanently stranded. A `saved` row whose recipe still exists
+    is left untouched; re-opening the same link once genuinely saved is a no-op.
+- **`copy-shared-recipe-photo` Edge Function** — same authorize-with-caller,
+  act-with-admin shape as `copy-received-recipe-photo` (see Account-to-Account
+  Sharing — Build 4 above), soft-fail, source path derived server-side from
+  `recipe_shares` (never from client input). Re-keyed to check
+  `shared_recipe_discoveries.status = 'saved'` for the exact
+  `(caller, share_token, recipe_id)` triple before copying — so the function
+  structurally cannot run ahead of the stamp step, not just by client call-order
+  discipline, and cannot be invoked by anyone other than the recipe's actual owner.
+
+**Schema-inventory note.** This is the second `supabase/migrations/`-tracked
+schema change in the app (after account-to-account sharing's functions-only
+migrations) — unlike the dashboard-only convention for everything else (see Data
+Layer in CLAUDE.md), the full table, all three functions, the `profiles` column,
+and the edge-function registration for this feature are captured in
+`supabase/migrations/20261002000001_shared_recipe_save.sql` and
+`supabase/config.toml`, not hand-applied.
+
+### "Inspired by" — now displayed, not just stamped
+
+`recipes.inspired_by_name`/`inspired_by_id` (added in Build 2 of account-to-account
+sharing — see above) were write-only until this feature: stamped at save time by
+both `finish_received_recipe_save` (friend sends) and `finish_shared_recipe_save`
+(public-share discoveries), but never rendered back to the recipe's own owner
+anywhere in the saved-recipe views. `data.ts`'s `Recipe` type and both
+`getSavedRecipesForCategory`/`getSavedRecipesAll` now select and return
+`inspired_by_name`. The saved-recipe detail view (`App.tsx`'s `RecipeCard`) renders
+a quiet `"inspired by {name}"` line under the title whenever the field is present —
+styled identically to the existing "inspired by" line in `ExpandedRecipeOverlay.tsx`
+(`fontSize: 12`, `color: rgba(35,60,0,0.5)`, `marginBottom: 12`). Applies uniformly
+to any recipe with the field set, including friend-sent saves, which had the
+column populated but previously nowhere to show it.
+
+### Component reuse: `ExpandedRecipeOverlay`
+
+Build's "RECIPE PREVIEW" component (`src/tipsy/ExpandedRecipeOverlay.tsx`) was
+extracted from `App.tsx` and is now the shared preview component across three
+call sites: Build itself (`App.tsx`), the Discovered-tile preview (`Home.tsx`), and
+the logged-out share preview (`SharedRecipeView.tsx`). Its new props
+(`sharerName`, `photoUrl`, `saveLabel`, `onSignIn`, etc.) are all optional with
+defaults that preserve Build's original behavior exactly. **Reuse this component
+for any future recipe-preview surface rather than re-styling** — it's what keeps
+the three previews in sync automatically instead of by hand-matching.
+
+### Funnel hook markers (comment-only placeholders)
+
+All ten markers below are `// FUNNEL HOOK: <name> — <description>` comments with
+no actual instrumentation wired yet — placeholders for an upcoming instrumentation
+session, not currently emitting any event.
+
+| File | Line | Marker |
+|---|---|---|
+| `App.tsx` | 3041 | `share_link_created` |
+| `Home.tsx` | 173 | `discovered_shelf_mount` |
+| `Home.tsx` | 1989 | `discovered_save_category_picked` |
+| `Home.tsx` | 2014 | `discovered_save_complete` |
+| `Home.tsx` | 2030 | `discovered_save_tap` |
+| `Onboarding.tsx` | 412 | `onboarding_share_token_detected` |
+| `Onboarding.tsx` | 451 | `onboarding_complete_handoff` |
+| `SharedRecipeView.tsx` | 22 | `share_view_in_app` |
+| `SharedRecipeView.tsx` | 32 | `share_view_signup_tap` |
+| `SharedRecipeView.tsx` | 36 | `share_view_signin_tap` |
+
+Line numbers are a snapshot as of the `6cfd9f8` merge — re-grep
+(`grep -rn "FUNNEL HOOK" src/`) before trusting them, same caution as every other
+line-number reference in this doc.
+
+### Known edge cases
+
+- **A second save of the same discovered recipe may lack its photo.**
+  `shared_recipe_discoveries` has `UNIQUE (user_id, share_token)`, and
+  `finish_shared_recipe_save`'s upsert keeps whichever `recipe_id` was already
+  attached to that row (`coalesce(existing.recipe_id, excluded.recipe_id)`). If a
+  user discovers, saves, then somehow saves the same share again (producing a
+  second, different `recipes` row), the discovery row still points at the FIRST
+  recipe's id. `copy-shared-recipe-photo`'s `status='saved'` check requires an
+  exact `(caller, share_token, recipe_id)` match, so the second recipe's photo
+  copy is rejected 403 and soft-fails — the second recipe saves successfully but
+  with no photo.
+- **`cook_time`/`serves` are never persisted by any Discovered save path.**
+  `saveSharedRecipe()`'s snapshot parameter type is
+  `Pick<DiscoveredRecipe, 'title' | 'description' | 'ingredients' | 'steps'>` —
+  `cookTime`/`serves` are deliberately excluded from what gets written, even
+  though the snapshot and `DiscoveredRecipe` type both carry them for preview
+  display.
+- **The legacy-link "View in app" path (bare `/` href, no `?share=` token) was not
+  device-tested** as part of this feature's verification — only the snapshot-share
+  path (`?share={token}`) was exercised end-to-end on a real phone before merge.
