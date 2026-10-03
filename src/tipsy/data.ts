@@ -749,6 +749,7 @@ export type Recipe = {
   photo_url?: string | null;
   photo_version?: number;
   created_at?: string;
+  inspired_by_name?: string | null;
 };
 
 // Gradient palette for categories
@@ -1251,6 +1252,7 @@ export async function getSavedRecipesForCategory(categoryId: string, label: stri
           source,
           photo_url,
           photo_version,
+          inspired_by_name,
           ingredients (
             name,
             quantity,
@@ -1295,6 +1297,7 @@ export async function getSavedRecipesForCategory(categoryId: string, label: stri
         photo_url: recipe.photo_url ?? null,
         photo_version: recipe.photo_version ?? 0,
         created_at: recipe.created_at,
+        inspired_by_name: recipe.inspired_by_name ?? null,
       };
     });
   } catch (error) {
@@ -1330,6 +1333,7 @@ export async function getSavedRecipesAll(): Promise<Recipe[]> {
           source,
           photo_url,
           photo_version,
+          inspired_by_name,
           ingredients (
             name,
             quantity,
@@ -1376,6 +1380,7 @@ export async function getSavedRecipesAll(): Promise<Recipe[]> {
         photo_url: recipe.photo_url ?? null,
         photo_version: recipe.photo_version ?? 0,
         created_at: recipe.created_at,
+        inspired_by_name: recipe.inspired_by_name ?? null,
       });
     }
     return Array.from(byRecipeId.values());

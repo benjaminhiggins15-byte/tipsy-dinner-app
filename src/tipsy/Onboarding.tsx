@@ -409,6 +409,7 @@ function Loader({ onUpdate, onDone, profile }: { onUpdate: (updates: Partial<Pro
     // must never delay onDone/the taste-profile handoff below it. Read-then-
     // remove is single-consumption; recordSharedRecipeDiscovery is itself
     // silent on an unknown/deleted token.
+    // FUNNEL HOOK: onboarding_share_token_detected — pending share token found and recorded mid-onboarding
     const pendingShareToken = localStorage.getItem(PENDING_SHARE_TOKEN_KEY);
     if (pendingShareToken) {
       localStorage.removeItem(PENDING_SHARE_TOKEN_KEY);
@@ -447,6 +448,7 @@ function Loader({ onUpdate, onDone, profile }: { onUpdate: (updates: Partial<Pro
         }
       }
 
+      // FUNNEL HOOK: onboarding_complete_handoff — onboarding finished, handing off to the main app
       if (!cancelled) onDone();
     })();
 

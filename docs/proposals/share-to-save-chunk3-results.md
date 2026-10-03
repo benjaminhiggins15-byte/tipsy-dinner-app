@@ -1,7 +1,10 @@
 # Chunk 3 — Step B Results
 
 **Status: migration applied, edge function deployed, live violation tests
-15/15 PASS, teardown complete. Client code (Step B(c)) in progress.**
+15/15 PASS, teardown complete. Client code (Step B(c)) complete, type-checked,
+built, committed (`8e6b519`), pushed to `feature/share-to-save`. Independently
+re-verified against live state 2026-10-03 (see "Step B(c) + independent
+re-verification" below) — not phone-tested yet.**
 
 Everything below the "Superseded" marker documents the OLD claim/attach/finish
 lock-table design (check 11's uncategorized-recipe finding from that round led
@@ -242,13 +245,59 @@ unilaterally.**
 
 ---
 
-## Not yet done (blocked on the category decision)
+## Step B(c) + independent re-verification (2026-10-03)
 
-- Step B(c): apply migration, deploy edge function
-- Step B(d): violation-test plan against live DB/function with throwaway
-  accounts
-- Step B(e): client code (`saveSharedRecipe`, Onboarding Loader wiring, Home
-  mount wiring)
-- Step B(f): push, preview build confirmation, phone steps
+Client code implemented: `data.ts` (`showSharer` param on `shareRecipeSnapshot`,
+`recordSharedRecipeDiscovery`, `dismissSharedRecipeDiscovery`,
+`getPendingDiscoveredRecipes`, `saveSharedRecipe`), `ExpandedRecipeOverlay.tsx`
+(`onBack`/`onDismiss`), `Home.tsx` (Discovered shelf, `DiscoveredDetailView`,
+mount effect), `App.tsx` (routing, `share_show_name` field + toggle UI +
+`handleToggleShowSharerName`), `Onboarding.tsx` (pending-token hook). Type-check:
+`bunx tsc --noEmit` → 12 errors, matching documented `main` baseline exactly, none
+in touched files. Build: clean. Committed `8e6b519`, pushed to
+`origin/feature/share-to-save`.
 
-This document will be updated in place as those resume.
+This session re-verified everything below independently (live queries, not
+memory/prior-doc trust), per explicit instruction. No remediation was needed —
+every item was already correct.
+
+- **FIX 1 (anon revoke), live:** queried `has_function_privilege` for
+  `anon`/`authenticated` on all three functions directly against the linked
+  remote DB. Result: `anon` → `false`, `authenticated` → `true` for
+  `record_shared_recipe_discovery`, `dismiss_shared_recipe_discovery`,
+  `finish_shared_recipe_save`. Matches the file's explicit
+  `revoke ... from public; revoke ... from anon;` pairs.
+- **GATE/FIX 2 (`share_show_name` isolation):** `updateProfile`
+  (`App.tsx:736`) does `supabase.from('profiles').upsert({ id, ...updates },
+  { onConflict: 'id' })` — only columns present in `updates` are written on
+  conflict. Every other `onUpdate(...)` call site (`Onboarding.tsx:268,420,444`;
+  `Profile.tsx:232,343,478`) passes a `Partial<ProfileType>` that never includes
+  `share_show_name`; the toggle's own call (`App.tsx:3073`) passes
+  `{ share_show_name: next }` only. No path can null or overwrite it outside the
+  toggle.
+- **FIX 3 (old draft removed):** `supabase/migrations/` contains exactly one
+  `2026100*` file, `20261002000001_shared_recipe_save.sql` (the redesign). No
+  `shared_recipe_saves`/claim-table draft file exists anywhere in the folder.
+- **Step a, live:** `supabase migration list` shows `20261002000001` on both
+  Local and Remote. `supabase functions list` shows `copy-shared-recipe-photo`
+  ACTIVE, updated 2026-10-03 16:41:12.
+- **Step b, violation tests:** the 15/15 PASS table and teardown accounting
+  above were already recorded for this exact (redesigned) migration in a prior
+  session. Re-ran a live spot-check this session against the two recorded test
+  user ids and the `shared_recipe_discoveries` table as a whole: 0 rows
+  everywhere. Teardown holds; no re-run needed since no schema change occurred
+  between sessions.
+- **Funnel hooks (file:line):** `App.tsx:3041` `share_link_created`;
+  `Home.tsx:173` `discovered_shelf_mount`; `Home.tsx:1989`
+  `discovered_save_category_picked`; `Home.tsx:2014` `discovered_save_complete`;
+  `Home.tsx:2030` `discovered_save_tap`; `SharedRecipeView.tsx:22`
+  `share_view_in_app`; `SharedRecipeView.tsx:32` `share_view_signup_tap`;
+  `SharedRecipeView.tsx:36` `share_view_signin_tap` (pre-existing, unmodified
+  this feature).
+- **Vercel preview for `8e6b519`:** could not be verified — no `gh` or `vercel`
+  CLI is available in this environment. Needs a manual check of the Vercel
+  dashboard before phone-testing.
+
+This document is now current as of 2026-10-03; nothing below this section
+reflects outstanding work other than the Vercel preview check and the phone
+test itself.

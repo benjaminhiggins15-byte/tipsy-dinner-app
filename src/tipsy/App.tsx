@@ -3490,6 +3490,18 @@ function RecipeCard({
             </div>
           </div>
 
+          {recipe.inspired_by_name && (
+            <div style={{
+              fontFamily: "Inter, sans-serif",
+              fontSize: 12,
+              fontWeight: 500,
+              color: "rgba(35,60,0,0.5)",
+              marginBottom: 12,
+            }}>
+              inspired by {recipe.inspired_by_name}
+            </div>
+          )}
+
           {/* Description */}
           <div style={{
             fontFamily: "Fraunces, serif",
