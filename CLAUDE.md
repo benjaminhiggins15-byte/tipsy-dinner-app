@@ -103,11 +103,20 @@ pointer named — do not duplicate it here.
 - `categories`, `recipe_categories` (join — a recipe can be in many categories)
 - `occasions`, `menus`, `menu_recipes` (join, has `section` field)
 - `grocery_items` — grocery list rows (raw + AI-enriched fields), owner-only
-- `grocery_list_shares` — frozen snapshots for public grocery share links; owner-write + anon-read
-- `recipe_shares` — frozen snapshots for public recipe share links; owner-write + anon-read (same pattern as `grocery_list_shares`; see Recipe Sharing in FEATURE_SPECS.md)
+- `grocery_list_shares` — frozen snapshots for public grocery share links; owner-write, no direct anon/authenticated read (see note below)
+- `recipe_shares` — frozen snapshots for public recipe share links; owner-write, no direct anon/authenticated read (same pattern as `grocery_list_shares`; see Recipe Sharing in FEATURE_SPECS.md)
 - `suggested_recipe_pool` — offline-generated recipe pool for a future suggestions feature; RLS deny-all, service-role-only, no live app read path yet. Full detail: Suggested Recipes Pool — Layer 1 in FEATURE_SPECS.md.
 - `profiles.taste_profile` (text, nullable) — AI-generated prose interpretation of a user's onboarding answers, for a future Layer 3 consumer, not the user. Full detail: Suggested Recipes — Layer 2 in FEATURE_SPECS.md.
 - `user_recipe_slices` — per-user, per-day 3-4 recipe slice computed by the `compute-slice` Edge Function; owner-only RLS, no shelf UI yet. Full detail: Suggested Recipes — Layer 3 (assignment runtime) in FEATURE_SPECS.md.
+
+**Public share reads go ONLY through SECURITY DEFINER functions.**
+`get_recipe_share_by_token`, `get_grocery_list_share_by_token`, and
+`get_my_discovered_shares` are the sole read paths into `recipe_shares`/
+`grocery_list_shares` — their old `qual = true` anon-read policies
+(`recipe_shares_select_anon`/`grocery_list_shares_select_anon`) were dropped
+2026-10-03 after confirming the function-based code paths were live in
+production. Never re-add an anon/public SELECT policy on either table. Share
+tokens are `crypto.randomUUID()`.
 
 **Key schema decisions:**
 - Ingredients stored as **free-text strings**, NOT structured `{amount, unit}`. Deliberate and load-bearing: fits the free-text nature of AI cooking ("a good glug of olive oil"); AI normalizes on demand where structure is needed. The AI is the bridge between free-text recipes and any feature that computes over ingredients (grocery, future pantry/nutrition/scaling). Full structured-storage migration is a trigger-gated option — revisit ONLY if a feature must compute across the whole library's quantities in *stored* form.
@@ -379,5 +388,5 @@ code defects).
 - Account-to-account sharing's own standing cleanup/watch items (the send-sheet label, cache-clear/cook_time gaps, receiving aesthetic passes, etc. — the receive branch itself merged 2026-08-23, no longer long-lived) live in their respective FEATURE_SPECS.md build sections, not here.
 - **Fraunces italic renders as generic serif app-wide, and Lazydog renders as its plain fallback — neither font's stylesheet/`@font-face` is actually wired.** Closed by decision 2026-09-20, not a bug to re-discover: known fix path is adding a Fraunces `<link>` next to the existing Inter one in `src/routes/__root.tsx`, and a `@font-face` block for `src/fonts/lazydog.ttf`; out of scope until a session deliberately picks it up. Every "Fraunces italic"/"Lazydog" instruction elsewhere in this doc is aspirational until then. See Fonts in Design System.
 - **Funnel hook comment markers (`// FUNNEL HOOK: ...`) exist as placeholders only** — no instrumentation is wired yet. Full marker list (file + name): Share-to-Save / Discovered in FEATURE_SPECS.md.
-- **Known security issue — `recipe_shares`'s anon SELECT policy is `qual = true` (not token-scoped)**, so any anon client can enumerate every shared-recipe snapshot, not just the one it holds the token for. Fix (scope to an exact `share_token` match) before beta link distribution.
+- **Banked follow-up — legacy `is_public` path is token-free by design.** The legacy fallback policies `recipes_select_public`/`ingredients_select_public` (used by `getPublicRecipeByToken`, the `/r/$token` live-fallback for pre-snapshot links) are gated only on `is_public = true`, not on knowing a token — so anon can list every public recipe, not just one it holds a link for. Those `recipes` rows include `user_id` and `inspired_by_name`; `ingredients` rows include `user_id`. Lower risk than the now-fixed `recipe_shares`/`grocery_list_shares` issue since `is_public` is an explicit user opt-in, not an accidental default. Consider column-scoping these policies in a future pass.
 - **Dual lockfile:** `package-lock.json` (Vercel's build source) and `bun.lockb` (local dev) are both committed. Reconciling to one is a known open item.
