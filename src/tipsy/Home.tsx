@@ -229,10 +229,66 @@ export default function Home({
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: 16 }}>
+        <div
+          style={{
+            margin: `36px ${EDGE}px 8px`,
+            fontFamily: fontSans,
+            fontWeight: 500,
+            textTransform: "uppercase",
+            fontSize: 13,
+            letterSpacing: "0.1em",
+            color: C.text,
+          }}
+        >
+          Jump in
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "row",
+            overflowX: "auto",
+            padding: `4px ${EDGE}px 4px`,
+            gap: 12,
+            WebkitOverflowScrolling: "touch",
+          }}
+        >
+          {displayChips.map((chip, index) => (
+            <button
+              key={index}
+              onClick={() => seedBuildFromChip(chip.prompt)}
+              style={{
+                minWidth: 200,
+                height: 72,
+                background: "rgba(35,60,0,0.06)",
+                border: "1px solid rgba(35,60,0,0.1)",
+                borderRadius: 16,
+                padding: "14px 16px",
+                cursor: "pointer",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-start",
+                justifyContent: "center",
+                gap: 4,
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ fontFamily: fontSans, fontWeight: 700, fontSize: 15, color: C.text, lineHeight: 1.2 }}>
+                {chip.header}
+              </div>
+              <div style={{ fontFamily: fontDisplay, fontStyle: "italic", fontWeight: 300, fontSize: 13, color: C.textLight, lineHeight: 1.2 }}>
+                {chip.body}
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <SuggestionsCarousel loading={sliceLoading} result={sliceResult} push={push} />
+
         {discovered.length > 0 && (
           <div
             style={{
-              margin: `8px ${EDGE}px 8px`,
+              margin: `36px ${EDGE}px 8px`,
               fontFamily: fontSans,
               fontWeight: 500,
               textTransform: "uppercase",
@@ -338,62 +394,6 @@ export default function Home({
             ))}
           </div>
         )}
-
-        <div
-          style={{
-            margin: `36px ${EDGE}px 8px`,
-            fontFamily: fontSans,
-            fontWeight: 500,
-            textTransform: "uppercase",
-            fontSize: 13,
-            letterSpacing: "0.1em",
-            color: C.text,
-          }}
-        >
-          Jump in
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "row",
-            overflowX: "auto",
-            padding: `4px ${EDGE}px 4px`,
-            gap: 12,
-            WebkitOverflowScrolling: "touch",
-          }}
-        >
-          {displayChips.map((chip, index) => (
-            <button
-              key={index}
-              onClick={() => seedBuildFromChip(chip.prompt)}
-              style={{
-                minWidth: 200,
-                height: 72,
-                background: "rgba(35,60,0,0.06)",
-                border: "1px solid rgba(35,60,0,0.1)",
-                borderRadius: 16,
-                padding: "14px 16px",
-                cursor: "pointer",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "flex-start",
-                justifyContent: "center",
-                gap: 4,
-                flexShrink: 0,
-              }}
-            >
-              <div style={{ fontFamily: fontSans, fontWeight: 700, fontSize: 15, color: C.text, lineHeight: 1.2 }}>
-                {chip.header}
-              </div>
-              <div style={{ fontFamily: fontDisplay, fontStyle: "italic", fontWeight: 300, fontSize: 13, color: C.textLight, lineHeight: 1.2 }}>
-                {chip.body}
-              </div>
-            </button>
-          ))}
-        </div>
-
-        <SuggestionsCarousel loading={sliceLoading} result={sliceResult} push={push} />
 
         {pendingSummary && (
           <div
