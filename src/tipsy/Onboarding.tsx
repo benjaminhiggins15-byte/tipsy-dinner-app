@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type CSSProperties } from "react";
-import { generateTasteProfile, generateOnboardingReflection, composeConstraintsAndAllergies, type StructuredAllergies } from "./data";
+import { generateTasteProfile, generateOnboardingReflection, composeConstraintsAndAllergies, recordSharedRecipeDiscovery, PENDING_SHARE_TOKEN_KEY, type StructuredAllergies } from "./data";
 import { buildConstraintsConfirmation } from "./constraintsConfirmation";
 import { supabase } from "../lib/supabase";
 import { ChatBubble, TypingBubble, CookInputBar } from "./ChatUI";
@@ -401,6 +401,19 @@ function Loader({ onUpdate, onDone, profile }: { onUpdate: (updates: Partial<Pro
     if (startedRef.current) return;
     startedRef.current = true;
     let cancelled = false;
+
+    // Share-to-save handoff: a stranger who tapped "Sign up to save" from a
+    // public share page lands here fresh out of signup, mid-onboarding. The
+    // token rode along in localStorage (set before AuthFlow) under the same
+    // key Home's own mount effect reads. Fire-and-forget and non-blocking —
+    // must never delay onDone/the taste-profile handoff below it. Read-then-
+    // remove is single-consumption; recordSharedRecipeDiscovery is itself
+    // silent on an unknown/deleted token.
+    const pendingShareToken = localStorage.getItem(PENDING_SHARE_TOKEN_KEY);
+    if (pendingShareToken) {
+      localStorage.removeItem(PENDING_SHARE_TOKEN_KEY);
+      recordSharedRecipeDiscovery(pendingShareToken);
+    }
 
     (async () => {
       try {

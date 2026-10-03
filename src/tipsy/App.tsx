@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName, sendRecipeToFriends, searchProfiles, getMyConnections, type ProfileSearchResult, type PendingReceivedRecipe, getPendingReceivedRecipes, type SuggestedRecipeDetail, getSuggestedRecipeDetail, type StructuredAllergies, getRecipeSnapshotByToken, type RecipeShareSnapshot, PENDING_SHARE_TOKEN_KEY } from "./data";
+import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName, sendRecipeToFriends, searchProfiles, getMyConnections, type ProfileSearchResult, type PendingReceivedRecipe, getPendingReceivedRecipes, type SuggestedRecipeDetail, getSuggestedRecipeDetail, type StructuredAllergies, getRecipeSnapshotByToken, type RecipeShareSnapshot, PENDING_SHARE_TOKEN_KEY, type DiscoveredRecipe } from "./data";
 import { type CropRect } from "./image";
 import { type Big9Id, BIG9_DISPLAY_NAMES, effectiveAllergensForScan, scanIngredientsForBig9, scanFreeTextForBig9, type Big9Hit } from "./allergyMap";
 import AddYourOwn from "./AddYourOwn";
@@ -14,7 +14,7 @@ import SaveRecipeFlow from "./SaveRecipeFlow";
 import AuthFlow from "./AuthFlow";
 import SharedRecipeView from "./SharedRecipeView";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
-import Home, { ReceivedPending, ReceivedRecipeView, SuggestionDetailView } from "./Home";
+import Home, { ReceivedPending, ReceivedRecipeView, SuggestionDetailView, DiscoveredDetailView } from "./Home";
 import { supabase } from "../lib/supabase";
 import type { Session } from "@supabase/supabase-js";
 import watermarkSquare from "../Logos/watermark_square.png";
@@ -64,6 +64,7 @@ type ProfileType = {
   onboarding_complete: boolean;
   taste_profile: string | null;
   allergies: StructuredAllergies | null;
+  share_show_name: boolean;
 };
 
 // Helper: Convert recipe to XML format for AI context (used in App and Cook components)
@@ -322,7 +323,9 @@ type Screen =
   | { name: "receivedRecipe"; item: PendingReceivedRecipe; newCategory?: { key: string; label: string } }
   | { name: "newcategoryforreceived"; item: PendingReceivedRecipe }
   | { name: "suggestionDetail"; recipe: SuggestedRecipeDetail; newCategory?: { key: string; label: string } }
-  | { name: "newcategoryforsuggestion"; recipe: SuggestedRecipeDetail };
+  | { name: "newcategoryforsuggestion"; recipe: SuggestedRecipeDetail }
+  | { name: "discoveredDetail"; recipe: DiscoveredRecipe; newCategory?: { key: string; label: string } }
+  | { name: "newcategoryfordiscovered"; recipe: DiscoveredRecipe };
 
 type TabId = "build" | "recipes" | "grocery" | "profile" | "home";
 
@@ -374,6 +377,8 @@ function screenKey(s: Screen): string {
     case "newcategoryforreceived": return `newcategoryforreceived:${s.item.sendId}`;
     case "suggestionDetail": return `suggestionDetail:${s.recipe.id}`;
     case "newcategoryforsuggestion": return `newcategoryforsuggestion:${s.recipe.id}`;
+    case "discoveredDetail": return `discoveredDetail:${s.recipe.shareToken}`;
+    case "newcategoryfordiscovered": return `newcategoryfordiscovered:${s.recipe.shareToken}`;
   }
 }
 
@@ -409,6 +414,7 @@ function renderScreen(
   seedBuildFromChip?: (prompt: string) => void,
   goToReceivedShelf?: () => void,
   switchToTab?: (tab: TabId, screen?: Screen) => void,
+  finishCreateCategoryForDiscovered?: (catKey: string, catLabel: string, recipe: DiscoveredRecipe) => void,
 ) {
   switch (s.name) {
     case "cook": return (
@@ -493,6 +499,8 @@ function renderScreen(
         push={push}
         clearRecipeCache={clearRecipeCache}
         transferToRecipeChat={transferToRecipeChat}
+        profile={profile}
+        onUpdate={onUpdate}
       />
     );
     case "grocerylist": return <GroceryList push={push} back={back} />;
@@ -568,6 +576,24 @@ function renderScreen(
         }}
       />
     );
+    case "discoveredDetail": return (
+      <DiscoveredDetailView
+        recipe={s.recipe}
+        newCategory={s.newCategory}
+        back={back}
+        push={push}
+        finishSaveRecipe={(r, k, l) => finishSaveRecipe?.(r, k, l)}
+        clearRecipeCache={clearRecipeCache || (() => {})}
+      />
+    );
+    case "newcategoryfordiscovered": return (
+      <NewCategory
+        back={back}
+        onSaved={(cat) => {
+          if (cat) finishCreateCategoryForDiscovered?.(cat.key, cat.label, s.recipe);
+        }}
+      />
+    );
   }
 }
 
@@ -631,6 +657,19 @@ export default function App() {
     return () => {
       ignore = true;
     };
+  }, [session, sharedToken]);
+
+  // Logged-in arrival with ?share={token} — same URL param as the logged-out
+  // path above, but handled separately and much more simply: there's no
+  // snapshot to fetch/render here, just a handoff to localStorage under the
+  // SAME key Onboarding's Loader already reads (PENDING_SHARE_TOKEN_KEY), so
+  // Home's own mount effect records the discovery and shows it on the
+  // Discovered shelf. This is the "View in app" path for an already-signed-in
+  // user re-opening a share link.
+  useEffect(() => {
+    if (session === undefined || session === null) return;
+    if (!sharedToken) return;
+    localStorage.setItem(PENDING_SHARE_TOKEN_KEY, sharedToken);
   }, [session, sharedToken]);
 
   // Build conversation state - lifted to survive tab switches
@@ -1184,6 +1223,16 @@ export default function App() {
     });
   };
 
+  // Mirrors finishCreateCategoryForSuggestion — discovered detail's own
+  // create-category return target.
+  const finishCreateCategoryForDiscovered = (catKey: string, catLabel: string, recipe: DiscoveredRecipe) => {
+    if (transition) return;
+    updateCurrentTabStack((prev) => {
+      const newStack = prev.slice(0, -1); // Remove newcategoryfordiscovered screen
+      return [...newStack, { name: "discoveredDetail", recipe, newCategory: { key: catKey, label: catLabel } }];
+    });
+  };
+
   // Transfer to Build with a recipe and question
   const transferToRecipeChat = (recipe: SavedRecipe, question: string, onCollisionCancel: () => void) => {
     if (transition) return;
@@ -1435,6 +1484,7 @@ export default function App() {
           finishCreateCategoryForRecipe={finishCreateCategoryForRecipe}
           finishCreateCategoryForReceived={finishCreateCategoryForReceived}
           finishCreateCategoryForSuggestion={finishCreateCategoryForSuggestion}
+          finishCreateCategoryForDiscovered={finishCreateCategoryForDiscovered}
           finishSaveRecipe={finishSaveRecipe}
           onSignOut={handleSignOut}
           profile={profile}
@@ -1613,6 +1663,7 @@ function ScreenStage({
   finishCreateCategoryForRecipe,
   finishCreateCategoryForReceived,
   finishCreateCategoryForSuggestion,
+  finishCreateCategoryForDiscovered,
   finishSaveRecipe,
   onSignOut,
   profile,
@@ -1646,6 +1697,7 @@ function ScreenStage({
   finishCreateCategoryForRecipe: (catKey: string, catLabel: string, draft: RecipeDraft, returnTo: "cook" | "addown") => void;
   finishCreateCategoryForReceived: (catKey: string, catLabel: string, item: PendingReceivedRecipe) => void;
   finishCreateCategoryForSuggestion: (catKey: string, catLabel: string, recipe: SuggestedRecipeDetail) => void;
+  finishCreateCategoryForDiscovered: (catKey: string, catLabel: string, recipe: DiscoveredRecipe) => void;
   finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
   onSignOut: () => void;
   profile: ProfileType | null;
@@ -1755,7 +1807,7 @@ function ScreenStage({
         pointerEvents: isTransitioning ? "none" : "auto",
         paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
       }}>
-        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab)}
+        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered)}
       </div>
 
       {/* Overlay layer - only during transitions, renders from screen */}
@@ -1768,7 +1820,7 @@ function ScreenStage({
           pointerEvents: "none",
           paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
         }}>
-          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab)}
+          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered)}
         </div>
       )}
     </div>
@@ -2735,6 +2787,8 @@ function RecipeCard({
   push,
   clearRecipeCache,
   transferToRecipeChat,
+  profile,
+  onUpdate,
 }: {
   recipe: Recipe;
   categoryLabel: string;
@@ -2743,10 +2797,16 @@ function RecipeCard({
   push: (s: Screen) => void;
   clearRecipeCache?: (categoryKey: string) => void;
   transferToRecipeChat?: (recipe: SavedRecipe, question: string, onCollisionCancel: () => void) => void;
+  profile?: ProfileType | null;
+  onUpdate?: (updates: Partial<ProfileType>) => Promise<void>;
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps" | "history">("ingredients");
   const [shareConfirm, setShareConfirm] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
+  // "Show my name" toggle, initialized from the persisted profile default
+  // (profiles.share_show_name) — toggling here both drives THIS share and
+  // updates that default for next time, via onUpdate.
+  const [showSharerName, setShowSharerName] = useState(() => profile?.share_show_name ?? true);
   const [groceryAddedConfirm, setGroceryAddedConfirm] = useState(false);
   const [showChatInput, setShowChatInput] = useState(false);
   const [chatQuestion, setChatQuestion] = useState("");
@@ -2978,7 +3038,8 @@ function RecipeCard({
   async function handleShare() {
     if (!recipe.savedId) return;
     setShareError(null);
-    const url = await shareRecipeSnapshot(recipe.savedId.toString());
+    // FUNNEL HOOK: share_link_created — recipe share link minted from RecipeCard
+    const url = await shareRecipeSnapshot(recipe.savedId.toString(), showSharerName);
     if (!url) {
       setShareError("Couldn't share this recipe. Try again.");
       return;
@@ -3001,6 +3062,15 @@ function RecipeCard({
         console.error('Clipboard write failed:', err);
       }
     }
+  }
+
+  // Toggling persists the new default to profiles.share_show_name (fire-and-
+  // forget — a failed write only affects next time's default, never this
+  // share, which already reads the local state synchronously).
+  function handleToggleShowSharerName() {
+    const next = !showSharerName;
+    setShowSharerName(next);
+    onUpdate?.({ share_show_name: next });
   }
 
   function openSendSheet() {
@@ -4666,6 +4736,53 @@ function RecipeCard({
                 >
                   <IconLink size={15} stroke={1.5} />
                   Share as link instead
+                </button>
+
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleToggleShowSharerName();
+                  }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    width: "100%",
+                    background: "transparent",
+                    border: "none",
+                    padding: "10px 0 0",
+                    fontFamily: "Inter, sans-serif",
+                    fontSize: 11,
+                    fontWeight: 500,
+                    color: "rgba(35,60,0,0.4)",
+                    cursor: "pointer",
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      width: 28,
+                      height: 16,
+                      borderRadius: 999,
+                      background: showSharerName ? "#233C00" : "rgba(35,60,0,0.15)",
+                      padding: 2,
+                      transition: "background 150ms ease",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: "50%",
+                        background: "#FAF7F2",
+                        transform: showSharerName ? "translateX(12px)" : "translateX(0)",
+                        transition: "transform 150ms ease",
+                      }}
+                    />
+                  </span>
+                  Show my name on the shared link
                 </button>
               </div>
             </div>

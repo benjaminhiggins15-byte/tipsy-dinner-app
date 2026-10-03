@@ -15,6 +15,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/copy-received-recipe-photo/index.ts"
 
+[functions.copy-shared-recipe-photo]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/copy-shared-recipe-photo/index.ts"
+
 [functions.compute-slice]
 enabled = true
 verify_jwt = true

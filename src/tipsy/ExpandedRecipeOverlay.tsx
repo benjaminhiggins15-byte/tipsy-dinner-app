@@ -15,6 +15,8 @@ export default function ExpandedRecipeOverlay({
   sharerName,
   onSignIn,
   photoUrl,
+  onBack,
+  onDismiss,
 }: {
   open: boolean;
   bottomOffset: number;
@@ -31,6 +33,15 @@ export default function ExpandedRecipeOverlay({
   sharerName?: string;
   onSignIn?: () => void;
   photoUrl?: string | null;
+  // Optional back control for callers that mount this as a full navigated
+  // screen (e.g. Home's Discovered detail) rather than an overlay above a
+  // mini-player — renders a back chevron in the header's left slot when
+  // provided; omitted leaves the header exactly as it was for every other caller.
+  onBack?: () => void;
+  // Optional dismiss control, paired with onBack for Home's Discovered
+  // detail (the only caller needing both) — renders a text button in the
+  // header's right slot, otherwise left as an empty spacer.
+  onDismiss?: () => void;
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
   const [mounted, setMounted] = useState(open);
@@ -88,7 +99,19 @@ export default function ExpandedRecipeOverlay({
       }}>
       {/* Sheet header */}
       <div style={{ padding: "20px 16px 12px", flexShrink: 0, display: "grid", gridTemplateColumns: "32px 1fr 32px", alignItems: "center", background: "#FAF7F2" }}>
-        <span />
+        {onBack ? (
+          <button
+            onClick={onBack}
+            aria-label="Back"
+            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", justifySelf: "start" }}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.6)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
+        ) : (
+          <span />
+        )}
         <div style={{
           textAlign: "center",
           fontFamily: "Inter, sans-serif",
@@ -100,7 +123,28 @@ export default function ExpandedRecipeOverlay({
         }}>
           RECIPE PREVIEW
         </div>
-        <span />
+        {onDismiss ? (
+          <button
+            onClick={onDismiss}
+            style={{
+              background: "transparent",
+              border: "none",
+              padding: 0,
+              cursor: "pointer",
+              justifySelf: "end",
+              fontFamily: "Inter, sans-serif",
+              fontSize: 10,
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              fontWeight: 500,
+              color: "rgba(35,60,0,0.4)",
+            }}
+          >
+            Dismiss
+          </button>
+        ) : (
+          <span />
+        )}
       </div>
 
       {/* Scrollable content */}

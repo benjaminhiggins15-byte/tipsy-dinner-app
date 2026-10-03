@@ -1641,9 +1641,15 @@ export type RecipeShareSnapshot = {
   // older snapshots minted before this field existed simply lack the key —
   // never backfilled. Never lets a lookup failure fail the share itself.
   sharerName?: string;
+  // Explicit "Show my name" choice, frozen at share time. Absent on
+  // snapshots minted before this toggle existed (legacy) —
+  // finish_shared_recipe_save treats a missing key as true. false means
+  // sharerName is deliberately omitted below too, not just unused: no
+  // fallback may ever resurrect a name for a sharer who opted out.
+  showSharer?: boolean;
 };
 
-export async function shareRecipeSnapshot(recipeId: number | string): Promise<string | null> {
+export async function shareRecipeSnapshot(recipeId: number | string, showSharer: boolean = true): Promise<string | null> {
   const userId = await getCurrentUserId();
   if (!userId) {
     console.error('Cannot share recipe: no user session');
@@ -1686,18 +1692,22 @@ export async function shareRecipeSnapshot(recipeId: number | string): Promise<st
     // snapshot. Owner-scoped read (profiles RLS is owner-only SELECT, and
     // userId here is the caller's own id), so this never needs a trusted
     // RPC. Any failure is swallowed — a share must never fail over this.
+    // Skipped entirely when showSharer is false: no point reading a name
+    // that's about to be omitted anyway.
     let sharerName: string | undefined;
-    try {
-      const { data: sharerProfile } = await supabase
-        .from('profiles')
-        .select('display_name')
-        .eq('id', userId)
-        .maybeSingle();
-      if (sharerProfile?.display_name) {
-        sharerName = sharerProfile.display_name;
+    if (showSharer) {
+      try {
+        const { data: sharerProfile } = await supabase
+          .from('profiles')
+          .select('display_name')
+          .eq('id', userId)
+          .maybeSingle();
+        if (sharerProfile?.display_name) {
+          sharerName = sharerProfile.display_name;
+        }
+      } catch (profileError) {
+        console.error('Could not read sharer display name (sharing without it):', profileError);
       }
-    } catch (profileError) {
-      console.error('Could not read sharer display name (sharing without it):', profileError);
     }
 
     // If the recipe has a photo, freeze an independent byte-copy under this
@@ -1743,7 +1753,8 @@ export async function shareRecipeSnapshot(recipeId: number | string): Promise<st
       cookTime: recipe.cook_time ?? null,
       serves: recipe.serves ?? null,
       photoUrl,
-      ...(sharerName ? { sharerName } : {}),
+      showSharer,
+      ...(showSharer && sharerName ? { sharerName } : {}),
     };
 
     const { error: insertError } = await supabase
@@ -1787,6 +1798,162 @@ export async function getRecipeSnapshotByToken(token: string): Promise<RecipeSha
     console.error('Error loading recipe snapshot:', error);
     return null;
   }
+}
+
+// Best-effort record of a pending share discovery, backing the Home
+// "Discovered" shelf. Deliberately never throws — called from the
+// Onboarding Loader and Home's mount effect, neither of which may ever be
+// blocked or delayed by a stale/unknown localStorage token. The underlying
+// RPC is itself silent on an unknown token; this wrapper additionally
+// swallows network/auth failures so callers never need a try/catch.
+export async function recordSharedRecipeDiscovery(shareToken: string): Promise<void> {
+  try {
+    const { error } = await supabase.rpc('record_shared_recipe_discovery', { p_share_token: shareToken });
+    if (error) console.error('Error recording shared recipe discovery:', error);
+  } catch (error) {
+    console.error('Error recording shared recipe discovery:', error);
+  }
+}
+
+export async function dismissSharedRecipeDiscovery(shareToken: string): Promise<boolean> {
+  const { error } = await supabase.rpc('dismiss_shared_recipe_discovery', { p_share_token: shareToken });
+  if (error) {
+    console.error('Error dismissing shared recipe discovery:', error);
+    return false;
+  }
+  return true;
+}
+
+// Discovered-shelf tile data: the user's own pending discoveries, joined
+// against each share's live snapshot. recipe_shares carries an anon-read RLS
+// policy (it has to, for the public /r/$token route), so a direct client
+// select here needs no SECURITY DEFINER wrapper. A discovery whose
+// recipe_shares row is gone (deleted share) is dropped silently rather than
+// surfaced as a broken tile — there's nothing left to preview or save.
+export type DiscoveredRecipe = {
+  shareToken: string;
+  title: string;
+  description: string;
+  ingredients: { name: string; qty: string }[];
+  steps: RecipeStep[];
+  cookTime: string | null;
+  serves: string | null;
+  photoUrl: string | null;
+  sharerName?: string;
+  discoveredAt: string;
+};
+
+export async function getPendingDiscoveredRecipes(): Promise<DiscoveredRecipe[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
+
+  const { data: discoveries, error } = await supabase
+    .from('shared_recipe_discoveries')
+    .select('share_token, updated_at')
+    .eq('user_id', userId)
+    .eq('status', 'pending')
+    .order('updated_at', { ascending: false });
+
+  if (error) {
+    console.error('Error loading discovered recipes:', error);
+    return [];
+  }
+  if (!discoveries || discoveries.length === 0) return [];
+
+  const tokens = discoveries.map((d) => d.share_token);
+  const { data: shares, error: sharesError } = await supabase
+    .from('recipe_shares')
+    .select('share_token, recipe')
+    .in('share_token', tokens);
+
+  if (sharesError) {
+    console.error('Error loading share snapshots for discovered recipes:', sharesError);
+    return [];
+  }
+
+  const snapshotByToken = new Map<string, RecipeShareSnapshot>(
+    (shares || []).map((s: any) => [s.share_token, s.recipe as RecipeShareSnapshot])
+  );
+
+  return discoveries
+    .map((d): DiscoveredRecipe | null => {
+      const snapshot = snapshotByToken.get(d.share_token);
+      if (!snapshot) return null;
+      return {
+        shareToken: d.share_token,
+        title: snapshot.title,
+        description: snapshot.description,
+        ingredients: snapshot.ingredients,
+        steps: snapshot.steps,
+        cookTime: snapshot.cookTime,
+        serves: snapshot.serves,
+        photoUrl: snapshot.photoUrl,
+        ...(snapshot.sharerName ? { sharerName: snapshot.sharerName } : {}),
+        discoveredAt: d.updated_at,
+      };
+    })
+    .filter((d): d is DiscoveredRecipe => d !== null);
+}
+
+export type SaveSharedRecipeResult = {
+  recipeId: string;
+  photoCopied: boolean;
+  photoUrl?: string;
+  photoVersion?: number;
+};
+
+// Connection-free save of a publicly-shared recipe — mirrors the Suggested
+// Recipes save pattern (plain saveRecipe, no recipe_sends/connection), NOT
+// saveReceivedRecipe's three-actor two-party flow. Sequence is fixed:
+// saveRecipe (unmodified, standard category write) -> finish_shared_recipe_save
+// (idempotent discovery upsert + toggle-aware inspired_by stamp) -> soft-fail
+// photo copy. Never calls clearRecipeCache — that's the caller's job, same
+// convention as saveReceivedRecipe.
+export async function saveSharedRecipe(
+  shareToken: string,
+  snapshot: Pick<DiscoveredRecipe, 'title' | 'description' | 'ingredients' | 'steps'>,
+  categoryId: string,
+): Promise<SaveSharedRecipeResult> {
+  const recipeId = await saveRecipe(
+    {
+      id: '',
+      title: snapshot.title,
+      description: snapshot.description,
+      category: categoryId,
+      ingredients: snapshot.ingredients,
+      steps: snapshot.steps,
+      createdAt: new Date().toISOString(),
+    },
+    'manual',
+    categoryId,
+  );
+
+  const { error: finishError } = await supabase.rpc('finish_shared_recipe_save', {
+    p_share_token: shareToken,
+    p_recipe_id: recipeId,
+  });
+  if (finishError) {
+    console.error('Error finishing shared recipe save:', finishError);
+  }
+
+  let photoCopied = false;
+  let photoUrl: string | undefined;
+  let photoVersion: number | undefined;
+
+  try {
+    const { data, error } = await supabase.functions.invoke('copy-shared-recipe-photo', {
+      body: { share_token: shareToken, recipe_id: recipeId },
+    });
+    if (!error && data?.copied) {
+      photoCopied = true;
+      photoUrl = data.photo_url;
+      photoVersion = data.photo_version;
+    }
+  } catch (error) {
+    console.error('Error copying shared recipe photo:', error);
+  }
+
+  return { recipeId, photoCopied, photoUrl, photoVersion };
 }
 
 // Reconstitution shape, not display shape — feeds send_recipe_to_friend's
