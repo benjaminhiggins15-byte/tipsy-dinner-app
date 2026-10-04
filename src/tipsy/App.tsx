@@ -2914,6 +2914,12 @@ function RecipeCard({
   const headlineRating = headlineRatingFromEvents(cookEvents);
   const editable = recipe.savedId != null;
 
+  // recipe_opened — RecipeCard mounted for a saved recipe
+  useEffect(() => {
+    if (!recipe.savedId) return;
+    logEvent("recipe_opened", { recipe_id: recipe.savedId });
+  }, [recipe.savedId]);
+
   // Debounced server search — the ignore flag guards against a slow earlier
   // query's response landing after a newer one (same pattern as every other
   // async fetch in this app; see the Lovable double-mount note in CLAUDE.md).
@@ -3306,6 +3312,9 @@ function RecipeCard({
       steps: recipe.steps ?? [],
       createdAt: new Date().toISOString(),
     };
+
+    // riff_started — chat-from-recipe message sent, handing off to Build
+    logEvent("riff_started", { recipe_id: recipe.savedId });
 
     // Transfer to Build with question (App-level function handles seeding + navigation)
     transferToRecipeChat(savedRecipe, chatQuestion, () => {
@@ -6159,6 +6168,8 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
       categoryKey: catKey,
     };
     setTrayOpen(false);
+    // recipe_saved — recipe saved from Build/chat
+    logEvent("recipe_saved", { recipe_id: recipeId, source: "build_chat" });
     finishSaveRecipe(recipe, catKey, catLabel);
   };
 

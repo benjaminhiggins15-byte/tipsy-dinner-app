@@ -994,6 +994,8 @@ export function ReceivedRecipeView({
     };
 
     clearRecipeCache(catKey);
+    // recipe_saved — received recipe saved to the library
+    logEvent("recipe_saved", { recipe_id: result.recipeId, source: "received" });
     finishSaveRecipe(recipe, catKey, catLabel);
   };
 
@@ -1532,6 +1534,8 @@ export function SuggestionDetailView({
     };
 
     clearRecipeCache(catKey);
+    // recipe_saved — suggested recipe saved to the library
+    logEvent("recipe_saved", { recipe_id: savedId, source: "suggested" });
     finishSaveRecipe(saved, catKey, catLabel);
   };
 
@@ -2019,6 +2023,8 @@ export function DiscoveredDetailView({
     clearRecipeCache(catKey);
     // discovered_save_complete — discovered share saved to the library
     logEvent("discovered_save_complete", { recipe_id: result.recipeId });
+    // recipe_saved — discovered share saved to the library
+    logEvent("recipe_saved", { recipe_id: result.recipeId, source: "discovered" });
     finishSaveRecipe(saved, catKey, catLabel);
   };
 
