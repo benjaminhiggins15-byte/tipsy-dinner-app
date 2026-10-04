@@ -16,6 +16,7 @@ import SharedRecipeView from "./SharedRecipeView";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
 import Home, { ReceivedPending, ReceivedRecipeView, SuggestionDetailView, DiscoveredDetailView } from "./Home";
 import { supabase } from "../lib/supabase";
+import { logEvent } from "../lib/events";
 import type { Session } from "@supabase/supabase-js";
 import watermarkSquare from "../Logos/watermark_square.png";
 import watermarkCircle from "../Logos/watermark_circle.png";
@@ -603,6 +604,22 @@ function getTabIndex(tab: TabId): number {
   return TAB_ORDER.indexOf(tab);
 }
 
+// In-memory only (NOT localStorage) — purely to cut network chatter from the
+// two app_open call sites below. The real dedupe is server-side: log_event()
+// collapses any app_open within a 2-minute window per user, which is what
+// actually protects against duplicate rows (e.g. the documented duplicate-
+// SIGNED_IN-on-tab-refocus event firing moments apart from a visibilitychange
+// event).
+let lastAppOpenAttempt = 0;
+const APP_OPEN_CLIENT_THROTTLE_MS = 60_000;
+
+function fireAppOpen() {
+  const now = Date.now();
+  if (now - lastAppOpenAttempt < APP_OPEN_CLIENT_THROTTLE_MS) return;
+  lastAppOpenAttempt = now;
+  logEvent("app_open", { tz: Intl.DateTimeFormat().resolvedOptions().timeZone });
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>("home");
   const [tabStacks, setTabStacks] = useState<Record<TabId, Screen[]>>({
@@ -618,6 +635,13 @@ export default function App() {
   const isTabRoot = currentStack.length === 1;
 
   const [session, setSession] = useState<Session | null | undefined>(undefined);
+  // Kept in sync with `session` state below so the visibilitychange listener
+  // (registered once, see its own effect) can read the current session
+  // without closing over a stale value from its registration render.
+  const sessionRef = useRef<Session | null | undefined>(undefined);
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
   const [authScreen, setAuthScreen] = useState<"signup" | "signin">("signup");
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
   const [profile, setProfile] = useState<ProfileType | null>(null);
@@ -826,6 +850,10 @@ export default function App() {
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       setSession(session);
 
+      if (session && document.visibilityState === 'visible') {
+        fireAppOpen();
+      }
+
       if (session && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
         if (profileInitialized.current) {
           // Already initialized — this is a tab refocus, not a real sign-in
@@ -904,6 +932,21 @@ export default function App() {
     });
 
     return () => subscription.unsubscribe();
+  }, []);
+
+  // app_open heartbeat, fire point B: tab regains focus. Registered once;
+  // reads sessionRef (not `session` state) so it never checks a value frozen
+  // at registration time. Purely additive — does not touch the auth effect
+  // above.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && sessionRef.current) {
+        fireAppOpen();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
   // Migrate recipes from localStorage and cleanup old category data when session is available
