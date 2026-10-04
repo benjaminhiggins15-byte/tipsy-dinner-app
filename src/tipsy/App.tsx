@@ -1521,6 +1521,7 @@ export default function App() {
       return (
         <SharedRecipeView
           snapshot={sharedSnapshot as RecipeShareSnapshot}
+          shareToken={sharedToken as string}
           onSignUp={handleShareSignUpTap}
           onSignIn={handleShareSignInTap}
         />
@@ -3106,12 +3107,21 @@ function RecipeCard({
   async function handleShare() {
     if (!recipe.savedId) return;
     setShareError(null);
-    // FUNNEL HOOK: share_link_created — recipe share link minted from RecipeCard
     const url = await shareRecipeSnapshot(recipe.savedId.toString(), showSharerName);
     if (!url) {
       setShareError("Couldn't share this recipe. Try again.");
       return;
     }
+
+    // share_link_created — recipe share link minted from RecipeCard
+    let shareToken: string | undefined;
+    try {
+      const segments = new URL(url).pathname.split("/").filter(Boolean);
+      shareToken = segments[segments.length - 1];
+    } catch {
+      shareToken = undefined;
+    }
+    logEvent("share_link_created", { recipe_id: recipe.savedId, share_token: shareToken });
 
     // Try native share sheet first
     if (navigator.share) {

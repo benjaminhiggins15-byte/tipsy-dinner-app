@@ -1,5 +1,7 @@
+import { useEffect } from "react";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
 import type { RecipeShareSnapshot } from "./data";
+import { logEvent } from "../lib/events";
 
 // Logged-out in-app view for a stranger who tapped "View in app" on a public
 // share page (/r/$token) while they have no session. Reuses Build's actual
@@ -14,12 +16,17 @@ import type { RecipeShareSnapshot } from "./data";
 
 type Props = {
   snapshot: RecipeShareSnapshot;
+  shareToken: string;
   onSignUp: () => void;
   onSignIn: () => void;
 };
 
-export default function SharedRecipeView({ snapshot, onSignUp, onSignIn }: Props) {
-  // FUNNEL HOOK: share_view_in_app — logged-out in-app share view rendered
+export default function SharedRecipeView({ snapshot, shareToken, onSignUp, onSignIn }: Props) {
+  // share_view_in_app — logged-out in-app share view rendered
+  useEffect(() => {
+    logEvent("share_view_in_app", { share_token: shareToken });
+  }, [shareToken]);
+
   return (
     <ExpandedRecipeOverlay
       open={true}
@@ -29,11 +36,13 @@ export default function SharedRecipeView({ snapshot, onSignUp, onSignIn }: Props
       photoUrl={snapshot.photoUrl}
       saveLabel="Sign up to save"
       onSave={() => {
-        // FUNNEL HOOK: share_view_signup_tap — "Sign up to save" tapped from the logged-out share view
+        // share_view_signup_tap — "Sign up to save" tapped from the logged-out share view
+        logEvent("share_view_signup_tap", { share_token: shareToken });
         onSignUp();
       }}
       onSignIn={() => {
-        // FUNNEL HOOK: share_view_signin_tap — "Already have an account? Sign in" tapped from the logged-out share view
+        // share_view_signin_tap — "Already have an account? Sign in" tapped from the logged-out share view
+        logEvent("share_view_signin_tap", { share_token: shareToken });
         onSignIn();
       }}
     />
