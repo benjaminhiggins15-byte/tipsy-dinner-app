@@ -605,7 +605,7 @@ function getTabIndex(tab: TabId): number {
 }
 
 // In-memory only (NOT localStorage) — purely to cut network chatter from the
-// two app_open call sites below. The real dedupe is server-side: log_event()
+// three app_open call sites below. The real dedupe is server-side: log_event()
 // collapses any app_open within a 2-minute window per user, which is what
 // actually protects against duplicate rows (e.g. the documented duplicate-
 // SIGNED_IN-on-tab-refocus event firing moments apart from a visibilitychange
@@ -613,11 +613,13 @@ function getTabIndex(tab: TabId): number {
 let lastAppOpenAttempt = 0;
 const APP_OPEN_CLIENT_THROTTLE_MS = 60_000;
 
-function fireAppOpen() {
+type AppOpenTrigger = "load" | "visible" | "pageshow";
+
+function fireAppOpen(trigger: AppOpenTrigger) {
   const now = Date.now();
   if (now - lastAppOpenAttempt < APP_OPEN_CLIENT_THROTTLE_MS) return;
   lastAppOpenAttempt = now;
-  logEvent("app_open", { tz: Intl.DateTimeFormat().resolvedOptions().timeZone });
+  logEvent("app_open", { tz: Intl.DateTimeFormat().resolvedOptions().timeZone, trigger });
 }
 
 export default function App() {
@@ -851,7 +853,7 @@ export default function App() {
       setSession(session);
 
       if (session && document.visibilityState === 'visible') {
-        fireAppOpen();
+        fireAppOpen('load');
       }
 
       if (session && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
@@ -942,11 +944,34 @@ export default function App() {
     if (typeof window === 'undefined') return;
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && sessionRef.current) {
-        fireAppOpen();
+        fireAppOpen('visible');
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
+  // app_open heartbeat, fire point C: bfcache restore. Mobile Safari (and
+  // other browsers) can restore a "closed and reopened" tab from the
+  // back/forward cache instead of doing a full reload — no React remount, no
+  // fresh onAuthStateChange registration, so fire point A never runs and
+  // fire point B's visibilitychange is not a reliable enough signal on its
+  // own for this specific case. `pageshow` with `event.persisted === true`
+  // is the standard, purpose-built signal for a bfcache restore. Registered
+  // once, additive only. The module-level throttle is reset first because a
+  // bfcache restore keeps old module state alive (unlike a full reload,
+  // which would naturally reset it) — without this, a restore soon after the
+  // page was frozen could be silently swallowed by the normal 60s throttle.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted && sessionRef.current && document.visibilityState === 'visible') {
+        lastAppOpenAttempt = 0;
+        fireAppOpen('pageshow');
+      }
+    };
+    window.addEventListener('pageshow', handlePageShow);
+    return () => window.removeEventListener('pageshow', handlePageShow);
   }, []);
 
   // Migrate recipes from localStorage and cleanup old category data when session is available
