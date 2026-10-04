@@ -3580,3 +3580,233 @@ line-number reference in this doc.
 - **The legacy-link "View in app" path (bare `/` href, no `?share=` token) was not
   device-tested** as part of this feature's verification — only the snapshot-share
   path (`?share={token}`) was exercised end-to-end on a real phone before merge.
+
+---
+
+## Behavior & Funnel Instrumentation (user_events)
+
+Merged to `main` 2026-10-04 as `22aff1e`, branch
+`feature/user-events-instrumentation`. Adds app-wide behavior/funnel event
+logging: a single `user_events` table, a single `log_event()` write path, and a
+thin fire-and-forget client wrapper. Live in production — verified post-deploy
+with a read-only check showing a real session logging correctly. 12/12
+security violation tests (direct insert as anon, direct insert as
+authenticated, cross-user select, oversized props, unknown event_type,
+logged-out non-allowlisted event, missing anon_id while logged out, etc.)
+passed before merge.
+
+This is a write/log layer only. There is no reporting UI and no SQL view
+layer yet — reading the data today means querying `user_events` directly
+(dashboard/service-role). A proper reading layer (saved SQL views, or a small
+internal dashboard) is a known deferred fast-follow, not part of this build.
+
+### Architecture
+
+- **Table:** `public.user_events` (migration
+  `supabase/migrations/20261004000001_create_user_events.sql`) — `id`,
+  `user_id` (uuid, deliberately NOT a foreign key — same posture as
+  `llm_usage.user_id`: a bad/missing value must never fail the write),
+  `anon_id` (uuid, client-generated, present on both logged-out and logged-in
+  rows once minted), `event_type` (text, `CHECK`-constrained to a 21-value
+  allowlist), `props` (jsonb, default `{}`), `created_at`. Four indexes:
+  `(user_id, created_at desc)`, `(event_type, created_at desc)`, a partial
+  index on `anon_id where anon_id is not null`, and a partial index on
+  `(user_id, created_at desc) where event_type = 'app_open'` sized
+  specifically for `log_event()`'s dedupe lookup below.
+- **RLS:** owner-reads-own only (`auth.uid() = user_id`; rows with
+  `user_id IS NULL` — every pre-signup, anon-only row — are unreadable by
+  anyone, including the visitor who generated them, same sentinel-unreadable
+  posture as `llm_usage`). All direct writes denied: no insert/update/delete
+  policy for `authenticated` or `anon` exists at all. Unlike `llm_usage` (which
+  left `anon`/`authenticated`'s default table-level SELECT grant in place and
+  relied on RLS alone), this table goes further and explicitly
+  `revoke all ... from anon` plus `revoke insert, update, delete ...
+  from authenticated` — belt-and-suspenders, not RLS alone.
+- **`log_event(p_event_type, p_props, p_anon_id)` is the ONLY write path.**
+  `SECURITY DEFINER`, `search_path` pinned to `public`, `EXECUTE` granted to
+  both `anon` and `authenticated`. `user_id` is always `auth.uid()` as observed
+  inside the function — never client-supplied. Every rejection is a silent
+  `return` (no exception raised to the caller), and the entire body is wrapped
+  in an exception handler (`exception when others then return;`) — a
+  telemetry call must never be able to break the mid-funnel code path that
+  fired it. Guards, in order: unknown/null `event_type` → return; oversized
+  `props` (`pg_column_size(v_props) > 2048`, an approximate ~2KB guard, not an
+  exact byte count) → return; logged out (`v_user_id is null`) → only 4
+  pre-signup share-funnel events are allowed (`share_link_view`,
+  `share_view_in_app`, `share_view_signup_tap`, `share_view_signin_tap`), and
+  only if the caller supplied a non-null `p_anon_id` — anything else returns;
+  `app_open` 2-minute backstop (below) → return if a dupe.
+- **`app_open` 2-minute dedupe backstop.** Before inserting an `app_open` row,
+  `log_event()` checks (via the partial index above) whether this `user_id`
+  already has an `app_open` row in the last 2 minutes, and silently no-ops if
+  so. This collapses duplicate auth events firing together — `TOKEN_REFRESHED`,
+  the documented duplicate-`SIGNED_IN`-on-tab-refocus bug (see Authentication
+  in CLAUDE.md), and the `visibilitychange` listener firing moments apart from
+  an `onAuthStateChange` event — into one row per 2-minute window. **This is
+  NOT a session boundary** — see Read Rules below for how sessions are
+  actually derived. Only reachable when `v_user_id` is non-null, since
+  `app_open` isn't in the logged-out allowlist.
+
+### Client contract (load-bearing — read before touching any call site)
+
+- **`logEvent` is fire-and-forget.** Defined in `src/lib/events.ts`. NEVER
+  `await` it, never `.then()`/chain off its return value at a call site, never
+  let it gate control flow (an `if (await logEvent(...))` or a `try { await
+  logEvent(...) } catch` that blocks a save/nav is a contract violation).
+  Internally it wraps the whole body in a `try/catch` and handles `.rpc()`'s
+  thenable via the two-callback form of `.then()` (covers both the `{error}`
+  result shape and a rejected promise) so a telemetry failure can never surface
+  as an unhandled rejection or thrown error to the caller.
+- **Props are IDs and small enums only** — `recipe_id`, `share_token`,
+  `source`, `step`, `screen`, `recipient_count`, `tz`, and similar. **Never**
+  free text, onboarding answers, recipe content/ingredients/steps, or emails.
+  This is enforced by caller discipline, not a DB constraint — `log_event()`'s
+  ~2KB size guard is a crude backstop against a caller that ignores the rule,
+  not an enforcement mechanism for the rule itself.
+- **Adding a new event type is a three-part, tracked change:** (1) a new
+  tracked migration updating the `user_events.event_type` `CHECK` constraint,
+  (2) the same new value added to `log_event()`'s internal allowlist array
+  (both the validity check and, if it should be loggable while logged out, the
+  `v_logged_out_allowed` array), and (3) the `EventType` union in
+  `src/lib/events.ts`. The migration is a write to the shared Supabase DB and
+  requires explicit founder approval first, same as any other schema change
+  (see Data Layer in CLAUDE.md). All three must land together — a client that
+  logs a value missing from the DB `CHECK`/allowlist silently no-ops at
+  `log_event()` (never an error), and a DB value missing from the TS union is
+  simply never reachable from the client.
+
+### Event dictionary
+
+All 21 `EventType` values, mirrored exactly between the `CHECK` constraint,
+`log_event()`'s allowlist, and `src/lib/events.ts`. "Logged out?" marks events
+reachable from `log_event()`'s logged-out allowlist. "Answers" names which of
+the six read-time questions (retention, creation, riff/moat, habit,
+sends/flywheel, funnel) the event primarily feeds — several funnel events
+jointly answer multiple onboarding/discovery funnel questions; this column
+names the primary one.
+
+| Event | File:line | Props | Logged out? | Answers |
+|---|---|---|---|---|
+| `app_open` | `App.tsx:622` | `{ tz, trigger }` | no | retention |
+| `screen_view` | `App.tsx:641` | `{ screen }` | no | habit |
+| `recipe_opened` | `App.tsx:2925` | `{ recipe_id }` | no | habit |
+| `cook_logged` | `App.tsx:3092` | `{ recipe_id }` | no | habit |
+| `share_link_created` | `App.tsx:3137` | `{ recipe_id, share_token }` | no | sends/flywheel |
+| `recipe_sent` | `App.tsx:3210` | `{ recipe_id, recipient_count }` | no | sends/flywheel |
+| `riff_started` | `App.tsx:3326` | `{ recipe_id }` | no | riff/moat |
+| `grocery_list_shared` | `App.tsx:5110` | `{}` | no | sends/flywheel |
+| `recipe_saved` (build) | `App.tsx:6184` | `{ recipe_id, source: "build_chat" }` | no | creation |
+| `discovered_shelf_mount` | `Home.tsx:189` | `{ count }` | no | funnel |
+| `recipe_saved` (received) | `Home.tsx:998` | `{ recipe_id, source: "received" }` | no | creation |
+| `recipe_saved` (suggested) | `Home.tsx:1538` | `{ recipe_id, source: "suggested" }` | no | creation |
+| `discovered_save_category_picked` | `Home.tsx:1999` | `{}` | no | funnel |
+| `discovered_save_complete` | `Home.tsx:2025` | `{ recipe_id }` | no | funnel |
+| `recipe_saved` (discovered) | `Home.tsx:2027` | `{ recipe_id, source: "discovered" }` | no | creation |
+| `discovered_save_tap` | `Home.tsx:2044` | `{}` | no | funnel |
+| `share_view_in_app` | `SharedRecipeView.tsx:27` | `{ share_token }` | **yes** | funnel |
+| `share_view_signup_tap` | `SharedRecipeView.tsx:40` | `{ share_token }` | **yes** | funnel |
+| `share_view_signin_tap` | `SharedRecipeView.tsx:45` | `{ share_token }` | **yes** | funnel |
+| `onboarding_started` | `Onboarding.tsx:279` | `{}` | no | funnel |
+| `onboarding_step_answered` (palate) | `Onboarding.tsx:312` | `{ step: "palate" }` | no | funnel |
+| `onboarding_step_answered` (inspiration) | `Onboarding.tsx:325` | `{ step: "inspiration" }` | no | funnel |
+| `onboarding_step_answered` (constraints) | `Onboarding.tsx:356` | `{ step: "constraints" }` | no | funnel |
+| `onboarding_share_token_detected` | `Onboarding.tsx:424` | `{ share_token }` | no | funnel |
+| `onboarding_completed` | `Onboarding.tsx:462` | `{}` | no | funnel |
+| `recipe_saved` (manual) | `AddYourOwn.tsx:239` | `{ recipe_id, source: "manual" }` | no | creation |
+| `share_link_view` | `routes/r.$token.tsx:29` | `{ share_token }` | **yes** | funnel |
+
+Note: `onboarding_started`/`onboarding_step_answered`/`onboarding_completed`
+fire from an authenticated-but-not-yet-onboarded session (post-signup, pre-
+`onboarding_complete`), not a truly logged-out one — they are not in
+`log_event()`'s logged-out allowlist and don't need to be.
+
+### Read rules (required to read this data correctly)
+
+- **Sessions are 30+ minute gaps across ALL of a user's events, not
+  `app_open` counts.** `app_open` is a deduped heartbeat, not a one-row-per-
+  session marker — see the 2-minute backstop above, which only collapses
+  near-simultaneous duplicates, not genuinely distinct opens. Derive sessions
+  by sorting a user's full event stream by `created_at` and splitting on any
+  gap ≥ 30 minutes, same as standard session-stitching practice.
+- **`recipe_opened` needs filtering, not raw counting.** Count a row only when
+  it's accompanied by a `screen_view` with `props.screen = 'recipe'` within
+  ~1 second (a genuine arrival at the recipe screen). Drop rows that coincide
+  with navigation away — `ScreenStage` remounts the OUTGOING screen inside its
+  transition overlay, re-running that screen's mount effects (see Known
+  Issues below), which can emit a spurious `recipe_opened`. Also drop any
+  `recipe_opened` firing within ~1 second after a `recipe_saved` or an edit
+  for the same `recipe_id` — that's the post-save auto-navigation back to the
+  recipe, not a new, intentional open.
+- **`onboarding_started`/`onboarding_completed` need DISTINCT-user counting,
+  not row counting** — both double-fire once per signup today (see Known
+  Issues below). Count `count(distinct user_id)`, never `count(*)`.
+  `onboarding_step_answered` is unaffected by this particular bug (fired once
+  per step, inside a stable per-step branch) but apply the same distinct-user
+  discipline when in doubt.
+- **Funnel stitching across identity boundaries uses two different keys.**
+  Link a stranger's logged-out rows to the account they eventually create via
+  `anon_id` (same id persists across the signup boundary once minted — see
+  `getOrCreateAnonId` in `src/lib/events.ts`). Attribute a stranger's activity
+  back to the person who shared with them via `share_token`, originating from
+  that sharer's own `share_link_created` row — `share_token` is the
+  cross-person join key; `anon_id` is the cross-session, same-person join key.
+  Don't conflate the two.
+- **Signup method** comes from `auth.users.raw_app_meta_data->>'provider'`
+  (Supabase's standard `app_metadata.provider` field — `"email"` or
+  `"google"`), not from any `user_events` row; there is no dedicated signup-
+  method event.
+- **Differential onboarding drop-off** (which specific question strands which
+  users) requires joining onboarding events to `profiles`, not just reading
+  `onboarding_step_answered` rows: `profiles.palate` /
+  `profiles.inspiration` / `profiles.constraints` are persisted per-question
+  as the user answers (see Onboarding — Conversational Flow), so a user who
+  has `palate` set but not `inspiration` dropped off at the inspiration
+  question even if their `onboarding_step_answered` rows are incomplete or
+  ambiguous for any reason.
+- **Cooking time-of-day** should read `cook_logged.created_at`
+  (a `timestamptz`, real time-of-day), never `cook_events.cooked_on` (date-only,
+  no time component — see Cook History in this doc).
+- **Exclude internal/test accounts from every stranger/beta read:**
+  `benjamin.higgins15@gmail.com`, `test2@test2.com`, `betatest@betatest.com`,
+  and any `anon_id` that stitches to one of these three via the logged-
+  out→logged-in join above. Failing to exclude these inflates every funnel and
+  habit metric with founder/QA activity.
+
+### Known issues / follow-ups
+
+- **BUG, not yet fixed in code:** Onboarding's Loader double-mounts,
+  generating `taste_profile` TWICE per signup — confirmed in `llm_usage` (two
+  rows per signup where one is expected). Root cause is `Onboarding.tsx`'s old
+  one-div/two-div transition ternary (pre-dates this build). This is also why
+  `onboarding_started`/`onboarding_completed` need distinct-user counting
+  above rather than a code fix here — fixing the double-mount is out of scope
+  for this instrumentation build and belongs to its own session.
+- **`ScreenStage` remounts the OUTGOING screen** inside its transition
+  overlay (see Architecture / SSR in CLAUDE.md), re-running that screen's
+  mount effects — the root cause of the `recipe_opened` double-fire handled
+  by the read-time filter above. Same category of issue as the Onboarding
+  double-mount: a pre-existing structural quirk, worked around at read time
+  rather than patched in this build.
+- **Tightening pass, not yet done:** revoke the default `TRUNCATE`/
+  `REFERENCES`/`TRIGGER` grants from `authenticated` on both `user_events` and
+  `llm_usage` (Postgres grants these by default on table creation; this table
+  already revokes `INSERT`/`UPDATE`/`DELETE` and all of `anon`'s privileges,
+  but these three narrower grants were not explicitly addressed).
+- **`share_link_created`'s `share_token` prop is parsed out of the returned
+  share URL** at the `App.tsx:3137` call site, rather than received as a
+  first-class value. More robust: have `shareRecipeSnapshot` return
+  `{ url, token }` directly so no caller needs to parse a token back out of a
+  URL string.
+- **Email verification is OFF** (founder-confirmed, intentional for now).
+  Turning on Supabase's "Confirm email" as-is would strand email/password
+  signups, since `App.tsx` routes purely on session presence (no "check your
+  email" intermediate state exists). This instrumentation build does not
+  change that; it's noted here because `onboarding_started`/signup-funnel
+  reads should be interpreted knowing every email signup today is
+  immediately session-live, with no verification step to fall out at. Any
+  future launch-gating work here depends on a Google-prominent signup
+  flow plus soft/deferred verification, not a hard blocking change.
+- **The reading layer (saved SQL views, or a small internal dashboard) is
+  deferred** — this build is write/log-path only. The Read Rules above are
+  necessary because there is no view layer yet encoding them; building that
+  view layer is the natural fast-follow.

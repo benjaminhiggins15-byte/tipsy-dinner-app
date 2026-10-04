@@ -75,6 +75,7 @@ pointer named — do not duplicate it here.
 - **Build Conversation Persistence moved to FEATURE_SPECS.md** — Build state (`buildMessages`, `buildConversationHistory`, `buildCurrentRecipe`, etc.) lives at App level, not in Cook, and survives tab switches/nav/save. Full detail: Build Conversation Persistence in FEATURE_SPECS.md.
 - **Chat from Recipe Card moved to FEATURE_SPECS.md** — `transferToRecipeChat` is the only sanctioned path from a saved Recipe Card into Build; RecipeCard has no closure access to App-level setters. Full detail: Chat from Recipe Card in FEATURE_SPECS.md.
 - **Most Standing Cleanup / Watch Items bullets moved to FEATURE_SPECS.md** — only the genuinely universal ones (schema-is-dashboard-only, the TS-error-count-drift caution, the loading-spinner-reuse note, the Fraunces/Lazydog non-loading fact, and the A2A-sharing-items-live-elsewhere pointer) remain in CLAUDE.md. Full detail: Standing Cleanup — Relocated Items in FEATURE_SPECS.md.
+- **`log_event()` (`SECURITY DEFINER`) is the ONLY write path into deny-all `user_events`** — `logEvent` (`src/lib/events.ts`) is fire-and-forget (never await/chain/gate control flow on it), props are IDs/small enums only, never free text or recipe content. Full detail: Behavior & Funnel Instrumentation (user_events) in FEATURE_SPECS.md.
 
 ---
 
