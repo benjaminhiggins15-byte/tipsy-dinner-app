@@ -236,7 +236,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
     clearRecipeCache?.(key);
 
     // recipe_saved — recipe saved via Write Your Own
-    logEvent("recipe_saved", { recipe_id: recipeId, source: "manual" });
+    if (recipeId) logEvent("recipe_saved", { recipe_id: recipeId, source: "manual" });
 
     setSavedCategory({ key, label });
     setTrayOpen(false);

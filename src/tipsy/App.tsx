@@ -636,6 +636,11 @@ export default function App() {
   const current = currentStack[currentStack.length - 1];
   const isTabRoot = currentStack.length === 1;
 
+  // screen_view — fires once per actual screen change, name only (no params/content)
+  useEffect(() => {
+    logEvent("screen_view", { screen: current.name });
+  }, [current]);
+
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   // Kept in sync with `session` state below so the visibilitychange listener
   // (registered once, see its own effect) can read the current session
@@ -3083,6 +3088,8 @@ function RecipeCard({
         const created = await addCookEvent(recipe.savedId.toString(), { cookedOn, score, note });
         if (created) {
           setCookEvents((prev) => sortCookEventsDesc([...prev, created]));
+          // cook_logged — a cook event was logged for this recipe
+          logEvent("cook_logged", { recipe_id: recipe.savedId });
         }
       } else if (editingEventId) {
         await updateCookEvent(editingEventId, { cookedOn, score, note });
@@ -3199,6 +3206,8 @@ function RecipeCard({
       setSendError("Couldn't send. Try again.");
       return;
     }
+    // recipe_sent — recipe sent to one or more connections
+    logEvent("recipe_sent", { recipe_id: recipe.savedId, recipient_count: selectedRecipients.size });
     setShowSendSheet(false);
     setSentConfirm(true);
     setTimeout(() => setSentConfirm(false), 2000);
@@ -5097,6 +5106,9 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
       const url = await shareGroceryList();
       if (!url) return;
 
+      // grocery_list_shared — grocery list share link minted
+      logEvent("grocery_list_shared", {});
+
       if (navigator.share) {
         try {
           await navigator.share({ url });
@@ -6169,7 +6181,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
     };
     setTrayOpen(false);
     // recipe_saved — recipe saved from Build/chat
-    logEvent("recipe_saved", { recipe_id: recipeId, source: "build_chat" });
+    if (recipeId) logEvent("recipe_saved", { recipe_id: recipeId, source: "build_chat" });
     finishSaveRecipe(recipe, catKey, catLabel);
   };
 
