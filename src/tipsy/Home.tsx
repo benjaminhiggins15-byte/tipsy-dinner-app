@@ -24,6 +24,7 @@ import {
 } from "./data";
 import { selectDailyChips, getRecentlyShownChipIds, recordShownChipIds } from "./chips";
 import { getCuisineLabel } from "./cuisineLabels";
+import { logEvent } from "../lib/events";
 import watermarkSquare from "../Logos/watermark_square.png";
 import watermarkCircle from "../Logos/watermark_circle.png";
 import SaveRecipeFlow from "./SaveRecipeFlow";
@@ -170,8 +171,8 @@ export default function Home({
     };
   }, []);
 
-  // FUNNEL HOOK: discovered_shelf_mount — Home mounted, about to resolve any
-  // pending share-token handoff and load the Discovered shelf.
+  // Home mounted; resolve any pending share-token handoff and load the
+  // Discovered shelf.
   useEffect(() => {
     let ignore = false;
     (async () => {
@@ -183,6 +184,10 @@ export default function Home({
       const items = await getPendingDiscoveredRecipes();
       if (ignore) return;
       setDiscovered(items);
+      if (items.length > 0) {
+        // discovered_shelf_mount — Discovered shelf rendered with at least one recipe
+        logEvent("discovered_shelf_mount", { count: items.length });
+      }
     })();
     return () => {
       ignore = true;
@@ -1986,7 +1991,8 @@ export function DiscoveredDetailView({
     setTrayOpen(false);
     setSaving(true);
 
-    // FUNNEL HOOK: discovered_save_category_picked — category chosen, about to save a discovered share
+    // discovered_save_category_picked — category chosen, about to save a discovered share
+    logEvent("discovered_save_category_picked", {});
     const result = await saveSharedRecipe(
       recipe.shareToken,
       { title: recipe.title, description: recipe.description, ingredients: recipe.ingredients, steps: recipe.steps },
@@ -2011,7 +2017,8 @@ export function DiscoveredDetailView({
     };
 
     clearRecipeCache(catKey);
-    // FUNNEL HOOK: discovered_save_complete — discovered share saved to the library
+    // discovered_save_complete — discovered share saved to the library
+    logEvent("discovered_save_complete", { recipe_id: result.recipeId });
     finishSaveRecipe(saved, catKey, catLabel);
   };
 
@@ -2027,7 +2034,8 @@ export function DiscoveredDetailView({
         onDismiss={dismissing || saving ? undefined : handleDismiss}
         onSave={() => {
           if (dismissing || saving) return;
-          // FUNNEL HOOK: discovered_save_tap — "Save" tapped on a discovered share's preview
+          // discovered_save_tap — "Save" tapped on a discovered share's preview
+          logEvent("discovered_save_tap", {});
           setTrayOpen(true);
         }}
       />
