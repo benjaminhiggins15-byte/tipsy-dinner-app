@@ -970,7 +970,7 @@ export default function App() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const handlePageShow = (event: PageTransitionEvent) => {
-      if (event.persisted && sessionRef.current && document.visibilityState === 'visible') {
+      if (event.persisted && sessionRef.current) {
         lastAppOpenAttempt = 0;
         fireAppOpen('pageshow');
       }
