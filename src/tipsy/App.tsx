@@ -16,6 +16,7 @@ import SharedRecipeView from "./SharedRecipeView";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
 import Home, { ReceivedPending, ReceivedRecipeView, SuggestionDetailView, DiscoveredDetailView } from "./Home";
 import { supabase } from "../lib/supabase";
+import { logEvent } from "../lib/events";
 import type { Session } from "@supabase/supabase-js";
 import watermarkSquare from "../Logos/watermark_square.png";
 import watermarkCircle from "../Logos/watermark_circle.png";
@@ -603,6 +604,24 @@ function getTabIndex(tab: TabId): number {
   return TAB_ORDER.indexOf(tab);
 }
 
+// In-memory only (NOT localStorage) — purely to cut network chatter from the
+// three app_open call sites below. The real dedupe is server-side: log_event()
+// collapses any app_open within a 2-minute window per user, which is what
+// actually protects against duplicate rows (e.g. the documented duplicate-
+// SIGNED_IN-on-tab-refocus event firing moments apart from a visibilitychange
+// event).
+let lastAppOpenAttempt = 0;
+const APP_OPEN_CLIENT_THROTTLE_MS = 60_000;
+
+type AppOpenTrigger = "load" | "visible" | "pageshow";
+
+function fireAppOpen(trigger: AppOpenTrigger) {
+  const now = Date.now();
+  if (now - lastAppOpenAttempt < APP_OPEN_CLIENT_THROTTLE_MS) return;
+  lastAppOpenAttempt = now;
+  logEvent("app_open", { tz: Intl.DateTimeFormat().resolvedOptions().timeZone, trigger });
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>("home");
   const [tabStacks, setTabStacks] = useState<Record<TabId, Screen[]>>({
@@ -617,7 +636,19 @@ export default function App() {
   const current = currentStack[currentStack.length - 1];
   const isTabRoot = currentStack.length === 1;
 
+  // screen_view — fires once per actual screen change, name only (no params/content)
+  useEffect(() => {
+    logEvent("screen_view", { screen: current.name });
+  }, [current]);
+
   const [session, setSession] = useState<Session | null | undefined>(undefined);
+  // Kept in sync with `session` state below so the visibilitychange listener
+  // (registered once, see its own effect) can read the current session
+  // without closing over a stale value from its registration render.
+  const sessionRef = useRef<Session | null | undefined>(undefined);
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
   const [authScreen, setAuthScreen] = useState<"signup" | "signin">("signup");
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
   const [profile, setProfile] = useState<ProfileType | null>(null);
@@ -826,6 +857,10 @@ export default function App() {
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       setSession(session);
 
+      if (session && document.visibilityState === 'visible') {
+        fireAppOpen('load');
+      }
+
       if (session && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
         if (profileInitialized.current) {
           // Already initialized — this is a tab refocus, not a real sign-in
@@ -904,6 +939,44 @@ export default function App() {
     });
 
     return () => subscription.unsubscribe();
+  }, []);
+
+  // app_open heartbeat, fire point B: tab regains focus. Registered once;
+  // reads sessionRef (not `session` state) so it never checks a value frozen
+  // at registration time. Purely additive — does not touch the auth effect
+  // above.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && sessionRef.current) {
+        fireAppOpen('visible');
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
+  // app_open heartbeat, fire point C: bfcache restore. Mobile Safari (and
+  // other browsers) can restore a "closed and reopened" tab from the
+  // back/forward cache instead of doing a full reload — no React remount, no
+  // fresh onAuthStateChange registration, so fire point A never runs and
+  // fire point B's visibilitychange is not a reliable enough signal on its
+  // own for this specific case. `pageshow` with `event.persisted === true`
+  // is the standard, purpose-built signal for a bfcache restore. Registered
+  // once, additive only. The module-level throttle is reset first because a
+  // bfcache restore keeps old module state alive (unlike a full reload,
+  // which would naturally reset it) — without this, a restore soon after the
+  // page was frozen could be silently swallowed by the normal 60s throttle.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted && sessionRef.current) {
+        lastAppOpenAttempt = 0;
+        fireAppOpen('pageshow');
+      }
+    };
+    window.addEventListener('pageshow', handlePageShow);
+    return () => window.removeEventListener('pageshow', handlePageShow);
   }, []);
 
   // Migrate recipes from localStorage and cleanup old category data when session is available
@@ -1453,6 +1526,7 @@ export default function App() {
       return (
         <SharedRecipeView
           snapshot={sharedSnapshot as RecipeShareSnapshot}
+          shareToken={sharedToken as string}
           onSignUp={handleShareSignUpTap}
           onSignIn={handleShareSignInTap}
         />
@@ -2845,6 +2919,12 @@ function RecipeCard({
   const headlineRating = headlineRatingFromEvents(cookEvents);
   const editable = recipe.savedId != null;
 
+  // recipe_opened — RecipeCard mounted for a saved recipe
+  useEffect(() => {
+    if (!recipe.savedId) return;
+    logEvent("recipe_opened", { recipe_id: recipe.savedId });
+  }, [recipe.savedId]);
+
   // Debounced server search — the ignore flag guards against a slow earlier
   // query's response landing after a newer one (same pattern as every other
   // async fetch in this app; see the Lovable double-mount note in CLAUDE.md).
@@ -3008,6 +3088,8 @@ function RecipeCard({
         const created = await addCookEvent(recipe.savedId.toString(), { cookedOn, score, note });
         if (created) {
           setCookEvents((prev) => sortCookEventsDesc([...prev, created]));
+          // cook_logged — a cook event was logged for this recipe
+          logEvent("cook_logged", { recipe_id: recipe.savedId });
         }
       } else if (editingEventId) {
         await updateCookEvent(editingEventId, { cookedOn, score, note });
@@ -3038,12 +3120,21 @@ function RecipeCard({
   async function handleShare() {
     if (!recipe.savedId) return;
     setShareError(null);
-    // FUNNEL HOOK: share_link_created — recipe share link minted from RecipeCard
     const url = await shareRecipeSnapshot(recipe.savedId.toString(), showSharerName);
     if (!url) {
       setShareError("Couldn't share this recipe. Try again.");
       return;
     }
+
+    // share_link_created — recipe share link minted from RecipeCard
+    let shareToken: string | undefined;
+    try {
+      const segments = new URL(url).pathname.split("/").filter(Boolean);
+      shareToken = segments[segments.length - 1];
+    } catch {
+      shareToken = undefined;
+    }
+    logEvent("share_link_created", { recipe_id: recipe.savedId, share_token: shareToken });
 
     // Try native share sheet first
     if (navigator.share) {
@@ -3115,6 +3206,8 @@ function RecipeCard({
       setSendError("Couldn't send. Try again.");
       return;
     }
+    // recipe_sent — recipe sent to one or more connections
+    logEvent("recipe_sent", { recipe_id: recipe.savedId, recipient_count: selectedRecipients.size });
     setShowSendSheet(false);
     setSentConfirm(true);
     setTimeout(() => setSentConfirm(false), 2000);
@@ -3228,6 +3321,9 @@ function RecipeCard({
       steps: recipe.steps ?? [],
       createdAt: new Date().toISOString(),
     };
+
+    // riff_started — chat-from-recipe message sent, handing off to Build
+    logEvent("riff_started", { recipe_id: recipe.savedId });
 
     // Transfer to Build with question (App-level function handles seeding + navigation)
     transferToRecipeChat(savedRecipe, chatQuestion, () => {
@@ -5010,6 +5106,9 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
       const url = await shareGroceryList();
       if (!url) return;
 
+      // grocery_list_shared — grocery list share link minted
+      logEvent("grocery_list_shared", {});
+
       if (navigator.share) {
         try {
           await navigator.share({ url });
@@ -6081,6 +6180,8 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
       categoryKey: catKey,
     };
     setTrayOpen(false);
+    // recipe_saved — recipe saved from Build/chat
+    if (recipeId) logEvent("recipe_saved", { recipe_id: recipeId, source: "build_chat" });
     finishSaveRecipe(recipe, catKey, catLabel);
   };
 

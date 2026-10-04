@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { getPublicRecipeByToken, getRecipeSnapshotByToken, normalizeStep } from "../tipsy/data";
+import { logEvent } from "../lib/events";
 import watermarkCircle from "../Logos/watermark_circle.png";
 
 export const Route = createFileRoute("/r/$token")({
@@ -22,6 +23,11 @@ function PublicRecipePage() {
   const { recipe } = Route.useLoaderData();
   const { token } = Route.useParams();
   const [photoFailed, setPhotoFailed] = useState(false);
+
+  // FUNNEL HOOK: share_link_view — public share page viewed (logged-out)
+  useEffect(() => {
+    logEvent("share_link_view", { share_token: token });
+  }, [token]);
 
   if (!recipe) {
     return (

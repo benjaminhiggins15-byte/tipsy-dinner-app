@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, type CSSProperties, type KeyboardEvent } from "react";
 import { saveRecipe, updateSavedRecipe, deleteSavedRecipe, countMenusContainingRecipe, loadCustomCategories, addRecipeToMenuSection, type Recipe, type MenuSection, type RecipeStep, normalizeStep } from "./data";
+import { logEvent } from "../lib/events";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 
 type Step = 1 | 2 | 3 | 4 | 6;
@@ -213,7 +214,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
 
   const onPickCategory = async (key: string, label: string, menuInfo?: { menuId: number; section: MenuSection }) => {
     const id = Date.now();
-    await saveRecipe({
+    const recipeId = await saveRecipe({
       id,
       title: title.trim(),
       description: desc.trim(),
@@ -233,6 +234,9 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
 
     // Clear recipe cache for this category
     clearRecipeCache?.(key);
+
+    // recipe_saved — recipe saved via Write Your Own
+    if (recipeId) logEvent("recipe_saved", { recipe_id: recipeId, source: "manual" });
 
     setSavedCategory({ key, label });
     setTrayOpen(false);

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, type CSSProperties } from "react";
 import { generateTasteProfile, generateOnboardingReflection, composeConstraintsAndAllergies, recordSharedRecipeDiscovery, PENDING_SHARE_TOKEN_KEY, type StructuredAllergies } from "./data";
 import { buildConstraintsConfirmation } from "./constraintsConfirmation";
 import { supabase } from "../lib/supabase";
+import { logEvent } from "../lib/events";
 import { ChatBubble, TypingBubble, CookInputBar } from "./ChatUI";
 
 type ProfileType = {
@@ -274,6 +275,8 @@ function OnboardingChat({
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
+    // onboarding_started — conversational onboarding intro sequence begins
+    logEvent("onboarding_started", {});
     const firstName = profile?.display_name?.trim().split(" ")[0] || "";
     (async () => {
       await sayAI(
@@ -305,6 +308,8 @@ function OnboardingChat({
       // Write and reflection fire concurrently — the reflection never gates
       // the write, and a slow/failed reflection can't delay it either.
       const writePromise = safeUpdate({ palate: val });
+      // onboarding_step_answered — palate question answered
+      logEvent("onboarding_step_answered", { step: "palate" });
       await sayReflection("palate", val, nextFallbackAck());
       await writePromise;
       await sayAI("Who shapes how you cook? A chef, a cookbook, an account you save from, someone who taught you.");
@@ -316,6 +321,8 @@ function OnboardingChat({
     if (stage === "inspiration") {
       answersRef.current.inspiration = val;
       const writePromise = safeUpdate({ inspiration: val });
+      // onboarding_step_answered — inspiration question answered
+      logEvent("onboarding_step_answered", { step: "inspiration" });
       await sayReflection("inspiration", val, nextFallbackAck());
       await writePromise;
       await sayAI("Last thing, and this one I'll always respect. Any allergies I should know about? And then, separately, anything you'd just rather not see.");
@@ -345,6 +352,8 @@ function OnboardingChat({
       setTyping(false);
 
       const writePromise = safeUpdate({ constraints: constraintsToWrite, allergies: allergiesToWrite });
+      // onboarding_step_answered — constraints/allergies question answered
+      logEvent("onboarding_step_answered", { step: "constraints" });
       const confirmationText = buildConstraintsConfirmation({
         allergyItems,
         dislikeItems,
@@ -409,9 +418,10 @@ function Loader({ onUpdate, onDone, profile }: { onUpdate: (updates: Partial<Pro
     // must never delay onDone/the taste-profile handoff below it. Read-then-
     // remove is single-consumption; recordSharedRecipeDiscovery is itself
     // silent on an unknown/deleted token.
-    // FUNNEL HOOK: onboarding_share_token_detected — pending share token found and recorded mid-onboarding
     const pendingShareToken = localStorage.getItem(PENDING_SHARE_TOKEN_KEY);
     if (pendingShareToken) {
+      // onboarding_share_token_detected — pending share token found and recorded mid-onboarding
+      logEvent("onboarding_share_token_detected", { share_token: pendingShareToken });
       localStorage.removeItem(PENDING_SHARE_TOKEN_KEY);
       recordSharedRecipeDiscovery(pendingShareToken);
     }
@@ -448,7 +458,8 @@ function Loader({ onUpdate, onDone, profile }: { onUpdate: (updates: Partial<Pro
         }
       }
 
-      // FUNNEL HOOK: onboarding_complete_handoff — onboarding finished, handing off to the main app
+      // onboarding_completed — onboarding finished, handing off to the main app
+      logEvent("onboarding_completed", {});
       if (!cancelled) onDone();
     })();
 
