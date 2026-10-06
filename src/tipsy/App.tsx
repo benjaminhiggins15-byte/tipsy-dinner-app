@@ -848,6 +848,65 @@ export default function App() {
     }
   };
 
+  // Load profile, run migration, reload profile, check onboarding. Shared by
+  // the SIGNED_IN/INITIAL_SESSION branch below and by
+  // handlePasswordRecoveryComplete further down — a password-recovery
+  // session deliberately skips that branch (see the PASSWORD_RECOVERY case
+  // below), so this is the only other call site. Body is unchanged from the
+  // original inline version; only pulled out so it can run a second time
+  // outside of an onAuthStateChange event.
+  const runProfileInit = async (session: Session) => {
+    try {
+      const initialProfile = await loadProfile(session.user.id);
+      await migrateFromLocalStorage(session.user.id);
+
+      // Backfill display_name from auth metadata the first time we see it
+      // empty. Google OAuth populates user_metadata.full_name/name
+      // automatically; the email/password form passes `name` explicitly
+      // (see SignUp.tsx) — either way it was landing in auth metadata but
+      // never being copied into profiles until now.
+      const metadataName = (
+        session.user.user_metadata?.full_name ||
+        session.user.user_metadata?.name ||
+        ''
+      ).trim();
+      if (!initialProfile.display_name && metadataName) {
+        await updateProfile({ display_name: metadataName }, session.user.id);
+      }
+
+      // Silently derive a handle for genuinely new profiles. Existing
+      // users already have one from the one-time migration, so this is
+      // skipped for them. profiles.handle is unique via a
+      // case-insensitive index (lower(handle)), and the profiles SELECT
+      // policy is owner-only (id = auth.uid()) — this client can't
+      // proactively query which handles other users already hold. So
+      // "is it taken" is answered by attempting the real write: a
+      // conflicting handle fails the unique index with Postgres error
+      // 23505 regardless of RLS (uniqueness constraints aren't
+      // RLS-scoped), and a non-conflicting write succeeds and IS the
+      // persist step — no separate save call is needed afterward.
+      if (!initialProfile.handle) {
+        const nameForHandle = (initialProfile.display_name || metadataName).trim();
+        const tryClaimHandle = async (candidate: string): Promise<boolean> => {
+          const { error } = await supabase
+            .from('profiles')
+            .update({ handle: candidate })
+            .eq('id', session.user.id);
+          if (!error) return false;
+          if (error.code === '23505') return true;
+          throw error;
+        };
+        await deriveHandleFromName(nameForHandle, tryClaimHandle);
+      }
+
+      const finalProfile = await loadProfile(session.user.id);
+      setShowOnboarding(!finalProfile.onboarding_complete);
+    } catch (err) {
+      console.error('Error initializing profile on sign in:', err);
+      setShowOnboarding(false);
+    }
+  };
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -872,56 +931,7 @@ export default function App() {
           return;
         }
         profileInitialized.current = true;
-        // Load profile, run migration, reload profile, check onboarding
-        try {
-          const initialProfile = await loadProfile(session.user.id);
-          await migrateFromLocalStorage(session.user.id);
-
-          // Backfill display_name from auth metadata the first time we see it
-          // empty. Google OAuth populates user_metadata.full_name/name
-          // automatically; the email/password form passes `name` explicitly
-          // (see SignUp.tsx) — either way it was landing in auth metadata but
-          // never being copied into profiles until now.
-          const metadataName = (
-            session.user.user_metadata?.full_name ||
-            session.user.user_metadata?.name ||
-            ''
-          ).trim();
-          if (!initialProfile.display_name && metadataName) {
-            await updateProfile({ display_name: metadataName }, session.user.id);
-          }
-
-          // Silently derive a handle for genuinely new profiles. Existing
-          // users already have one from the one-time migration, so this is
-          // skipped for them. profiles.handle is unique via a
-          // case-insensitive index (lower(handle)), and the profiles SELECT
-          // policy is owner-only (id = auth.uid()) — this client can't
-          // proactively query which handles other users already hold. So
-          // "is it taken" is answered by attempting the real write: a
-          // conflicting handle fails the unique index with Postgres error
-          // 23505 regardless of RLS (uniqueness constraints aren't
-          // RLS-scoped), and a non-conflicting write succeeds and IS the
-          // persist step — no separate save call is needed afterward.
-          if (!initialProfile.handle) {
-            const nameForHandle = (initialProfile.display_name || metadataName).trim();
-            const tryClaimHandle = async (candidate: string): Promise<boolean> => {
-              const { error } = await supabase
-                .from('profiles')
-                .update({ handle: candidate })
-                .eq('id', session.user.id);
-              if (!error) return false;
-              if (error.code === '23505') return true;
-              throw error;
-            };
-            await deriveHandleFromName(nameForHandle, tryClaimHandle);
-          }
-
-          const finalProfile = await loadProfile(session.user.id);
-          setShowOnboarding(!finalProfile.onboarding_complete);
-        } catch (err) {
-          console.error('Error initializing profile on sign in:', err);
-          setShowOnboarding(false);
-        }
+        await runProfileInit(session);
       } else if (session && event === 'PASSWORD_RECOVERY') {
         // Code verified via verifyOtp({ type: "recovery" }) — this session
         // exists only to call updateUser({ password }). Deliberately skips
@@ -1507,6 +1517,26 @@ export default function App() {
     // Onboarding check will happen automatically
   };
 
+  // Called once the user has set a new password on the recovery session.
+  // updateUser() fires USER_UPDATED, not SIGNED_IN/INITIAL_SESSION, so the
+  // profile-init branch above never runs for this session — showOnboarding
+  // would stay null forever, and getCurrentView() would return null (blank
+  // screen) the moment passwordRecoveryActive clears. Fetching the live
+  // session and running the SAME runProfileInit used by a normal sign-in
+  // (setting profileInitialized.current first, exactly like that branch
+  // does) puts this session through identical routing before the gate is
+  // released, so the user lands on home/onboarding exactly as a normal
+  // sign-in would — no blank-screen frame in between.
+  const handlePasswordRecoveryComplete = async () => {
+    const { data: { session: currentSession } } = await supabase.auth.getSession();
+    if (currentSession) {
+      setSession(currentSession);
+      profileInitialized.current = true;
+      await runProfileInit(currentSession);
+    }
+    setPasswordRecoveryActive(false);
+  };
+
   // Tapping either CTA on the logged-out share view writes the pending token
   // (last write wins — a single key, no queue) then drops straight into
   // AuthFlow on the matching screen. localStorage, not URL params or
@@ -1549,7 +1579,7 @@ export default function App() {
         <AuthFlow
           initialScreen={authScreen}
           onSuccess={handleAuthSuccess}
-          onPasswordRecoveryComplete={() => setPasswordRecoveryActive(false)}
+          onPasswordRecoveryComplete={handlePasswordRecoveryComplete}
         />
       );
     }

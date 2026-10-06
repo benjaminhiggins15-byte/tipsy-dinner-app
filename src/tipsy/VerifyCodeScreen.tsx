@@ -7,6 +7,7 @@ type Props = {
   onVerified: () => void;
   onUseDifferentEmail: () => void;
   type?: "signup" | "recovery";
+  onBackToSignIn?: () => void;
 };
 
 const RESEND_COOLDOWN_SECONDS = 30;
@@ -105,7 +106,7 @@ function friendlyError(err: { code?: string; message: string }): string {
   }
 }
 
-export default function VerifyCodeScreen({ email, onVerified, onUseDifferentEmail, type = "signup" }: Props) {
+export default function VerifyCodeScreen({ email, onVerified, onUseDifferentEmail, type = "signup", onBackToSignIn }: Props) {
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -249,6 +250,11 @@ export default function VerifyCodeScreen({ email, onVerified, onUseDifferentEmai
           <button type="button" style={linkBtn} onClick={onUseDifferentEmail}>
             Use a different email
           </button>
+          {onBackToSignIn && (
+            <button type="button" style={linkBtn} onClick={onBackToSignIn}>
+              Back to sign in
+            </button>
+          )}
         </div>
       </div>
 

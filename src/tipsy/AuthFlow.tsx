@@ -7,7 +7,7 @@ type AuthScreen = "signup" | "signin";
 type Props = {
   initialScreen?: AuthScreen;
   onSuccess: () => void;
-  onPasswordRecoveryComplete: () => void;
+  onPasswordRecoveryComplete: () => Promise<void>;
 };
 
 const DURATION = 300;
