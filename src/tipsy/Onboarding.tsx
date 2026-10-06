@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type CSSProperties } from "react";
+import { useState, useEffect, useRef, type CSSProperties, type MutableRefObject } from "react";
 import { generateTasteProfile, generateOnboardingReflection, composeConstraintsAndAllergies, recordSharedRecipeDiscovery, PENDING_SHARE_TOKEN_KEY, type StructuredAllergies } from "./data";
 import { buildConstraintsConfirmation } from "./constraintsConfirmation";
 import { supabase } from "../lib/supabase";
@@ -403,9 +403,7 @@ function OnboardingChat({
   );
 }
 
-function Loader({ onUpdate, onDone, profile }: { onUpdate: (updates: Partial<ProfileType>) => Promise<void>; onDone: () => void; profile: ProfileType | null }) {
-  const startedRef = useRef(false);
-
+function Loader({ onUpdate, onDone, profile, startedRef }: { onUpdate: (updates: Partial<ProfileType>) => Promise<void>; onDone: () => void; profile: ProfileType | null; startedRef: MutableRefObject<boolean> }) {
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
@@ -495,6 +493,14 @@ function Loader({ onUpdate, onDone, profile }: { onUpdate: (updates: Partial<Pro
 export default function Onboarding({ onComplete, profile, onUpdate }: Props) {
   const [step, setStep] = useState(1);
   const [transition, setTransition] = useState<{ from: number; to: number } | null>(null);
+  // Lifted out of Loader (was a local useRef there) because the transition
+  // below renders two JSX shapes back to back — a "from"/"to" layer pair
+  // during the transition, then a single fresh layer once it ends — and that
+  // shape change unmounts/remounts Loader even though its key is unchanged
+  // (same root cause as the ScreenStage double-mount class in CLAUDE.md).
+  // A ref scoped to Onboarding itself, which never unmounts across this
+  // transition, survives both mounts and keeps the handoff effect run-once.
+  const onboardingHandoffStartedRef = useRef(false);
 
   const next = () => {
     setStep((s) => {
@@ -506,7 +512,7 @@ export default function Onboarding({ onComplete, profile, onUpdate }: Props) {
 
   const renderStep = (s: number) => {
     if (s === 1) return <OnboardingChat key="chat" profile={profile} onUpdate={onUpdate} onNext={next} />;
-    return <Loader key="loader" onUpdate={onUpdate} onDone={onComplete} profile={profile} />;
+    return <Loader key="loader" onUpdate={onUpdate} onDone={onComplete} profile={profile} startedRef={onboardingHandoffStartedRef} />;
   };
 
   const DURATION = 280;
