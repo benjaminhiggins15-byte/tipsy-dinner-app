@@ -7,6 +7,7 @@ import VerifyCodeScreen from "./VerifyCodeScreen";
 type Props = {
   onNavigateToSignUp: () => void;
   onSuccess: () => void;
+  onPasswordRecoveryComplete: () => void;
 };
 
 const fieldLabel: CSSProperties = {
@@ -83,7 +84,7 @@ const dividerText: CSSProperties = {
   color: "rgba(35,60,0,0.35)",
 };
 
-export default function SignIn({ onNavigateToSignUp, onSuccess }: Props) {
+export default function SignIn({ onNavigateToSignUp, onSuccess, onPasswordRecoveryComplete }: Props) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);

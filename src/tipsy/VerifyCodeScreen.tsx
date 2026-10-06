@@ -6,6 +6,7 @@ type Props = {
   email: string;
   onVerified: () => void;
   onUseDifferentEmail: () => void;
+  type?: "signup" | "recovery";
 };
 
 const RESEND_COOLDOWN_SECONDS = 30;
@@ -104,7 +105,7 @@ function friendlyError(err: { code?: string; message: string }): string {
   }
 }
 
-export default function VerifyCodeScreen({ email, onVerified, onUseDifferentEmail }: Props) {
+export default function VerifyCodeScreen({ email, onVerified, onUseDifferentEmail, type = "signup" }: Props) {
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -131,7 +132,7 @@ export default function VerifyCodeScreen({ email, onVerified, onUseDifferentEmai
       const { error: verifyError } = await supabase.auth.verifyOtp({
         email,
         token: code,
-        type: "signup",
+        type,
       });
 
       if (verifyError) {
@@ -155,10 +156,12 @@ export default function VerifyCodeScreen({ email, onVerified, onUseDifferentEmai
     setResendStatus("");
 
     try {
-      const { error: resendError } = await supabase.auth.resend({
-        type: "signup",
-        email,
-      });
+      // resend() only supports type "signup"/"email_change" — recovery codes
+      // are resent by calling resetPasswordForEmail() again.
+      const { error: resendError } =
+        type === "recovery"
+          ? await supabase.auth.resetPasswordForEmail(email)
+          : await supabase.auth.resend({ type: "signup", email });
 
       if (resendError) {
         setError(friendlyError(resendError));
@@ -193,7 +196,9 @@ export default function VerifyCodeScreen({ email, onVerified, onUseDifferentEmai
       <div style={heading}>Check your email</div>
       <div style={body}>
         We sent a 6-digit code to <span style={emailText}>{email}</span>.
-        Enter it below to finish setting up your account.
+        {type === "recovery"
+          ? " Enter it below to reset your password."
+          : " Enter it below to finish setting up your account."}
       </div>
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 18 }}>

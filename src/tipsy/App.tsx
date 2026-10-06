@@ -651,6 +651,11 @@ export default function App() {
   }, [session]);
   const [authScreen, setAuthScreen] = useState<"signup" | "signin">("signup");
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
+  // Set only on the PASSWORD_RECOVERY auth event (verifyOtp({ type:
+  // "recovery" })). Pins getCurrentView() to "auth" so the recovery session
+  // doesn't get routed into onboarding/app before a new password is set.
+  // Cleared by onPasswordRecoveryComplete (passed to AuthFlow) or on logout.
+  const [passwordRecoveryActive, setPasswordRecoveryActive] = useState(false);
   const [profile, setProfile] = useState<ProfileType | null>(null);
   const [recipesByCategory, setRecipesByCategory] = useState<Record<string, Recipe[]>>({});
 
@@ -917,8 +922,15 @@ export default function App() {
           console.error('Error initializing profile on sign in:', err);
           setShowOnboarding(false);
         }
+      } else if (session && event === 'PASSWORD_RECOVERY') {
+        // Code verified via verifyOtp({ type: "recovery" }) — this session
+        // exists only to call updateUser({ password }). Deliberately skips
+        // the profile-init block above (no onboarding check, no handle
+        // derivation) since this isn't a real "logged in for app use" event.
+        setPasswordRecoveryActive(true);
       } else if (!session) {
         profileInitialized.current = false; // Reset on logout
+        setPasswordRecoveryActive(false); // Reset on logout
         // Reset to signin screen when logged out
         setAuthScreen("signin");
         setShowOnboarding(null);
@@ -1537,6 +1549,7 @@ export default function App() {
         <AuthFlow
           initialScreen={authScreen}
           onSuccess={handleAuthSuccess}
+          onPasswordRecoveryComplete={() => setPasswordRecoveryActive(false)}
         />
       );
     }
@@ -1586,6 +1599,7 @@ export default function App() {
   };
 
   const getCurrentView = (): "auth" | "onboarding" | "app" | "shared-recipe" | null => {
+    if (passwordRecoveryActive) return "auth";
     if (session === undefined) return null;
     if (session === null) {
       // Logged-in arrivals with ?share= ignore the param entirely (unchanged

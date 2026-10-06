@@ -7,12 +7,13 @@ type AuthScreen = "signup" | "signin";
 type Props = {
   initialScreen?: AuthScreen;
   onSuccess: () => void;
+  onPasswordRecoveryComplete: () => void;
 };
 
 const DURATION = 300;
 const EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
 
-export default function AuthFlow({ initialScreen = "signup", onSuccess }: Props) {
+export default function AuthFlow({ initialScreen = "signup", onSuccess, onPasswordRecoveryComplete }: Props) {
   const [current, setCurrent] = useState<AuthScreen>(initialScreen);
   const [transition, setTransition] = useState<{
     from: AuthScreen;
@@ -87,6 +88,7 @@ export default function AuthFlow({ initialScreen = "signup", onSuccess }: Props)
       <SignIn
         onNavigateToSignUp={() => navigateTo("signup")}
         onSuccess={onSuccess}
+        onPasswordRecoveryComplete={onPasswordRecoveryComplete}
       />
     );
   };
