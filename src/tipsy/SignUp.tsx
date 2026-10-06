@@ -186,9 +186,6 @@ export default function SignUp({ onNavigateToSignIn, onSuccess }: Props) {
         />
       </div>
 
-      {/* Flex spacer, not a fixed margin — shrinks to ~0 on short viewports instead of overlapping */}
-      <div style={{ flex: 2 }} />
-
       <GoogleButton onClick={handleGoogleSignUp} />
 
       <div style={dividerRow}>
