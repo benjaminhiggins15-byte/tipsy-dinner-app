@@ -253,6 +253,18 @@ new full-height bottom sheet or overlay should use the same `fixed` pattern from
 start. Someday cleanup: make the nav-bar clearance not hard-coded so this class of
 bug can't recur.
 
+**`Onboarding.tsx`'s `Loader` is a third known instance of the same JSX-shape-swap
+double-mount class** as this section's `ScreenStage` case above and `RecipePicker.tsx`'s
+still-open case: its transition also renders a "from"/"to" layer pair during the
+transition and collapses to a single fresh layer afterward, so `Loader` unmounts/
+remounts mid-transition despite an unchanged `key`. Worked around (not structurally
+fixed) via a shared in-flight promise owned by the parent `Onboarding` component
+(`onboardingHandoffPromiseRef`/`runHandoffOnce`) — the handoff body runs exactly once
+regardless of double-mounting, and each `Loader` instance awaits it via `.finally()`
+so whichever instance is alive when it settles is the one that advances the user.
+Someday cleanup: give Onboarding the same structural fix as `ScreenStage` (unify its
+transition into one stable base-layer position) so this workaround can be removed.
+
 **Lovable double-mount.** Built in Lovable → components mount twice in dev
 (StrictMode-equivalent). All async fetches use the ignore-flag pattern:
 ```javascript
