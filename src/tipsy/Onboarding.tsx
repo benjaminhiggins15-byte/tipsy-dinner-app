@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type CSSProperties, type MutableRefObject } from "react";
+import { useState, useEffect, useRef, type CSSProperties } from "react";
 import { generateTasteProfile, generateOnboardingReflection, composeConstraintsAndAllergies, recordSharedRecipeDiscovery, PENDING_SHARE_TOKEN_KEY, type StructuredAllergies } from "./data";
 import { buildConstraintsConfirmation } from "./constraintsConfirmation";
 import { supabase } from "../lib/supabase";
@@ -403,69 +403,19 @@ function OnboardingChat({
   );
 }
 
-function Loader({ onUpdate, onDone, profile, startedRef }: { onUpdate: (updates: Partial<ProfileType>) => Promise<void>; onDone: () => void; profile: ProfileType | null; startedRef: MutableRefObject<boolean> }) {
+function Loader({ onDone, runHandoff }: { onDone: () => void; runHandoff: () => Promise<void> }) {
   useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
     let cancelled = false;
 
-    // Share-to-save handoff: a stranger who tapped "Sign up to save" from a
-    // public share page lands here fresh out of signup, mid-onboarding. The
-    // token rode along in localStorage (set before AuthFlow) under the same
-    // key Home's own mount effect reads. Fire-and-forget and non-blocking —
-    // must never delay onDone/the taste-profile handoff below it. Read-then-
-    // remove is single-consumption; recordSharedRecipeDiscovery is itself
-    // silent on an unknown/deleted token.
-    const pendingShareToken = localStorage.getItem(PENDING_SHARE_TOKEN_KEY);
-    if (pendingShareToken) {
-      // onboarding_share_token_detected — pending share token found and recorded mid-onboarding
-      logEvent("onboarding_share_token_detected", { share_token: pendingShareToken });
-      localStorage.removeItem(PENDING_SHARE_TOKEN_KEY);
-      recordSharedRecipeDiscovery(pendingShareToken);
-    }
-
-    (async () => {
-      try {
-        await onUpdate({ onboarding_complete: true });
-      } catch (err) {
-        console.error("Onboarding completion write failed:", err);
-      }
-
-      if (!profile) {
-        if (!cancelled) onDone();
-        return;
-      }
-
-      // Fire-and-forget — generateTasteProfile writes taste_profile directly
-      // via Supabase and is itself fail-quiet. We don't await it here; the
-      // poll below is the actual readiness signal.
-      generateTasteProfile(profile.id, {
-        palate: profile.palate,
-        inspiration: profile.inspiration,
-        constraints: profile.constraints,
-      }).catch((err) => {
-        console.error("Taste profile generation failed:", err);
-      });
-
-      const tasteProfile = await waitForTasteProfile(profile.id, HANDOFF_MAX_WAIT_MS, TASTE_PROFILE_POLL_INTERVAL_MS);
-      if (tasteProfile) {
-        try {
-          await onUpdate({ taste_profile: tasteProfile });
-        } catch (err) {
-          console.error("Taste profile state sync failed:", err);
-        }
-      }
-
-      // onboarding_completed — onboarding finished, handing off to the main app
-      logEvent("onboarding_completed", {});
+    runHandoff().finally(() => {
       if (!cancelled) onDone();
-    })();
+    });
 
     return () => {
       cancelled = true;
     };
-    // Run-once handoff sequence — deliberately not re-keyed off profile/
-    // onUpdate/onDone, which all change identity mid-sequence as writes land.
+    // Run-once handoff sequence — deliberately not re-keyed off runHandoff/
+    // onDone, which can change identity across renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -493,14 +443,77 @@ function Loader({ onUpdate, onDone, profile, startedRef }: { onUpdate: (updates:
 export default function Onboarding({ onComplete, profile, onUpdate }: Props) {
   const [step, setStep] = useState(1);
   const [transition, setTransition] = useState<{ from: number; to: number } | null>(null);
-  // Lifted out of Loader (was a local useRef there) because the transition
+  // Lifted out of Loader (was a local useEffect there) because the transition
   // below renders two JSX shapes back to back — a "from"/"to" layer pair
   // during the transition, then a single fresh layer once it ends — and that
   // shape change unmounts/remounts Loader even though its key is unchanged
-  // (same root cause as the ScreenStage double-mount class in CLAUDE.md).
-  // A ref scoped to Onboarding itself, which never unmounts across this
-  // transition, survives both mounts and keeps the handoff effect run-once.
-  const onboardingHandoffStartedRef = useRef(false);
+  // (same root cause as the ScreenStage double-mount class in CLAUDE.md). A
+  // shared in-flight promise, owned here in Onboarding (which never unmounts
+  // across this transition), guarantees the handoff body runs exactly once
+  // regardless of how many Loader instances request it, while still letting
+  // whichever instance is alive when it settles be the one that advances the
+  // user (see Loader's own cancelled-flag + .finally() below).
+  const onboardingHandoffPromiseRef = useRef<Promise<void> | null>(null);
+
+  const runHandoffOnce = (): Promise<void> => {
+    if (!onboardingHandoffPromiseRef.current) {
+      onboardingHandoffPromiseRef.current = (async () => {
+        // Share-to-save handoff: a stranger who tapped "Sign up to save" from a
+        // public share page lands here fresh out of signup, mid-onboarding. The
+        // token rode along in localStorage (set before AuthFlow) under the same
+        // key Home's own mount effect reads. Fire-and-forget and non-blocking —
+        // must never delay onDone/the taste-profile handoff below it. Read-then-
+        // remove is single-consumption; recordSharedRecipeDiscovery is itself
+        // silent on an unknown/deleted token.
+        const pendingShareToken = localStorage.getItem(PENDING_SHARE_TOKEN_KEY);
+        if (pendingShareToken) {
+          // onboarding_share_token_detected — pending share token found and recorded mid-onboarding
+          logEvent("onboarding_share_token_detected", { share_token: pendingShareToken });
+          localStorage.removeItem(PENDING_SHARE_TOKEN_KEY);
+          recordSharedRecipeDiscovery(pendingShareToken);
+        }
+
+        try {
+          await onUpdate({ onboarding_complete: true });
+        } catch (err) {
+          console.error("Onboarding completion write failed:", err);
+        }
+
+        if (!profile) return;
+
+        // Fire-and-forget — generateTasteProfile writes taste_profile directly
+        // via Supabase and is itself fail-quiet. We don't await it here; the
+        // poll below is the actual readiness signal.
+        generateTasteProfile(profile.id, {
+          palate: profile.palate,
+          inspiration: profile.inspiration,
+          constraints: profile.constraints,
+        }).catch((err) => {
+          console.error("Taste profile generation failed:", err);
+        });
+
+        const tasteProfile = await waitForTasteProfile(profile.id, HANDOFF_MAX_WAIT_MS, TASTE_PROFILE_POLL_INTERVAL_MS);
+        if (tasteProfile) {
+          try {
+            await onUpdate({ taste_profile: tasteProfile });
+          } catch (err) {
+            console.error("Taste profile state sync failed:", err);
+          }
+        }
+
+        // onboarding_completed — onboarding finished, handing off to the main app
+        logEvent("onboarding_completed", {});
+      })().catch((err) => {
+        // Defensive only — every step above already fails soft internally, so
+        // this should never actually trigger. If something unforeseen still
+        // throws, swallow it here so the shared promise always resolves and
+        // every mounted Loader still advances the user via .finally() instead
+        // of hanging.
+        console.error("Onboarding handoff failed unexpectedly:", err);
+      });
+    }
+    return onboardingHandoffPromiseRef.current;
+  };
 
   const next = () => {
     setStep((s) => {
@@ -512,7 +525,7 @@ export default function Onboarding({ onComplete, profile, onUpdate }: Props) {
 
   const renderStep = (s: number) => {
     if (s === 1) return <OnboardingChat key="chat" profile={profile} onUpdate={onUpdate} onNext={next} />;
-    return <Loader key="loader" onUpdate={onUpdate} onDone={onComplete} profile={profile} startedRef={onboardingHandoffStartedRef} />;
+    return <Loader key="loader" onDone={onComplete} runHandoff={runHandoffOnce} />;
   };
 
   const DURATION = 280;
