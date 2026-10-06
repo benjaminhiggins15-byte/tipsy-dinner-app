@@ -374,6 +374,7 @@ props there, never App-level setters (that scope error caused a duplicate-on-sav
 
 ## Session Rules for Claude Code
 
+- **NEVER use the Supabase service-role key or the GoTrue Admin API (including read-only lookups) without explicit founder approval in that session. All DB reads and writes go through `supabase db query --linked`. Auth-user deletions are done by the founder in the Supabase dashboard.** (This happened twice: once during a security check, once during the beta-gate cleanup.)
 - Design decisions are made in Claude.ai first — never figure out design in Claude Code. Claude Code executes precise prompts and makes no decisions.
 - Read CLAUDE.md at the start of every session. Ask for a plan before writing code.
 - One clearly-scoped screen/task per session. Preserve existing functionality and data flow exactly unless explicitly told to change it.
@@ -395,6 +396,7 @@ code defects).
 
 ## Standing Cleanup / Watch Items
 
+- **`onboarding_started` double-fires on every signup.** The outgoing `OnboardingChat` layer remounts during the step→Loader transition (same JSX-shape-swap class as `ScreenStage`/`RecipePicker`/`Loader`). Activation (`onboarding_completed`) is unaffected. Handle at read time (count distinct users); the deferred structural Onboarding transition fix would cure it.
 - **Schema is dashboard-only** — no in-repo migrations. Cheap to fix now (export to a migration file), expensive to reconstruct later.
 - A standing baseline of pre-existing TypeScript errors unrelated to feature work. Re-count with `bunx tsc --noEmit` before ever claiming a change introduced zero new errors — do not trust a documented figure; this count has drifted before (31 → 40 → 29) and will again. Confirmed at 12 on `main` as of 2026-09-24 (`bunx tsc --noEmit` on `main` HEAD `d62b107`) — treat 12 as the new snapshot, not a permanent number, and re-run `bunx tsc --noEmit` yourself before trusting it. **Baseline errors are not noise by default — one (`Occasions.tsx`'s un-awaited `saveOccasion` call, previously counted here as harmless baseline) turned out to be a real launch-blocking bug** (first-tap create-menu silently failing; fixed 2026-09-24, merge `d62b107`). Treat each baseline error as a possible real bug until checked, not a number to wave away.
 - **Correction:** there is no reusable loading-spinner component. `Spinner.tsx` exists but has zero imports anywhere in the app (dead code). The "Updating…" pattern is inline in `GroceryList` (`App.tsx`), not a shared component — reusing it elsewhere (e.g. Occasions/Menus load flash) means copying the inline pattern, not importing something.
