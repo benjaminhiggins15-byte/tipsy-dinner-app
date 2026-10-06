@@ -2,6 +2,7 @@ import { useState, useEffect, type CSSProperties } from "react";
 import { supabase } from "../lib/supabase";
 import fullLogo from "../Logos/Full_logo.png";
 import GoogleButton from "./GoogleButton";
+import VerifyCodeScreen from "./VerifyCodeScreen";
 
 type Props = {
   onNavigateToSignUp: () => void;
@@ -87,6 +88,8 @@ export default function SignIn({ onNavigateToSignUp, onSuccess }: Props) {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [screen, setScreen] = useState<"form" | "verify">("form");
+  const [verifyEmail, setVerifyEmail] = useState("");
 
   useEffect(() => {
     const style = document.createElement("style");
@@ -122,6 +125,16 @@ export default function SignIn({ onNavigateToSignUp, onSuccess }: Props) {
       });
 
       if (signInError) {
+        if (signInError.code === "email_not_confirmed") {
+          // They signed up but never entered their code. Send a fresh one
+          // and drop them straight into the same verify screen instead of
+          // stranding them on a bare error message.
+          supabase.auth.resend({ type: "signup", email }).catch(() => {});
+          setVerifyEmail(email);
+          setScreen("verify");
+          setLoading(false);
+          return;
+        }
         setError(signInError.message);
         setLoading(false);
         return;
@@ -149,6 +162,19 @@ export default function SignIn({ onNavigateToSignUp, onSuccess }: Props) {
       setError("Failed to sign in with Google");
     }
   };
+
+  if (screen === "verify") {
+    return (
+      <VerifyCodeScreen
+        email={verifyEmail}
+        onVerified={onSuccess}
+        onUseDifferentEmail={() => {
+          setScreen("form");
+          setError("");
+        }}
+      />
+    );
+  }
 
   return (
     <div

@@ -2,6 +2,7 @@ import { useState, useEffect, type CSSProperties } from "react";
 import { supabase } from "../lib/supabase";
 import fullLogo from "../Logos/Full_logo.png";
 import GoogleButton from "./GoogleButton";
+import VerifyCodeScreen from "./VerifyCodeScreen";
 
 type Props = {
   onNavigateToSignIn: () => void;
@@ -89,6 +90,8 @@ export default function SignUp({ onNavigateToSignIn, onSuccess }: Props) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [screen, setScreen] = useState<"form" | "verify">("form");
+  const [verifyEmail, setVerifyEmail] = useState("");
 
   useEffect(() => {
     const style = document.createElement("style");
@@ -139,9 +142,34 @@ export default function SignUp({ onNavigateToSignIn, onSuccess }: Props) {
         return;
       }
 
-      if (data.user) {
+      if (data.session) {
+        // Email confirmation is off: signUp already returned a live session.
         onSuccess();
+        setLoading(false);
+        return;
       }
+
+      if (data.user && data.user.identities && data.user.identities.length === 0) {
+        // Anti-enumeration: Supabase returns a fake "new" user with no
+        // identities when the email already belongs to a confirmed account.
+        // No code was ever sent to it, so showing the code screen would be a
+        // dead end — point them to sign in instead.
+        setError("An account with this email already exists. Try signing in instead.");
+        setLoading(false);
+        return;
+      }
+
+      if (data.user) {
+        // Email confirmation is on: no session yet, user must enter the code
+        // we just emailed them.
+        setVerifyEmail(email);
+        setScreen("verify");
+        setLoading(false);
+        return;
+      }
+
+      setError("Something went wrong. Please try again.");
+      setLoading(false);
     } catch {
       setError("An unexpected error occurred");
       setLoading(false);
@@ -161,6 +189,19 @@ export default function SignUp({ onNavigateToSignIn, onSuccess }: Props) {
       setError("Failed to sign up with Google");
     }
   };
+
+  if (screen === "verify") {
+    return (
+      <VerifyCodeScreen
+        email={verifyEmail}
+        onVerified={onSuccess}
+        onUseDifferentEmail={() => {
+          setScreen("form");
+          setError("");
+        }}
+      />
+    );
+  }
 
   return (
     <div
