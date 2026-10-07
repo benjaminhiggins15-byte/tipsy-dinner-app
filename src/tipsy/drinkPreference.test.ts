@@ -85,20 +85,52 @@ async function main() {
   // ---- deterministic no-alcohol override phrases: false, no AI call ----
   const overridePhrases = [
     "I'm sober",
-    "I don't drink",
-    "I do not drink anymore",
     "no alcohol for me",
     "I only want non-alcoholic options",
+    "I only want non alcoholic options",
+    "nonalcoholic only, please",
     "please keep it alcohol-free",
+    "please keep it alcohol free",
+    "zero alcohol please",
+    "I'm not drinking these days",
+    "I quit drinking",
+    "I stopped drinking",
+    "I used to drink, not anymore",
+    "no booze for me",
+    "nothing alcoholic please",
+    "please, without alcohol",
     "I'm in recovery",
     "I'm pregnant",
     "I'm a teetotaler",
+    // general "don't drink" phrasing — narrowed to refer to drinking in general
+    "I don't drink.",
+    "I don’t drink", // curly apostrophe
+    "dont drink",
+    "I don't drink alcohol",
+    "I do not drink anymore",
+    "I don't drink at all",
   ];
   for (const phrase of overridePhrases) {
     installFetchMock(async () => sseResponseFor('{"alcohol_ok": true}'));
     const result = await parseDrinkPreference(phrase);
     check(`override phrase "${phrase}" -> false`, result === false);
     check(`override phrase "${phrase}" -> no AI call`, fetchCallCount === 0);
+    restoreFetch();
+  }
+
+  // ---- narrowed "don't drink X" phrasing: specific drink, NOT a general
+  // refusal -> must go to the AI, not the deterministic override ----
+  const nonOverridingPhrases = [
+    "I love wine, but only red. No white please",
+    "I don't drink white wine",
+    "I don't drink beer but love wine",
+    "I like wine and mocktails",
+  ];
+  for (const phrase of nonOverridingPhrases) {
+    installFetchMock(async () => sseResponseFor('{"alcohol_ok": true}'));
+    const result = await parseDrinkPreference(phrase);
+    check(`"${phrase}" -> goes to the AI, not the override`, fetchCallCount === 1);
+    check(`"${phrase}" -> mocked AI result passes through`, result === true);
     restoreFetch();
   }
 

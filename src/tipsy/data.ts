@@ -643,25 +643,54 @@ export async function composeAllergyBoxEdit(
 // a real false answer.
 export const DRINK_PREFERENCE_PARSE_TIMEOUT_MS = 4000;
 
-// Deterministic safety override, checked BEFORE any AI call. Case-
-// insensitive substring match. This list may only ever drive a `false`
-// result — it is a fast path for unambiguous no-alcohol signals, not a
-// trust boundary the AI result needs to clear.
+// Deterministic safety override, checked BEFORE any AI call. This list may
+// only ever drive a `false` result — it is a fast path for unambiguous
+// no-alcohol signals, not a trust boundary the AI result needs to clear.
+// Checked against normalized text (lowercased, curly quotes straightened,
+// whitespace collapsed) as a plain substring match.
 const NO_ALCOHOL_OVERRIDE_PHRASES = [
   "sober",
-  "don't drink",
-  "do not drink",
   "no alcohol",
   "non-alcoholic",
+  "non alcoholic",
+  "nonalcoholic",
   "alcohol-free",
+  "alcohol free",
+  "zero alcohol",
+  "not drinking",
+  "quit drinking",
+  "stopped drinking",
+  "used to drink",
+  "no booze",
+  "nothing alcoholic",
+  "without alcohol",
   "recovery",
   "pregnant",
   "teetotal",
 ];
 
+// "don't drink"/"do not drink"/"dont drink" only count as a no-alcohol
+// override when they refer to drinking IN GENERAL — end of text, punctuation,
+// or a general-refusal word right after ("alcohol", "anymore", "at all",
+// etc). Followed by a specific drink ("don't drink white", "don't drink
+// beer"), it's a taste preference, not a refusal — left for the AI, which
+// can read the surrounding sentence for drinks the person DOES like.
+const GENERAL_NO_DRINK_PATTERN =
+  /\b(?:don't drink|do not drink|dont drink)(?=$|[.,!?;:]|\s+(?:alcohol|alcoholic|booze|anymore|any more|at all)\b)/;
+
+function normalizeForOverrideCheck(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function matchesNoAlcoholOverride(text: string): boolean {
-  const lower = text.toLowerCase();
-  return NO_ALCOHOL_OVERRIDE_PHRASES.some((phrase) => lower.includes(phrase));
+  const normalized = normalizeForOverrideCheck(text);
+  if (NO_ALCOHOL_OVERRIDE_PHRASES.some((phrase) => normalized.includes(phrase))) return true;
+  return GENERAL_NO_DRINK_PATTERN.test(normalized);
 }
 
 const DRINK_PREFERENCE_PARSE_SYSTEM_PROMPT = (answer: string) => `You are classifying whether a home cook is open to alcoholic drink-pairing suggestions, based on their free-text answer to "what do you like to drink?" for a cooking app.
@@ -673,10 +702,11 @@ or
 
 Rules:
 - true ONLY if the answer affirmatively mentions alcoholic drinks (e.g. wine, beer, cocktails, whiskey), or expresses open-ended/omnivorous openness (e.g. "anything", "surprise me", "I'm easy").
-- false if the answer mentions only non-alcoholic drinks, is ambiguous, or contains any negation about alcohol (e.g. "I don't drink anymore").
+- false if they say they don't drink alcohol in general, or no longer drink (used to, quit, gave up). Excluding or disliking specific drinks while liking others (e.g. "only red, no white", "I don't drink beer but love wine") is a taste preference, not a refusal — answer true if they affirmatively name any alcoholic drink they enjoy.
+- Non-alcoholic versions of drinks (NA beer, non-alcoholic wine, zero-proof spirits, mocktails) count as non-alcoholic, not as mentions of alcohol.
 - When genuinely unsure, answer false — never guess toward alcohol.
 
-USER'S ANSWER: ${answer}`;
+<answer>${answer}</answer>`;
 
 // Strict, non-AI validator for the model's JSON output. Exactly one key,
 // exactly a boolean value — a stray extra key, a string "true", or any other
