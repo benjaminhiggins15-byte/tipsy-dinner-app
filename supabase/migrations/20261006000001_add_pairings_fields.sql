@@ -12,8 +12,9 @@ ALTER TABLE profiles
 
 -- recipes: cached AI drink-pairing suggestions, generated lazily on first
 -- open of the Pairings tab. NULL = never generated for this recipe yet.
--- pairings_fingerprint pins the cache to the exact profile inputs it was
--- generated under (drink_preference + alcohol_ok + allergies), mirroring
+-- pairings_fingerprint pins the cache to the recipe's own content (title +
+-- ingredients + steps) plus the profile inputs it was generated under
+-- (drink_preference + alcohol_ok + allergies), mirroring
 -- user_recipe_slices.gate_fingerprint in compute-slice — a mismatch means
 -- regenerate, not trust-the-stale-cache.
 ALTER TABLE recipes
