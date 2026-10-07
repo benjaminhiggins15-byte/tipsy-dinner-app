@@ -626,6 +626,196 @@ export async function composeAllergyBoxEdit(
   return mapAllergyItems(forcedItems.join(", "));
 }
 
+// Pairings feature: classifies whether a user's free-text drink-preference
+// answer means alcoholic pairings are OK. Mirrors enrichGroceryItems'
+// defensive JSON-in/JSON-out posture (strict shape check, fence-stripping,
+// never throws) rather than parseNoGosAnswer's two-line text format, since
+// this is a single boolean classification, not a composed record.
+//
+// Deliberately biased toward false at every stage: blank input, any no-
+// alcohol override phrase, ambiguous/malformed model output, and timeouts
+// all resolve to false or null — never true except on an affirmative or
+// open-ended model classification. null (not false) is returned specifically
+// for "the parse didn't produce a trustworthy answer" (timeout/error/
+// malformed), distinct from "the model affirmatively said no" (false) — both
+// read as "no alcohol" wherever alcohol_ok is consumed, but keeping them
+// distinct preserves the option to retry a null later without re-litigating
+// a real false answer.
+export const DRINK_PREFERENCE_PARSE_TIMEOUT_MS = 4000;
+
+// Deterministic safety override, checked BEFORE any AI call. Case-
+// insensitive substring match. This list may only ever drive a `false`
+// result — it is a fast path for unambiguous no-alcohol signals, not a
+// trust boundary the AI result needs to clear.
+const NO_ALCOHOL_OVERRIDE_PHRASES = [
+  "sober",
+  "don't drink",
+  "do not drink",
+  "no alcohol",
+  "non-alcoholic",
+  "alcohol-free",
+  "recovery",
+  "pregnant",
+  "teetotal",
+];
+
+function matchesNoAlcoholOverride(text: string): boolean {
+  const lower = text.toLowerCase();
+  return NO_ALCOHOL_OVERRIDE_PHRASES.some((phrase) => lower.includes(phrase));
+}
+
+const DRINK_PREFERENCE_PARSE_SYSTEM_PROMPT = (answer: string) => `You are classifying whether a home cook is open to alcoholic drink-pairing suggestions, based on their free-text answer to "what do you like to drink?" for a cooking app.
+
+Respond with ONLY raw JSON, nothing else — no preamble, no explanation, no markdown code fences:
+{"alcohol_ok": true}
+or
+{"alcohol_ok": false}
+
+Rules:
+- true ONLY if the answer affirmatively mentions alcoholic drinks (e.g. wine, beer, cocktails, whiskey), or expresses open-ended/omnivorous openness (e.g. "anything", "surprise me", "I'm easy").
+- false if the answer mentions only non-alcoholic drinks, is ambiguous, or contains any negation about alcohol (e.g. "I don't drink anymore").
+- When genuinely unsure, answer false — never guess toward alcohol.
+
+USER'S ANSWER: ${answer}`;
+
+// Strict, non-AI validator for the model's JSON output. Exactly one key,
+// exactly a boolean value — a stray extra key, a string "true", or any other
+// shape is treated as untrustworthy rather than coerced.
+function parseAlcoholOkResponse(rawText: string): boolean | null {
+  const cleaned = rawText.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (error) {
+    console.warn("Drink preference parsing: could not parse AI response as JSON", error);
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const keys = Object.keys(parsed as Record<string, unknown>);
+  if (keys.length !== 1 || keys[0] !== "alcohol_ok") return null;
+  const value = (parsed as Record<string, unknown>).alcohol_ok;
+  return typeof value === "boolean" ? value : null;
+}
+
+// The ONLY place that calls the AI to classify a drink-preference answer.
+// Never throws — timeouts, network errors, and malformed/ambiguous model
+// output all resolve to null, never reject.
+export async function parseDrinkPreference(
+  text: string,
+  timeoutMs: number = DRINK_PREFERENCE_PARSE_TIMEOUT_MS
+): Promise<boolean | null> {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (matchesNoAlcoholOverride(trimmed)) return false;
+
+  const callPromise = (async (): Promise<string> => {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseAnonKey) throw new Error("Supabase config missing");
+
+    const userId = await getCurrentUserId();
+
+    const response = await fetch(`${supabaseUrl}/functions/v1/ai-chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${supabaseAnonKey}`,
+      },
+      body: JSON.stringify({
+        systemPrompt: DRINK_PREFERENCE_PARSE_SYSTEM_PROMPT(trimmed),
+        messages: [{ role: "user", content: "Classify now." }],
+        call_type: "drink-parse",
+        user_id: userId,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Edge Function error: ${errorText}`);
+    }
+
+    let fullText = "";
+    for await (const chunk of parseSSEStream(response)) {
+      if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta") {
+        fullText += chunk.delta.text;
+      }
+    }
+    if (!fullText.trim()) throw new Error("Empty response from drink-preference parse call");
+    return fullText;
+  })();
+
+  try {
+    const raw = await withTimeout(callPromise, timeoutMs);
+    if (raw === null) return null; // timeout, or withTimeout swallowed a rejection
+    return parseAlcoholOkResponse(raw);
+  } catch (error) {
+    console.error("Drink preference parsing failed:", error);
+    return null;
+  }
+}
+
+// Conditional second write, broken out so tests can substitute a fake
+// without touching the real Supabase client. Scoped by id AND a match on
+// drink_preference still equaling the text that was parsed — a slower-
+// resolving parse of an older answer can never clobber a newer one; it
+// simply updates zero rows.
+export type AlcoholOkConditionalWriter = (
+  userId: string,
+  expectedCurrentDrinkPreference: string,
+  alcoholOk: boolean
+) => Promise<void>;
+
+const writeAlcoholOkIfStillCurrent: AlcoholOkConditionalWriter = async (
+  userId,
+  expectedCurrentDrinkPreference,
+  alcoholOk
+) => {
+  try {
+    const { error } = await supabase
+      .from("profiles")
+      .update({ alcohol_ok: alcoholOk })
+      .eq("id", userId)
+      .eq("drink_preference", expectedCurrentDrinkPreference);
+    if (error) throw error;
+  } catch (error) {
+    console.error("Error writing alcohol_ok conditionally:", error);
+  }
+};
+
+// The ONLY sanctioned write path for profiles.drink_preference. Two writes:
+// (1) an unconditional write of {drink_preference, alcohol_ok: null} via the
+// caller's own onUpdate path (same shape as the existing safeUpdate/onUpdate
+// pattern used for palate/inspiration/constraints) — this one is awaited and
+// has no dependency on the parse whatsoever; (2) a background, fire-and-
+// forget parse + conditional write that can only ever raise alcohol_ok away
+// from null, never block or delay the caller. onUpdate's generic
+// upsert-by-id has no way to express a WHERE-style guard, which is why the
+// second write bypasses it and goes straight to Supabase via
+// `writeAlcoholOk`.
+export async function saveDrinkPreference(
+  text: string,
+  onUpdate: (fields: { drink_preference: string; alcohol_ok: null }) => Promise<void>,
+  userId: string,
+  overrides: {
+    parse?: (text: string) => Promise<boolean | null>;
+    writeAlcoholOk?: AlcoholOkConditionalWriter;
+  } = {}
+): Promise<void> {
+  const parse = overrides.parse ?? parseDrinkPreference;
+  const writeAlcoholOk = overrides.writeAlcoholOk ?? writeAlcoholOkIfStillCurrent;
+
+  await onUpdate({ drink_preference: text, alcohol_ok: null });
+
+  parse(text)
+    .then((alcoholOk) => {
+      if (alcoholOk === null) return undefined;
+      return writeAlcoholOk(userId, text, alcoholOk);
+    })
+    .catch((error) => {
+      console.error("saveDrinkPreference: background parse/write failed:", error);
+    });
+}
+
 function localDateString(): string {
   const d = new Date();
   const year = d.getFullYear();
