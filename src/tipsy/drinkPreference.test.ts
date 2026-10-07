@@ -83,32 +83,39 @@ async function main() {
   }
 
   // ---- deterministic no-alcohol override phrases: false, no AI call ----
+  // Principle under test: the override fires only on statements about THE
+  // PERSON being a non-drinker, never on statements about a specific drink.
   const overridePhrases = [
     "I'm sober",
+    "I'm pregnant",
+    "I'm in recovery",
+    "I'm a teetotaler",
     "no alcohol for me",
-    "I only want non-alcoholic options",
-    "I only want non alcoholic options",
-    "nonalcoholic only, please",
-    "please keep it alcohol-free",
-    "please keep it alcohol free",
-    "zero alcohol please",
-    "I'm not drinking these days",
-    "I quit drinking",
-    "I stopped drinking",
-    "I used to drink, not anymore",
     "no booze for me",
     "nothing alcoholic please",
-    "please, without alcohol",
-    "I'm in recovery",
-    "I'm pregnant",
-    "I'm a teetotaler",
-    // general "don't drink" phrasing — narrowed to refer to drinking in general
+    // "only"/"just" turns a drink-category word into a blanket person-level
+    // statement, so these DO fire even though the bare words don't.
+    "only non-alcoholic please",
+    "only nonalcoholic, please",
+    "only alcohol-free stuff",
+    "only alcohol free stuff",
+    "just non-alcoholic stuff",
+    "just alcohol-free stuff",
+    // general "don't/quit/stopped/not/used to drink" phrasing — narrowed to
+    // refer to drinking in general (end of text, punctuation, or a
+    // general-refusal word right after).
     "I don't drink.",
     "I don’t drink", // curly apostrophe
     "dont drink",
     "I don't drink alcohol",
     "I do not drink anymore",
     "I don't drink at all",
+    "I used to drink.",
+    "I used to drink, not anymore",
+    "I quit drinking",
+    "stopped drinking alcohol",
+    "I stopped drinking",
+    "not drinking at all",
   ];
   for (const phrase of overridePhrases) {
     installFetchMock(async () => sseResponseFor('{"alcohol_ok": true}'));
@@ -118,13 +125,26 @@ async function main() {
     restoreFetch();
   }
 
-  // ---- narrowed "don't drink X" phrasing: specific drink, NOT a general
-  // refusal -> must go to the AI, not the deterministic override ----
+  // ---- narrowed phrasing: a specific drink, or a drink-category word with
+  // no "only"/"just", is NOT a general refusal -> must go to the AI, not the
+  // deterministic override ----
   const nonOverridingPhrases = [
     "I love wine, but only red. No white please",
     "I don't drink white wine",
     "I don't drink beer but love wine",
     "I like wine and mocktails",
+    "I used to drink red, now mostly white",
+    "quit drinking soda",
+    "stopped drinking beer, wine only now",
+    "not drinking white these days",
+    "I like IPAs and alcohol-free beer on weeknights",
+    "wine and non-alcoholic stuff too",
+    "I only want non-alcoholic options",
+    "I only want non alcoholic options",
+    "nonalcoholic only, please",
+    "please keep it alcohol-free",
+    "please keep it alcohol free",
+    "zero alcohol please",
   ];
   for (const phrase of nonOverridingPhrases) {
     installFetchMock(async () => sseResponseFor('{"alcohol_ok": true}'));

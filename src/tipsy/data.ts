@@ -648,35 +648,41 @@ export const DRINK_PREFERENCE_PARSE_TIMEOUT_MS = 4000;
 // no-alcohol signals, not a trust boundary the AI result needs to clear.
 // Checked against normalized text (lowercased, curly quotes straightened,
 // whitespace collapsed) as a plain substring match.
+//
+// Principle: this override fires only on statements about THE PERSON being
+// a non-drinker, never on statements about a specific drink. Phrases that
+// describe a drink rather than the person (e.g. "non-alcoholic", "alcohol-
+// free" on their own) are deliberately NOT here — a sentence like "wine and
+// non-alcoholic stuff too" is about a drink category, not a refusal, so it's
+// left for the AI's existing NA-drinks rule. "only non-alcoholic"/"just
+// alcohol-free" ARE here because "only"/"just" turns it into a blanket
+// statement about what the person drinks, not a mention of one drink among
+// others.
 const NO_ALCOHOL_OVERRIDE_PHRASES = [
   "sober",
+  "teetotal",
+  "pregnant",
+  "recovery",
   "no alcohol",
-  "non-alcoholic",
-  "non alcoholic",
-  "nonalcoholic",
-  "alcohol-free",
-  "alcohol free",
-  "zero alcohol",
-  "not drinking",
-  "quit drinking",
-  "stopped drinking",
-  "used to drink",
   "no booze",
   "nothing alcoholic",
-  "without alcohol",
-  "recovery",
-  "pregnant",
-  "teetotal",
+  "only non-alcoholic",
+  "only nonalcoholic",
+  "only alcohol-free",
+  "only alcohol free",
+  "just non-alcoholic",
+  "just alcohol-free",
 ];
 
-// "don't drink"/"do not drink"/"dont drink" only count as a no-alcohol
-// override when they refer to drinking IN GENERAL — end of text, punctuation,
-// or a general-refusal word right after ("alcohol", "anymore", "at all",
-// etc). Followed by a specific drink ("don't drink white", "don't drink
-// beer"), it's a taste preference, not a refusal — left for the AI, which
-// can read the surrounding sentence for drinks the person DOES like.
+// General-refusal phrasing only counts as a no-alcohol override when it
+// refers to drinking/the person IN GENERAL — end of text, punctuation, or a
+// general-refusal word right after ("alcohol", "anymore", "at all", etc).
+// Followed by a specific drink ("don't drink white", "used to drink red",
+// "quit drinking soda", "stopped drinking beer", "not drinking white"), it's
+// a taste preference, not a refusal — left for the AI, which can read the
+// surrounding sentence for drinks the person DOES like.
 const GENERAL_NO_DRINK_PATTERN =
-  /\b(?:don't drink|do not drink|dont drink)(?=$|[.,!?;:]|\s+(?:alcohol|alcoholic|booze|anymore|any more|at all)\b)/;
+  /\b(?:don't drink|do not drink|dont drink|used to drink|quit drinking|stopped drinking|not drinking)(?=$|[.,!?;:]|\s+(?:alcohol|alcoholic|booze|anymore|any more|at all)\b)/;
 
 function normalizeForOverrideCheck(text: string): string {
   return text
