@@ -66,6 +66,9 @@ type ProfileType = {
   taste_profile: string | null;
   allergies: StructuredAllergies | null;
   share_show_name: boolean;
+  wants_pairings: boolean | null;
+  drink_preference: string | null;
+  alcohol_ok: boolean | null;
 };
 
 // Helper: Convert recipe to XML format for AI context (used in App and Cook components)
