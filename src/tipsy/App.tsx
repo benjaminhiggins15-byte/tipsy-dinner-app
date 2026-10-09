@@ -320,7 +320,7 @@ type Screen =
   | { name: "menuinterior"; menuId: string }
   | { name: "recipepicker"; menuId: string; section: MenuSection }
   | { name: "profile" }
-  | { name: "profileedit"; fieldKey: "email" | "palate" | "inspiration" | "table" | "constraints" | "identity" }
+  | { name: "profileedit"; fieldKey: "email" | "palate" | "inspiration" | "table" | "constraints" | "identity" | "drinks" }
   | { name: "placeholder"; title: string }
   | { name: "home" }
   | { name: "receivedPending"; items: PendingReceivedRecipe[] }

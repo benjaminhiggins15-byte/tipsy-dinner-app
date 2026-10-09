@@ -1,6 +1,6 @@
 import { useState, type CSSProperties } from "react";
 import { supabase } from "../lib/supabase";
-import { isValidHandleFormat, generateTasteProfile, splitConstraintsForDisplay, buildConstraintsString, composeAllergyBoxEdit, type StructuredAllergies } from "./data";
+import { isValidHandleFormat, generateTasteProfile, splitConstraintsForDisplay, buildConstraintsString, composeAllergyBoxEdit, saveDrinkPreference, type StructuredAllergies } from "./data";
 
 type ProfileType = {
   id: string;
@@ -11,6 +11,9 @@ type ProfileType = {
   display_name: string;
   handle: string;
   onboarding_complete: boolean;
+  wants_pairings: boolean | null;
+  drink_preference: string | null;
+  alcohol_ok: boolean | null;
 };
 
 const KEYS = {
@@ -22,7 +25,7 @@ const KEYS = {
   constraints: "tipsyDinnerConstraints",
 } as const;
 
-type FieldKey = "email" | "palate" | "inspiration" | "table" | "constraints" | "identity";
+type FieldKey = "email" | "palate" | "inspiration" | "table" | "constraints" | "identity" | "drinks";
 
 function read(k: string): string {
   try { return localStorage.getItem(k) ?? ""; } catch { return ""; }
@@ -107,6 +110,36 @@ function Row({ title, subtitle, onClick, muted = false, noBorder = false, attach
   );
 }
 
+// Switch visual/interaction pattern copied verbatim from App.tsx's
+// share_show_name toggle (the only toggle in the codebase) — no shared
+// toggle component exists to import, so the pixel values below are
+// replicated rather than re-derived.
+function ToggleRow({ title, on, onToggle }: { title: string; on: boolean; onToggle: () => void }) {
+  return (
+    <div style={rowStyle}>
+      <div style={titleStyle}>{title}</div>
+      <button
+        onClick={onToggle}
+        style={{
+          width: 28, height: 16, borderRadius: 999, border: "none", padding: 0,
+          cursor: "pointer", position: "relative",
+          background: on ? "#233C00" : "rgba(35,60,0,0.15)",
+          transition: "background 150ms ease",
+        }}
+      >
+        <div
+          style={{
+            width: 12, height: 12, borderRadius: "50%", background: "#FAF7F2",
+            position: "absolute", top: 2, left: 2,
+            transform: on ? "translateX(12px)" : "translateX(0)",
+            transition: "transform 150ms ease",
+          }}
+        />
+      </button>
+    </div>
+  );
+}
+
 const FIELD_META: Record<FieldKey, { label: string; multiline: boolean }> = {
   email: { label: "Email", multiline: false },
   palate: { label: "Your palate", multiline: true },
@@ -114,6 +147,7 @@ const FIELD_META: Record<FieldKey, { label: string; multiline: boolean }> = {
   table: { label: "Your table", multiline: true },
   constraints: { label: "Constraints", multiline: true },
   identity: { label: "Edit Profile", multiline: false },
+  drinks: { label: "What you like to drink", multiline: true },
 };
 
 const fieldLabelStyle: CSSProperties = {
@@ -178,6 +212,19 @@ export default function Profile({ back, openEdit, isTabRoot = false, onSignOut, 
         <div style={sectionLabel}>Your Kitchen</div>
         <Row title="Your palate" subtitle={trim30(profile?.palate || "")} onClick={() => openEdit("palate")} />
         <Row title="Inspiration" subtitle={trim30(profile?.inspiration || "")} onClick={() => openEdit("inspiration")} />
+
+        <div style={sectionLabel}>Drink Pairings</div>
+        <ToggleRow
+          title="Drink pairings"
+          on={profile?.wants_pairings ?? false}
+          onToggle={() => {
+            onUpdate({ wants_pairings: !(profile?.wants_pairings ?? false) }).catch((err) => console.error("Error updating wants_pairings:", err));
+          }}
+        />
+        {(profile?.wants_pairings ?? false) && (
+          <Row title="What you like to drink" subtitle={trim30(profile?.drink_preference || "")} onClick={() => openEdit("drinks")} />
+        )}
+
         {(() => {
           const { allergyText, dislikeText } = splitConstraintsForDisplay(profile?.constraints);
           return (
@@ -405,12 +452,93 @@ function ProfileEditConstraints({ back, profile, onUpdate }: { back: () => void;
   );
 }
 
+// Standalone editor for drink_preference, pulled out of the generic
+// ProfileEdit below for the same reason ProfileEditConstraints was: the save
+// logic is fundamentally different (routes through saveDrinkPreference,
+// which needs profile.id and owns its own background alcohol_ok write).
+function ProfileEditDrinks({ back, profile, onUpdate }: { back: () => void; profile: ProfileType | null; onUpdate: (updates: Partial<ProfileType>) => Promise<void> }) {
+  const initialVal = profile?.drink_preference || "";
+  const [val, setVal] = useState(initialVal);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const inputBase: CSSProperties = {
+    width: "100%",
+    background: "rgba(35,60,0,0.05)",
+    border: "1px solid rgba(35,60,0,0.12)",
+    borderRadius: 12,
+    padding: "12px 14px",
+    fontFamily: "'Inter', sans-serif",
+    fontSize: 16,
+    color: "#233C00",
+    outline: "none",
+    lineHeight: 1.6,
+    boxSizing: "border-box",
+  };
+
+  const handleSave = async () => {
+    if (val !== initialVal) {
+      if (!profile?.id) {
+        console.error("ProfileEditDrinks: cannot save, no profile id");
+      } else {
+        setIsSaving(true);
+        try {
+          await saveDrinkPreference(val, onUpdate, profile.id);
+        } finally {
+          setIsSaving(false);
+        }
+      }
+    }
+    back();
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#FAF7F2" }}>
+      <div style={{
+        display: "grid", gridTemplateColumns: "44px 1fr 44px", alignItems: "center",
+        padding: "20px 16px 14px",
+      }}>
+        <button onClick={back} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(35,60,0,0.6)", fontSize: 22, padding: 0, textAlign: "left" }}>‹</button>
+        <div style={{ textAlign: "center", fontFamily: "'Inter', sans-serif", fontSize: 20, fontWeight: 700, textTransform: "uppercase", color: "#233C00" }}>
+          What you like to drink
+        </div>
+        <div />
+      </div>
+      <div style={{ flex: 1, padding: "12px 24px 24px", display: "flex", flexDirection: "column" }}>
+        <textarea
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          placeholder="Wine, cocktails, tea, fizzy stuff — whatever you reach for."
+          style={{ ...inputBase, height: "45%", resize: "none" }}
+        />
+        <div style={{ flex: 1 }} />
+        <button
+          disabled={isSaving}
+          onClick={handleSave}
+          style={{
+            background: "#233C00", color: "#FAF7F2", border: "none",
+            borderRadius: 100, padding: "14px 0",
+            fontFamily: "'Inter', sans-serif", fontSize: 12, fontWeight: 500,
+            letterSpacing: "0.12em", textTransform: "uppercase",
+            width: "100%", cursor: isSaving ? "default" : "pointer",
+            opacity: isSaving ? 0.6 : 1,
+          }}
+        >
+          {isSaving ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function ProfileEdit({ fieldKey, back, profile, onUpdate }: { fieldKey: FieldKey; back: () => void; profile: ProfileType | null; onUpdate: (updates: Partial<ProfileType>) => Promise<void> }) {
   if (fieldKey === "identity") {
     return <ProfileEditIdentity back={back} profile={profile} onUpdate={onUpdate} />;
   }
   if (fieldKey === "constraints") {
     return <ProfileEditConstraints back={back} profile={profile} onUpdate={onUpdate} />;
+  }
+  if (fieldKey === "drinks") {
+    return <ProfileEditDrinks back={back} profile={profile} onUpdate={onUpdate} />;
   }
   const meta = FIELD_META[fieldKey];
   const storageKey = KEYS[fieldKey];
