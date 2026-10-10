@@ -112,14 +112,17 @@ const MAX_METHOD_CHARS = 1500;
 // profile's own free-text other[] terms. This block is a quality layer only
 // — filterPairings is the real enforcement boundary regardless of what this
 // text says.
-function buildAllergyBlock(allergies: StructuredAllergies | null | undefined): string {
+function buildAllergyBlock(allergies: StructuredAllergies | null | undefined, alcoholOk: boolean): string {
   const allergySet = resolveAllergenSet(allergies);
   const otherTerms = allergies?.other ?? [];
   if (allergySet.length === 0 && otherTerms.length === 0) return "";
 
   const allergenWords = [...allergySet.map((id) => BIG9_DISPLAY_NAMES[id]), ...otherTerms].join(", ");
+  const hiddenIngredientsSentence = alcoholOk
+    ? "This includes hidden ingredients (for example, beer contains wheat, cream liqueurs and lattes contain milk, many sours use egg white, a Bloody Mary contains fish)."
+    : "This includes hidden ingredients (for example, lattes and many smoothies contain milk, horchata can contain milk or nuts, orgeat syrup contains almonds).";
 
-  return `Allergies: never suggest a drink that contains or is traditionally made with ${allergenWords}. This includes hidden ingredients (for example, beer contains wheat, cream liqueurs and lattes contain milk, many sours use egg white, a Bloody Mary contains fish).`;
+  return `Allergies: never suggest a drink that contains or is traditionally made with ${allergenWords}. ${hiddenIngredientsSentence}`;
 }
 
 function buildMethodText(steps: RecipeStep[] | undefined): string {
@@ -175,9 +178,12 @@ function buildPairingsSystemPrompt(
   if (palate) tagLines.push(`<palate>${palate}</palate>`);
   const tagsBlock = tagLines.length > 0 ? `${recipeBlock}\n${tagLines.join("\n")}` : recipeBlock;
 
-  const allergyBlock = buildAllergyBlock(profile.allergies);
+  const allergyBlock = buildAllergyBlock(profile.allergies, alcoholOk);
   const excludeBlock =
     excludeNames.length > 0 ? `Suggest different drinks from these: ${excludeNames.join(", ")}.` : "";
+  const namingBullet = alcoholOk
+    ? `- Name drink styles or types (e.g. "a dry Riesling", "a smoky mezcal", "cold-brewed oolong"), never brands, producers, or where to buy.`
+    : `- Name drinks by what's in them (e.g. "cold-brewed oolong", "a tart cherry shrub"), never brands, producers, or where to buy.`;
 
   return `You suggest drinks to go with a home-cooked dish, like a friend who knows food and drink well and has real taste.
 
@@ -191,7 +197,7 @@ ${allergyBlock}
 
 How to choose:
 - Lead with what genuinely suits this dish: its flavors, richness, texture, and cooking method. Then lean toward the person's drink taste and food palate where the dish allows. A great pairing they wouldn't have reached for on their own is the point.
-- Name drink styles or types (e.g. "a dry Riesling", "a smoky mezcal", "cold-brewed oolong"), never brands, producers, or where to buy.
+${namingBullet}
 
 How to write "why":
 - Exactly one sentence on why this drink works with this dish.

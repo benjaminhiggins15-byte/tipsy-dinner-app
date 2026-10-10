@@ -11,7 +11,7 @@ import {
   type PairingsProfileRecord,
   type PairingsGenerationOverrides,
 } from "./pairingsGeneration";
-import type { PairingItem } from "./pairingsSafety";
+import { ALCOHOL_TERMS, type PairingItem } from "./pairingsSafety";
 import { ALL_BIG9_IDS, BIG9_DISPLAY_NAMES, type Big9Id } from "./allergyMap";
 
 let pass = 0;
@@ -777,6 +777,51 @@ async function run() {
     check("prompt content: empty drink_preference -> no <drink_preference> tag", capturedPrompt.includes("<drink_preference>"), false);
     check("prompt content: empty palate -> no <palate> tag", capturedPrompt.includes("<palate>"), false);
     check("prompt content: title is still present even when other tags are omitted", capturedPrompt.includes(`Title: ${recipe.title}`), true);
+  }
+
+  // -------------------------------------------------------------------------
+  // 16. Prompt content: non-drinker prompt (NULL allergies) contains no bare
+  //     alcohol-term words, except inside the "do not use names borrowed
+  //     from..." prohibition line (which names them deliberately, as things
+  //     to avoid).
+  // -------------------------------------------------------------------------
+  {
+    const recipe = makeRecipeRecord({ id: "recipe-16" });
+    const profile = makeProfileRecord({ alcohol_ok: false, allergies: null, drink_preference: null });
+
+    let capturedPrompt = "";
+    await getPairingsForRecipe(
+      "recipe-16",
+      "user-1",
+      makeOverrides(recipe, profile, {
+        callAI: async (systemPrompt) => {
+          capturedPrompt = systemPrompt;
+          return JSON.stringify(NON_DRINKER_ITEMS);
+        },
+      })
+    );
+
+    const PROHIBITION_LINE =
+      'Do not mention alcohol at all, and do not use names borrowed from cocktails, beer, or wine (no "virgin", "mocktail", "spritz", "mule", "sour", "ginger beer", "NA beer").';
+    check(
+      "prompt content: the naming-prohibition line is present verbatim",
+      capturedPrompt.includes(PROHIBITION_LINE),
+      true
+    );
+
+    const promptWithoutProhibitionLine = capturedPrompt.split(PROHIBITION_LINE).join("");
+
+    function wordBoundaryMatch(term: string, text: string): boolean {
+      const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+      return new RegExp(`\\b${escaped}\\b`, "i").test(text);
+    }
+
+    const leakedTerms = ALCOHOL_TERMS.filter((term) => wordBoundaryMatch(term, promptWithoutProhibitionLine));
+    check(
+      "prompt content: non-drinker prompt (NULL allergies) has no alcohol-term words outside the prohibition line",
+      leakedTerms,
+      []
+    );
   }
 
   console.log();
