@@ -212,8 +212,6 @@ export default function Profile({ back, openEdit, isTabRoot = false, onSignOut, 
         <div style={sectionLabel}>Your Kitchen</div>
         <Row title="Your palate" subtitle={trim30(profile?.palate || "")} onClick={() => openEdit("palate")} />
         <Row title="Inspiration" subtitle={trim30(profile?.inspiration || "")} onClick={() => openEdit("inspiration")} />
-
-        <div style={sectionLabel}>Drink Pairings</div>
         <ToggleRow
           title="Drink pairings"
           on={profile?.wants_pairings ?? false}
@@ -224,7 +222,6 @@ export default function Profile({ back, openEdit, isTabRoot = false, onSignOut, 
         {(profile?.wants_pairings ?? false) && (
           <Row title="What you like to drink" subtitle={trim30(profile?.drink_preference || "")} onClick={() => openEdit("drinks")} />
         )}
-
         {(() => {
           const { allergyText, dislikeText } = splitConstraintsForDisplay(profile?.constraints);
           return (
