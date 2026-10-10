@@ -58,6 +58,27 @@ const DRINK_CARRIER_TERMS: ReadonlyArray<{ term: string; big9: Big9Id }> = [
   { term: "malt", big9: "wheat" },
   { term: "barley", big9: "wheat" },
   { term: "kvass", big9: "wheat" },
+  // wheat beer styles — added together with their ALCOHOL_TERMS entries
+  // below (same list, same reasoning: a wheat allergy and a non-drinker
+  // status both need to catch these by name, not just by the bare "beer"
+  // fallback, since none of them contain the word "beer").
+  { term: "witbier", big9: "wheat" },
+  { term: "weissbier", big9: "wheat" },
+  { term: "weizen", big9: "wheat" },
+  { term: "wheat ale", big9: "wheat" },
+  { term: "lambic", big9: "wheat" },
+  { term: "gueuze", big9: "wheat" },
+  { term: "gose", big9: "wheat" },
+  { term: "saison", big9: "wheat" },
+  { term: "kolsch", big9: "wheat" },
+  { term: "bock", big9: "wheat" },
+  { term: "dunkel", big9: "wheat" },
+  { term: "tripel", big9: "wheat" },
+  { term: "dubbel", big9: "wheat" },
+  { term: "berliner weisse", big9: "wheat" },
+  { term: "radler", big9: "wheat" },
+  { term: "shandy", big9: "wheat" },
+  { term: "sour beer", big9: "wheat" },
 
   // milk
   { term: "baileys", big9: "milk" },
@@ -125,22 +146,51 @@ export const ALCOHOL_TERMS: readonly string[] = [
   "whisky", "bourbon", "scotch", "brandy", "cognac", "liqueur", "vermouth",
   "amaro", "aperol", "campari", "port", "sherry", "absinthe", "schnapps",
   "grappa", "hard seltzer", "sangria", "mimosa", "bellini",
+  // wheat beer styles (also carriers — see DRINK_CARRIER_TERMS above)
+  "witbier", "weissbier", "weizen", "wheat ale", "lambic", "gueuze",
+  "gose", "saison", "kolsch", "bock", "dunkel", "tripel", "dubbel",
+  "berliner weisse", "radler", "shandy", "sour beer",
+  // other spirits/drinks not already covered above
+  "pisco", "cachaca", "makgeolli", "pulque", "hard cider", "kombucha",
+  "old fashioned", "highball", "julep", "daiquiri", "mojito", "paloma",
+  "manhattan", "michelada", "bloody mary",
 ];
+
+// Strips combining diacritical marks after NFD decomposition, so an accented
+// spelling in AI output (e.g. "kölsch", "cachaça") matches the plain-ASCII
+// term in our lists ("kolsch", "cachaca") without needing an accented
+// duplicate entry for every term.
+function stripAccents(text: string): string {
+  return text.normalize("NFD").replace(/[̀-ͯ]/g, "");
+}
 
 // Word-boundary, case-insensitive test. Multi-word terms match across
 // run-on whitespace the same way allergyMap.ts's own key-matching does
 // (`key.replace(/\s+/g, "\\s+")`). Escapes regex metacharacters defensively —
 // none of the configured terms currently need it, but a future addition
-// might.
+// might. Accepts an optional trailing "s" (simple plural — "beers", "red
+// wines", "IPAs", "sours") without loosening the boundary check that already
+// keeps "ginger" from matching "gin", "kale" from matching "ale", and
+// "rosemary" from matching "rum" — the boundary failure in those cases is at
+// the START of the match, which an optional trailing "s" never affects. Both
+// the term and the text are accent-stripped first.
 function wordBoundaryMatch(term: string, text: string): boolean {
-  const escaped = term
+  const escaped = stripAccents(term)
     .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
     .replace(/\s+/g, "\\s+");
-  return new RegExp(`\\b${escaped}\\b`, "i").test(text);
+  return new RegExp(`\\b${escaped}s?\\b`, "i").test(stripAccents(text));
 }
 
 function matchesAnyTerm(text: string, terms: readonly string[]): boolean {
   return terms.some((term) => wordBoundaryMatch(term, text));
+}
+
+function matchesAnyTermExcluding(
+  text: string,
+  terms: readonly string[],
+  exemptTerms: ReadonlySet<string>
+): boolean {
+  return terms.some((term) => !exemptTerms.has(term) && wordBoundaryMatch(term, text));
 }
 
 function matchesCarrierForAllergens(text: string, allergySet: ReadonlySet<Big9Id>): boolean {
@@ -148,6 +198,26 @@ function matchesCarrierForAllergens(text: string, allergySet: ReadonlySet<Big9Id
   return DRINK_CARRIER_TERMS.some(
     ({ term, big9 }) => allergySet.has(big9) && wordBoundaryMatch(term, text)
   );
+}
+
+function matchesCarrierForAllergensExcluding(
+  text: string,
+  allergySet: ReadonlySet<Big9Id>,
+  exemptTerms: ReadonlySet<string>
+): boolean {
+  if (allergySet.size === 0) return false;
+  return DRINK_CARRIER_TERMS.some(
+    ({ term, big9 }) => allergySet.has(big9) && !exemptTerms.has(term) && wordBoundaryMatch(term, text)
+  );
+}
+
+// Finds which terms from a list already appear in the recipe's own text —
+// these are exempted when the SAME term shows up in a pairing's "why"
+// sentence (e.g. a red-wine braise's "why" mentioning "wine", or a shrimp
+// taco's "why" mentioning "shrimp"). The drink NAME is never run through
+// this exemption — see filterPairings below.
+function termsPresentIn(terms: readonly string[], text: string): Set<string> {
+  return new Set(terms.filter((term) => wordBoundaryMatch(term, text)));
 }
 
 export interface PairingItem {
@@ -165,6 +235,17 @@ export interface FilterPairingsOptions {
   // Big-9 ids) — filterPairings itself does no allergy-record parsing.
   allergySet: Big9Id[];
   otherAllergyTerms?: string[];
+  // The recipe's own text (title + description + ingredients + steps).
+  // Used ONLY to exempt a pairing's "why" sentence from a hit that the
+  // recipe's own text already triggers for the same allergen id / alcohol
+  // term / other[] term (e.g. "shrimp" in the why of a shrimp-taco pairing,
+  // or "wine" in the why of a red-wine braise) — the AI is allowed to say
+  // why a drink matches the dish without that matching language itself
+  // being treated as a new hit. The drink NAME gets no such exemption: a
+  // name match is always enforced regardless of what the recipe contains.
+  // Optional/defaults to "" so existing callers with no recipe text behave
+  // exactly as before (no exemptions computed).
+  recipeText?: string;
 }
 
 export interface FilterPairingsResult {
@@ -182,35 +263,61 @@ function isWellFormedPairingItem(value: unknown): value is PairingItem {
   );
 }
 
-function isAlcoholTextMatch(item: PairingItem): boolean {
-  return matchesAnyTerm(`${item.name} ${item.why}`, ALCOHOL_TERMS);
+function itemHasAlcoholTextHit(item: PairingItem, exemptAlcoholTerms: ReadonlySet<string>): boolean {
+  return (
+    matchesAnyTerm(item.name, ALCOHOL_TERMS) ||
+    matchesAnyTermExcluding(item.why, ALCOHOL_TERMS, exemptAlcoholTerms)
+  );
 }
 
 // Drops malformed items, then applies the alcohol gate and the three-source
 // allergen scan ((a) shared Big-9 free-text scan, reused from allergyMap.ts;
 // (b) the pairings-only drink-carrier list above; (c) the user's own free-
-// text "other" allergy terms) to name+why. Keeps at most the first 4
-// survivors, in input order.
+// text "other" allergy terms) to name and why SEPARATELY (never combined):
+// a hit in the NAME is always enforced; a hit in the WHY is ignored if the
+// recipe's own text already triggers the same allergen id / alcohol term /
+// other[] term (see FilterPairingsOptions.recipeText). Keeps at most the
+// first 4 survivors, in input order.
 export function filterPairings(
   items: unknown[],
   options: FilterPairingsOptions
 ): FilterPairingsResult {
-  const { alcoholOk, allergySet, otherAllergyTerms = [] } = options;
+  const { alcoholOk, allergySet, otherAllergyTerms = [], recipeText = "" } = options;
   const allergySetSet = new Set(allergySet);
   const survivors: PairingItem[] = [];
 
+  const recipeAllergenIds = new Set(
+    scanFreeTextForBig9(recipeText, allergySet, "recipe").map((hit) => hit.allergen)
+  );
+  const exemptAlcoholTerms = termsPresentIn(ALCOHOL_TERMS, recipeText);
+  const exemptCarrierTerms = termsPresentIn(
+    DRINK_CARRIER_TERMS.map((c) => c.term),
+    recipeText
+  );
+  const exemptOtherTerms = termsPresentIn(otherAllergyTerms, recipeText);
+
   for (const raw of items) {
     if (!isWellFormedPairingItem(raw)) continue;
-    const combinedText = `${raw.name} ${raw.why}`;
 
     if (alcoholOk !== true) {
       if (raw.is_alcoholic === true) continue;
-      if (matchesAnyTerm(combinedText, ALCOHOL_TERMS)) continue;
+      if (matchesAnyTerm(raw.name, ALCOHOL_TERMS)) continue;
+      if (matchesAnyTermExcluding(raw.why, ALCOHOL_TERMS, exemptAlcoholTerms)) continue;
     }
 
-    if (scanFreeTextForBig9(combinedText, allergySet, "pairing").length > 0) continue;
-    if (matchesCarrierForAllergens(combinedText, allergySetSet)) continue;
-    if (otherAllergyTerms.length > 0 && matchesAnyTerm(combinedText, otherAllergyTerms)) continue;
+    if (scanFreeTextForBig9(raw.name, allergySet, "pairing-name").length > 0) continue;
+    const whyAllergenHits = scanFreeTextForBig9(raw.why, allergySet, "pairing-why").filter(
+      (hit) => !recipeAllergenIds.has(hit.allergen)
+    );
+    if (whyAllergenHits.length > 0) continue;
+
+    if (matchesCarrierForAllergens(raw.name, allergySetSet)) continue;
+    if (matchesCarrierForAllergensExcluding(raw.why, allergySetSet, exemptCarrierTerms)) continue;
+
+    if (otherAllergyTerms.length > 0) {
+      if (matchesAnyTerm(raw.name, otherAllergyTerms)) continue;
+      if (matchesAnyTermExcluding(raw.why, otherAllergyTerms, exemptOtherTerms)) continue;
+    }
 
     survivors.push(raw);
     if (survivors.length >= 4) break;
@@ -219,7 +326,7 @@ export function filterPairings(
   let complete = survivors.length === 4;
   if (complete && alcoholOk === true) {
     const hasNonAlcoholic = survivors.some(
-      (item) => item.is_alcoholic === false && !isAlcoholTextMatch(item)
+      (item) => item.is_alcoholic === false && !itemHasAlcoholTextHit(item, exemptAlcoholTerms)
     );
     if (!hasNonAlcoholic) complete = false;
   }

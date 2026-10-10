@@ -460,7 +460,26 @@ function resolveDeps(overrides: PairingsGenerationOverrides) {
   };
 }
 
-function buildFilterOptions(profile: PairingsProfileRecord): FilterPairingsOptions {
+// recipeText reuses the exact same buildIngredientsText/buildMethodText
+// blocks the system prompt itself is built from (not a second extraction),
+// so "what the recipe's own text contains" for the why-sentence exemption
+// (see FilterPairingsOptions.recipeText in pairingsSafety.ts) always matches
+// what the AI was actually shown.
+function buildRecipeTextForFilter(recipe: PairingsFingerprintRecipeContent): string {
+  return [
+    recipe.title,
+    recipe.description?.trim() ?? "",
+    buildIngredientsText(recipe.ingredients),
+    buildMethodText(recipe.steps),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function buildFilterOptions(
+  recipe: PairingsFingerprintRecipeContent,
+  profile: PairingsProfileRecord
+): FilterPairingsOptions {
   return {
     // alcohol_ok NULL is treated as not-alcohol-ok everywhere it's read —
     // filterPairings itself already fails closed on anything other than
@@ -469,6 +488,7 @@ function buildFilterOptions(profile: PairingsProfileRecord): FilterPairingsOptio
     alcoholOk: profile.alcohol_ok,
     allergySet: resolveAllergenSet(profile.allergies),
     otherAllergyTerms: profile.allergies?.other ?? [],
+    recipeText: buildRecipeTextForFilter(recipe),
   };
 }
 
@@ -516,7 +536,7 @@ export async function getPairingsForRecipe(
       palate: profile.palate,
     };
     const currentFingerprint = computePairingsFingerprint(recipe, profileInputs);
-    const filterOptions = buildFilterOptions(profile);
+    const filterOptions = buildFilterOptions(recipe, profile);
 
     if (recipe.pairings !== null && recipe.pairings_fingerprint === currentFingerprint) {
       const cachedItems = Array.isArray(recipe.pairings) ? recipe.pairings : [];
@@ -569,7 +589,7 @@ export async function regeneratePairings(
       palate: profile.palate,
     };
     const currentFingerprint = computePairingsFingerprint(recipe, profileInputs);
-    const filterOptions = buildFilterOptions(profile);
+    const filterOptions = buildFilterOptions(recipe, profile);
 
     const currentNames = Array.isArray(recipe.pairings)
       ? (recipe.pairings as unknown[])

@@ -193,6 +193,137 @@ check(
   check('other[] term "mustard" drops the matching item, keeps the rest', names(result), ["Margarita"]);
 }
 
+// --- Witbier: new wheat-carrier + alcohol-term entries ---
+check(
+  "witbier dropped for a wheat allergy",
+  names(filterPairings(
+    [{ name: "A crisp Witbier", why: "A Belgian wheat beer with citrus notes", is_alcoholic: true }],
+    { alcoholOk: true, allergySet: ["wheat"] }
+  )),
+  []
+);
+check(
+  "witbier dropped for a non-drinker (mislabeled is_alcoholic:false, caught by name text)",
+  names(filterPairings(
+    [{ name: "A Belgian-style Witbier", why: "Citrusy and light, a classic wheat beer style", is_alcoholic: false }],
+    { alcoholOk: false, allergySet: [] }
+  )),
+  []
+);
+
+// --- Plurals ---
+check(
+  '"IPAs" caught (plural) for a non-drinker',
+  names(filterPairings(
+    [{ name: "Flight of IPAs", why: "Hoppy and citrus-forward", is_alcoholic: false }],
+    { alcoholOk: false, allergySet: [] }
+  )),
+  []
+);
+check(
+  '"red wines" caught (plural) for a non-drinker',
+  names(filterPairings(
+    [{ name: "A Few Red Wines", why: "Robust and fruit-forward", is_alcoholic: false }],
+    { alcoholOk: false, allergySet: [] }
+  )),
+  []
+);
+
+// --- New bare alcohol term: kombucha ---
+check(
+  '"kombucha" dropped for a non-drinker',
+  names(filterPairings(
+    [{ name: "Ginger Kombucha", why: "Tangy and fizzy", is_alcoholic: false }],
+    { alcoholOk: false, allergySet: [] }
+  )),
+  []
+);
+
+// --- False-positive guard still holds after pluralization change ---
+check(
+  '"Rosemary" not matched as "rum"',
+  names(filterPairings(
+    [{ name: "Rosemary Lemonade", why: "A fresh, herbal, non-alcoholic cooler", is_alcoholic: false }],
+    { alcoholOk: false, allergySet: [] }
+  )),
+  ["Rosemary Lemonade"]
+);
+
+// --- Accent normalization ---
+check(
+  '"Kölsch" matches "kolsch" wheat carrier (accent-stripped)',
+  names(filterPairings(
+    [{ name: "A crisp Kölsch", why: "Light and bready", is_alcoholic: true }],
+    { alcoholOk: true, allergySet: ["wheat"] }
+  )),
+  []
+);
+check(
+  '"Cachaça" matches "cachaca" alcohol term (accent-stripped, mislabeled is_alcoholic:false)',
+  names(filterPairings(
+    [{ name: "Sparkling Cachaça Spritz", why: "Light and citrusy", is_alcoholic: false }],
+    { alcoholOk: false, allergySet: [] }
+  )),
+  []
+);
+
+// --- Recipe-text scan scope: WHY is exempted for a hit the recipe's own
+// text already triggers; NAME never is ---
+{
+  const shrimpTacoText =
+    "Spicy Shrimp Tacos with Lime Slaw. Charred chili-lime shrimp with a bright lime-cabbage slaw. " +
+    "1 lb large shrimp, peeled and deveined. Season and sear the shrimp until charred.";
+  const nullAllergyAllergens = resolveAllergenSet(null); // fail-closed to all nine, includes shellfish
+
+  check(
+    'shrimp-taco why mentioning "shrimp" survives for a NULL-allergy user',
+    names(filterPairings(
+      [{
+        name: "Pineapple Agua Fresca",
+        why: "Its tropical sweetness complements the charred shrimp and bright lime slaw",
+        is_alcoholic: false,
+      }],
+      { alcoholOk: false, allergySet: nullAllergyAllergens, recipeText: shrimpTacoText }
+    )),
+    ["Pineapple Agua Fresca"]
+  );
+  check(
+    'a drink NAMED "Clamato Cooler" is still dropped for a NULL-allergy user on the same recipe',
+    names(filterPairings(
+      [{ name: "Clamato Cooler", why: "A savory tomato-based refresher", is_alcoholic: false }],
+      { alcoholOk: false, allergySet: nullAllergyAllergens, recipeText: shrimpTacoText }
+    )),
+    []
+  );
+}
+
+{
+  const shortRibText =
+    "Braised Short Rib with Red Wine. Bone-in short ribs braised in red wine and beef stock. " +
+    "2 cups dry red wine. Deglaze with the red wine and simmer until reduced.";
+
+  check(
+    'red-wine-braise why mentioning "wine" survives for a non-drinker',
+    names(filterPairings(
+      [{
+        name: "Tart Cherry Shrub",
+        why: "Its deep berry notes echo the red wine in the braising liquid",
+        is_alcoholic: false,
+      }],
+      { alcoholOk: false, allergySet: [], recipeText: shortRibText }
+    )),
+    ["Tart Cherry Shrub"]
+  );
+  check(
+    'a drink NAMED "Mulled Wine" is still dropped for a non-drinker on the same recipe',
+    names(filterPairings(
+      [{ name: "Mulled Wine", why: "Warm spices mirror the braise's long-cooked depth", is_alcoholic: false }],
+      { alcoholOk: false, allergySet: [], recipeText: shortRibText }
+    )),
+    []
+  );
+}
+
 console.log();
 console.log("=".repeat(80));
 console.log(`SUMMARY: ${pass} passed, ${fail} failed out of ${pass + fail} tests`);
