@@ -3,13 +3,18 @@
 // safety filter (pairingsSafety.ts) — no UI, no screen wiring here.
 //
 // All AI and DB access is reachable only through the `overrides` parameter
-// of getPairingsForRecipe, mirroring saveDrinkPreference's overrides
-// convention in data.ts: production call sites get the real fetch/Supabase
-// defaults for free; tests inject fakes and never touch either.
+// of getPairingsForRecipe/regeneratePairings, mirroring saveDrinkPreference's
+// overrides convention in data.ts: production call sites get the real
+// fetch/Supabase defaults for free; tests inject fakes and never touch
+// either.
+//
+// Hard rule: NO PARTIAL RESULTS, EVER. A caller only ever sees a complete,
+// filtered, exactly-4-item set, or a "failed"/"off" status — never a
+// shrunken or unfiltered one, cached or fresh.
 import { supabase } from "../lib/supabase";
 import { type RecipeStep, normalizeStep, parseSSEStream } from "./data";
 import { type Big9Id, type StructuredAllergies, BIG9_DISPLAY_NAMES } from "./allergyMap";
-import { filterPairings, resolveAllergenSet, type PairingItem } from "./pairingsSafety";
+import { filterPairings, resolveAllergenSet, type PairingItem, type FilterPairingsOptions } from "./pairingsSafety";
 
 // ---------------------------------------------------------------------------
 // Fingerprint
@@ -97,11 +102,17 @@ function allergyBlockForPrompt(allergies: StructuredAllergies | null | undefined
 
 // Quality layer only — NOT the enforcement boundary. filterPairings (the
 // deterministic, non-AI backstop) always runs on this output before it is
-// trusted or persisted, same two-layer posture as Build/cook-chat's
-// prompt-level salience + scanRecipeDraftForBig9 backstop.
+// trusted, retried-around, or persisted, same two-layer posture as
+// Build/cook-chat's prompt-level salience + scanRecipeDraftForBig9 backstop.
+//
+// `excludeNames` serves two callers with one mechanism: a retry after a
+// failed/incomplete attempt (avoid repeating what was just rejected) and
+// regeneratePairings (avoid repeating what's already cached) both just need
+// "don't suggest these names again" — the reason doesn't change the ask.
 function buildPairingsSystemPrompt(
   recipe: PairingsFingerprintRecipeContent,
-  profile: PairingsFingerprintProfileInputs
+  profile: PairingsFingerprintProfileInputs,
+  excludeNames: string[] = []
 ): string {
   const ingredientLines = (recipe.ingredients ?? [])
     .map((i) => `- ${i.qty ? `${i.qty} ` : ""}${i.name}`)
@@ -122,7 +133,7 @@ ${drinkPreference ? `This person's stated drink taste: "${drinkPreference}". Lea
 ${alcoholOk ? drinkerInstructions : nonDrinkerInstructions}
 ${allergyBlockForPrompt(profile.allergies)}
 For every pairing, lead with how it fits THIS dish and this person's taste — never a generic or interchangeable blurb. Name drink styles, not brands (e.g. "a dry Riesling," not a specific label). Write one warm, economical sentence of "why" per pairing — no more.
-
+${excludeNames.length > 0 ? `\nDo not suggest any of the following drinks — give different options instead: ${excludeNames.join(", ")}.\n` : ""}
 Respond with ONLY raw JSON, nothing else — no preamble, no explanation, no markdown code fences. A JSON array of exactly 4 objects, each shaped:
 {"name": "...", "why": "...", "is_alcoholic": true}`;
 }
@@ -160,6 +171,7 @@ export interface PairingsRecipeRecord {
 }
 
 export interface PairingsProfileRecord {
+  wants_pairings: boolean | null;
   drink_preference: string | null;
   alcohol_ok: boolean | null;
   allergies: StructuredAllergies | null;
@@ -212,13 +224,14 @@ const fetchRecipeFromDb: FetchPairingsRecipe = async (recipeId, userId) => {
 const fetchProfileFromDb: FetchPairingsProfile = async (userId) => {
   const { data, error } = await supabase
     .from("profiles")
-    .select("drink_preference, alcohol_ok, allergies")
+    .select("wants_pairings, drink_preference, alcohol_ok, allergies")
     .eq("id", userId)
     .single();
 
   if (error) throw error;
 
   return {
+    wants_pairings: data.wants_pairings ?? null,
     drink_preference: data.drink_preference ?? null,
     alcohol_ok: data.alcohol_ok ?? null,
     allergies: (data.allergies ?? null) as StructuredAllergies | null,
@@ -270,6 +283,57 @@ const persistPairingsToDb: PersistPairings = async (recipeId, userId, pairings, 
 };
 
 // ---------------------------------------------------------------------------
+// Retry-bounded generation (shared by getPairingsForRecipe + regeneratePairings)
+// ---------------------------------------------------------------------------
+
+const MAX_GENERATION_ATTEMPTS = 3;
+
+// Generates up to MAX_GENERATION_ATTEMPTS times, filtering every attempt.
+// Returns the first COMPLETE filtered result; returns null if every attempt
+// was incomplete (a malformed/unparseable response counts as an attempt,
+// since parsePairingsResponse resolves it to [] rather than throwing).
+// Never returns a partial/shrunken set — null means "all 3 attempts failed",
+// full stop.
+async function generatePairingsWithRetries(
+  recipe: PairingsFingerprintRecipeContent,
+  profileInputs: PairingsFingerprintProfileInputs,
+  filterOptions: FilterPairingsOptions,
+  callAI: CallPairingsAI,
+  userId: string,
+  initialExcludeNames: string[] = []
+): Promise<{ items: PairingItem[] } | null> {
+  const excludeNames = [...initialExcludeNames];
+
+  for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt++) {
+    const systemPrompt = buildPairingsSystemPrompt(recipe, profileInputs, excludeNames);
+
+    let parsedItems: unknown[];
+    try {
+      const rawResponse = await callAI(systemPrompt, userId);
+      parsedItems = parsePairingsResponse(rawResponse);
+    } catch (error) {
+      console.error("Pairings generation: AI call failed", error);
+      parsedItems = [];
+    }
+
+    const filtered = filterPairings(parsedItems, filterOptions);
+    if (filtered.complete) {
+      return { items: filtered.items };
+    }
+
+    const survivorNames = new Set(filtered.items.map((i) => i.name));
+    for (const raw of parsedItems) {
+      if (raw && typeof raw === "object" && typeof (raw as Record<string, unknown>).name === "string") {
+        const name = (raw as Record<string, unknown>).name as string;
+        if (!survivorNames.has(name) && !excludeNames.includes(name)) excludeNames.push(name);
+      }
+    }
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Orchestration
 // ---------------------------------------------------------------------------
 
@@ -280,44 +344,78 @@ export interface PairingsGenerationOverrides {
   persistPairings?: PersistPairings;
 }
 
-export interface PairingsGenerationResult {
-  items: PairingItem[];
-  complete: boolean;
-}
+// No other shapes, and no "complete" flag — a caller that gets "ok" can
+// trust `items` is always the full, filtered 4-item set.
+export type PairingsOutcome =
+  | { status: "ok"; items: PairingItem[] }
+  | { status: "off" }
+  | { status: "failed" };
 
 // Dedupes concurrent requests for the same recipe's pairings so two
-// near-simultaneous opens of the Pairings tab can never trigger two AI
-// calls — same shared-in-flight-promise shape as Onboarding's
-// onboardingHandoffPromiseRef/runHandoffOnce, keyed per recipe here since
-// more than one recipe's pairings can legitimately be in flight at once.
-const inFlightByRecipeId = new Map<string, Promise<PairingsGenerationResult>>();
+// near-simultaneous opens of the Pairings tab (or a get racing a regenerate)
+// can never trigger two AI calls — same shared-in-flight-promise shape as
+// Onboarding's onboardingHandoffPromiseRef/runHandoffOnce, keyed per recipe
+// here since more than one recipe's pairings can legitimately be in flight
+// at once. Shared between getPairingsForRecipe and regeneratePairings.
+const inFlightByRecipeId = new Map<string, Promise<PairingsOutcome>>();
 
-// The single entry point: read the recipe's cached pairings + current
-// profile inputs fresh from the DB (never from passed-in app state),
-// compute today's fingerprint, and either re-filter the cached result (fast
-// path — also acts as a defense-in-depth re-check in case the safety filter
-// itself has since changed) or call the AI and persist a fresh one (the
-// fingerprint-mismatch path — this is what actually replaces stale pairings
-// when allergies/preferences change). Every return path, cached or fresh,
-// passes through filterPairings before the caller ever sees it.
+function resolveDeps(overrides: PairingsGenerationOverrides) {
+  return {
+    fetchRecipe: overrides.fetchRecipe ?? fetchRecipeFromDb,
+    fetchProfile: overrides.fetchProfile ?? fetchProfileFromDb,
+    callAI: overrides.callAI ?? callPairingsAIViaEdgeFunction,
+    persistPairings: overrides.persistPairings ?? persistPairingsToDb,
+  };
+}
+
+function buildFilterOptions(profile: PairingsProfileRecord): FilterPairingsOptions {
+  return {
+    // alcohol_ok NULL is treated as not-alcohol-ok everywhere it's read —
+    // filterPairings itself already fails closed on anything other than
+    // `true` (`if (alcoholOk !== true) { ... }`), so passing the raw
+    // (possibly null) value through here is correct, not an oversight.
+    alcoholOk: profile.alcohol_ok,
+    allergySet: resolveAllergenSet(profile.allergies),
+    otherAllergyTerms: profile.allergies?.other ?? [],
+  };
+}
+
+function runExclusive(recipeId: string, task: () => Promise<PairingsOutcome>): Promise<PairingsOutcome> {
+  const existing = inFlightByRecipeId.get(recipeId);
+  if (existing) return existing;
+
+  const run = task();
+  inFlightByRecipeId.set(recipeId, run);
+  return run.finally(() => {
+    inFlightByRecipeId.delete(recipeId);
+  });
+}
+
+// The single read-path entry point: gated on wants_pairings, then reads the
+// recipe's cached pairings + current profile inputs fresh from the DB
+// (never from passed-in app state), computes today's fingerprint, and
+// either re-filters the cached result (fast path — also acts as a
+// defense-in-depth re-check in case the safety filter itself has since
+// changed) or generates a fresh one (fingerprint mismatch, no cache yet, OR
+// the cached set no longer passes the re-filter — all three are treated as
+// a miss). A cache hit that fails the re-filter is NEVER returned shrunken;
+// it falls through to full regeneration like any other miss.
 export async function getPairingsForRecipe(
   recipeId: string,
   userId: string,
   overrides: PairingsGenerationOverrides = {}
-): Promise<PairingsGenerationResult> {
-  const existing = inFlightByRecipeId.get(recipeId);
-  if (existing) return existing;
-
-  const run = (async (): Promise<PairingsGenerationResult> => {
-    const fetchRecipe = overrides.fetchRecipe ?? fetchRecipeFromDb;
-    const fetchProfile = overrides.fetchProfile ?? fetchProfileFromDb;
-    const callAI = overrides.callAI ?? callPairingsAIViaEdgeFunction;
-    const persistPairings = overrides.persistPairings ?? persistPairingsToDb;
+): Promise<PairingsOutcome> {
+  return runExclusive(recipeId, async () => {
+    const { fetchRecipe, fetchProfile, callAI, persistPairings } = resolveDeps(overrides);
 
     const [recipe, profile] = await Promise.all([
       fetchRecipe(recipeId, userId),
       fetchProfile(userId),
     ]);
+
+    if (profile.wants_pairings !== true) {
+      return { status: "off" };
+    }
 
     const profileInputs: PairingsFingerprintProfileInputs = {
       drinkPreference: profile.drink_preference,
@@ -325,32 +423,84 @@ export async function getPairingsForRecipe(
       allergies: profile.allergies,
     };
     const currentFingerprint = computePairingsFingerprint(recipe, profileInputs);
-
-    const filterOptions = {
-      alcoholOk: profile.alcohol_ok,
-      allergySet: resolveAllergenSet(profile.allergies),
-      otherAllergyTerms: profile.allergies?.other ?? [],
-    };
+    const filterOptions = buildFilterOptions(profile);
 
     if (recipe.pairings !== null && recipe.pairings_fingerprint === currentFingerprint) {
       const cachedItems = Array.isArray(recipe.pairings) ? recipe.pairings : [];
-      return filterPairings(cachedItems, filterOptions);
+      const refiltered = filterPairings(cachedItems, filterOptions);
+      if (refiltered.complete) {
+        return { status: "ok", items: refiltered.items };
+      }
+      // Cache hit that fails the re-filter = miss. Fall through to generate.
     }
 
-    const systemPrompt = buildPairingsSystemPrompt(recipe, profileInputs);
-    const rawResponse = await callAI(systemPrompt, userId);
-    const parsedItems = parsePairingsResponse(rawResponse);
-    const filtered = filterPairings(parsedItems, filterOptions);
+    const generated = await generatePairingsWithRetries(recipe, profileInputs, filterOptions, callAI, userId);
+    if (!generated) {
+      return { status: "failed" };
+    }
 
-    await persistPairings(recipeId, userId, filtered.items, currentFingerprint);
+    await persistPairings(recipeId, userId, generated.items, currentFingerprint);
+    return { status: "ok", items: generated.items };
+  });
+}
 
-    return filtered;
-  })();
+// User-initiated "give me different ones." Ignores the cache entirely,
+// tells the AI to avoid the currently-cached names, and runs the same
+// filter/retry rules as getPairingsForRecipe. On success, overwrites the
+// cache. On failure, writes nothing — the existing cached pairings are left
+// exactly as they were (still usable on the next getPairingsForRecipe call,
+// provided they still pass filterPairings; if they no longer would, that
+// call's own cache-hit-fails-refilter=miss rule regenerates them then,
+// which is the correct self-healing behavior either way).
+export async function regeneratePairings(
+  recipeId: string,
+  userId: string,
+  overrides: PairingsGenerationOverrides = {}
+): Promise<PairingsOutcome> {
+  return runExclusive(recipeId, async () => {
+    const { fetchRecipe, fetchProfile, callAI, persistPairings } = resolveDeps(overrides);
 
-  inFlightByRecipeId.set(recipeId, run);
-  try {
-    return await run;
-  } finally {
-    inFlightByRecipeId.delete(recipeId);
-  }
+    const [recipe, profile] = await Promise.all([
+      fetchRecipe(recipeId, userId),
+      fetchProfile(userId),
+    ]);
+
+    if (profile.wants_pairings !== true) {
+      return { status: "off" };
+    }
+
+    const profileInputs: PairingsFingerprintProfileInputs = {
+      drinkPreference: profile.drink_preference,
+      alcoholOk: profile.alcohol_ok,
+      allergies: profile.allergies,
+    };
+    const currentFingerprint = computePairingsFingerprint(recipe, profileInputs);
+    const filterOptions = buildFilterOptions(profile);
+
+    const currentNames = Array.isArray(recipe.pairings)
+      ? (recipe.pairings as unknown[])
+          .map((item) =>
+            item && typeof item === "object" && typeof (item as Record<string, unknown>).name === "string"
+              ? ((item as Record<string, unknown>).name as string)
+              : null
+          )
+          .filter((name): name is string => name !== null)
+      : [];
+
+    const generated = await generatePairingsWithRetries(
+      recipe,
+      profileInputs,
+      filterOptions,
+      callAI,
+      userId,
+      currentNames
+    );
+
+    if (!generated) {
+      return { status: "failed" };
+    }
+
+    await persistPairings(recipeId, userId, generated.items, currentFingerprint);
+    return { status: "ok", items: generated.items };
+  });
 }
