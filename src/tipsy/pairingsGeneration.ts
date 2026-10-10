@@ -14,7 +14,7 @@
 import { supabase } from "../lib/supabase";
 import { type RecipeStep, normalizeStep, parseSSEStream } from "./data";
 import { type Big9Id, type StructuredAllergies, BIG9_DISPLAY_NAMES } from "./allergyMap";
-import { filterPairings, resolveAllergenSet, type PairingItem, type FilterPairingsOptions } from "./pairingsSafety";
+import { ALCOHOL_TERMS, filterPairings, resolveAllergenSet, type PairingItem, type FilterPairingsOptions } from "./pairingsSafety";
 
 // Note: BIG9_DISPLAY_NAMES is used below (allergy block of the system
 // prompt) — kept on the existing import line with Big9Id/StructuredAllergies.
@@ -106,6 +106,15 @@ const NON_DRINKER_BLOCK = `Suggest exactly 4 non-alcoholic pairings with real va
 
 const MAX_METHOD_CHARS = 1500;
 
+// Duplicated from pairingsSafety.ts's own (unexported) wordBoundaryMatch on
+// purpose, not shared — same precedent as canonicalizeAllergiesForFingerprint
+// above. Word-boundary, case-insensitive, same semantics as the safety
+// filter's own matching.
+function wordBoundaryMatch(term: string, text: string): boolean {
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+  return new RegExp(`\\b${escaped}\\b`, "i").test(text);
+}
+
 // Reuses the exact same resolved allergen set filterPairings enforces
 // (resolveAllergenSet: NULL -> all nine Big-9 ids, unparsed -> the same
 // deterministic text-scan backstop), written out as plain words, plus the
@@ -173,8 +182,17 @@ function buildPairingsSystemPrompt(
   if (method) recipeLines.push(`Method: ${method}`);
   const recipeBlock = `<recipe>\n${recipeLines.join("\n")}\n</recipe>`;
 
+  // For non-drinkers, a stated preference naming an alcoholic drink (e.g. "I
+  // used to love whiskey") is omitted entirely rather than handed to the AI
+  // — same word-boundary alcohol-term check the safety filter itself uses,
+  // so this stays a quality-layer choice, not a second enforcement path.
+  // Drinkers are unchanged: their stated preference is always included.
+  const includeDrinkPreference =
+    drinkPreference.length > 0 &&
+    (alcoholOk || !ALCOHOL_TERMS.some((term) => wordBoundaryMatch(term, drinkPreference)));
+
   const tagLines: string[] = [];
-  if (drinkPreference) tagLines.push(`<drink_preference>${drinkPreference}</drink_preference>`);
+  if (includeDrinkPreference) tagLines.push(`<drink_preference>${drinkPreference}</drink_preference>`);
   if (palate) tagLines.push(`<palate>${palate}</palate>`);
   const tagsBlock = tagLines.length > 0 ? `${recipeBlock}\n${tagLines.join("\n")}` : recipeBlock;
 

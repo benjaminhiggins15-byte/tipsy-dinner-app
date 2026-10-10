@@ -824,6 +824,83 @@ async function run() {
     );
   }
 
+  // -------------------------------------------------------------------------
+  // 17. drink_preference containing an alcohol term is omitted entirely for
+  //     non-drinkers; included unchanged for drinkers; included for
+  //     non-drinkers when it names no alcohol term.
+  // -------------------------------------------------------------------------
+  {
+    const recipe = makeRecipeRecord({ id: "recipe-17a" });
+    const profile = makeProfileRecord({ alcohol_ok: false, drink_preference: "I used to love whiskey" });
+
+    let capturedPrompt = "";
+    await getPairingsForRecipe(
+      "recipe-17a",
+      "user-1",
+      makeOverrides(recipe, profile, {
+        callAI: async (systemPrompt) => {
+          capturedPrompt = systemPrompt;
+          return JSON.stringify(NON_DRINKER_ITEMS);
+        },
+      })
+    );
+
+    check(
+      "non-drinker drink_preference naming an alcohol term: <drink_preference> tag omitted",
+      capturedPrompt.includes("<drink_preference>"),
+      false
+    );
+    check(
+      'non-drinker drink_preference naming an alcohol term: "whiskey" appears nowhere in the prompt',
+      capturedPrompt.toLowerCase().includes("whiskey"),
+      false
+    );
+  }
+  {
+    const recipe = makeRecipeRecord({ id: "recipe-17b" });
+    const profile = makeProfileRecord({ alcohol_ok: false, drink_preference: "tea and sparkling water" });
+
+    let capturedPrompt = "";
+    await getPairingsForRecipe(
+      "recipe-17b",
+      "user-1",
+      makeOverrides(recipe, profile, {
+        callAI: async (systemPrompt) => {
+          capturedPrompt = systemPrompt;
+          return JSON.stringify(NON_DRINKER_ITEMS);
+        },
+      })
+    );
+
+    check(
+      "non-drinker drink_preference naming no alcohol term: <drink_preference> tag present",
+      capturedPrompt.includes("<drink_preference>tea and sparkling water</drink_preference>"),
+      true
+    );
+  }
+  {
+    const recipe = makeRecipeRecord({ id: "recipe-17c" });
+    const profile = makeProfileRecord({ alcohol_ok: true, drink_preference: "I love wine, but only red" });
+
+    let capturedPrompt = "";
+    await getPairingsForRecipe(
+      "recipe-17c",
+      "user-1",
+      makeOverrides(recipe, profile, {
+        callAI: async (systemPrompt) => {
+          capturedPrompt = systemPrompt;
+          return JSON.stringify(DRINKER_ITEMS);
+        },
+      })
+    );
+
+    check(
+      "drinker drink_preference naming an alcohol term: <drink_preference> tag present unchanged",
+      capturedPrompt.includes("<drink_preference>I love wine, but only red</drink_preference>"),
+      true
+    );
+  }
+
   console.log();
   console.log("=".repeat(80));
   console.log(`SUMMARY: ${pass} passed, ${fail} failed out of ${pass + fail} tests`);
