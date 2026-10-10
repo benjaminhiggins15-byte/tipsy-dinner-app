@@ -12,7 +12,7 @@ import {
   type PairingsGenerationOverrides,
 } from "./pairingsGeneration";
 import type { PairingItem } from "./pairingsSafety";
-import type { Big9Id } from "./allergyMap";
+import { ALL_BIG9_IDS, BIG9_DISPLAY_NAMES, type Big9Id } from "./allergyMap";
 
 let pass = 0;
 let fail = 0;
@@ -39,6 +39,7 @@ console.log();
 
 const baseRecipeContent = {
   title: "Spanish Pork",
+  description: "A slow-braised pork shoulder with smoked paprika.",
   ingredients: [{ name: "pork shoulder", qty: "2 lb" }, { name: "paprika", qty: "1 tbsp" }],
   steps: ["Sear the pork.", "Braise for two hours."],
 };
@@ -46,6 +47,7 @@ const baseProfileInputs = {
   drinkPreference: "red wine",
   alcoholOk: true,
   allergies: { big9: ["wheat", "egg"] as const, other: ["mustard"] } as any,
+  palate: "bold, savory flavors",
 };
 
 check(
@@ -96,6 +98,20 @@ check(
   false
 );
 
+check(
+  "fingerprint: changing the recipe description changes the fingerprint",
+  computePairingsFingerprint(baseRecipeContent, baseProfileInputs) ===
+    computePairingsFingerprint({ ...baseRecipeContent, description: "A quick weeknight pork chop." }, baseProfileInputs),
+  false
+);
+
+check(
+  "fingerprint: changing palate changes the fingerprint",
+  computePairingsFingerprint(baseRecipeContent, baseProfileInputs) ===
+    computePairingsFingerprint(baseRecipeContent, { ...baseProfileInputs, palate: "light, delicate flavors" }),
+  false
+);
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -104,6 +120,7 @@ function makeRecipeRecord(overrides: Partial<PairingsRecipeRecord> = {}): Pairin
   return {
     id: "recipe-1",
     title: "Spanish Pork",
+    description: "A slow-braised pork shoulder with smoked paprika.",
     ingredients: [{ name: "pork shoulder", qty: "2 lb" }],
     steps: ["Sear the pork.", "Braise for two hours."],
     pairings: null,
@@ -118,14 +135,20 @@ function makeProfileRecord(overrides: Partial<PairingsProfileRecord> = {}): Pair
     drink_preference: "red wine",
     alcohol_ok: true,
     allergies: { big9: [], other: [] },
+    palate: "bold, savory flavors",
     ...overrides,
   };
 }
 
 function fingerprintFor(recipe: PairingsRecipeRecord, profile: PairingsProfileRecord): string {
   return computePairingsFingerprint(
-    { title: recipe.title, ingredients: recipe.ingredients, steps: recipe.steps },
-    { drinkPreference: profile.drink_preference, alcoholOk: profile.alcohol_ok, allergies: profile.allergies }
+    { title: recipe.title, description: recipe.description, ingredients: recipe.ingredients, steps: recipe.steps },
+    {
+      drinkPreference: profile.drink_preference,
+      alcoholOk: profile.alcohol_ok,
+      allergies: profile.allergies,
+      palate: profile.palate,
+    }
   );
 }
 
@@ -595,6 +618,165 @@ async function run() {
       status: "ok",
       items: DRINKER_ITEMS,
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // 12. Prompt content: tags present, recipe text confined to <recipe>
+  // -------------------------------------------------------------------------
+  {
+    const recipe = makeRecipeRecord({
+      id: "recipe-12a",
+      title: "Braised Short Rib Supreme",
+      description: "A rich, slow-braised short rib with red wine jus.",
+      ingredients: [{ name: "beef short rib", qty: "3 lb" }],
+      steps: ["Sear the short rib until deeply browned.", "Braise in red wine for three hours."],
+    });
+    const profile = makeProfileRecord({ drink_preference: "I love bold reds", palate: "rich, savory flavors" });
+
+    let capturedPrompt = "";
+    await getPairingsForRecipe(
+      "recipe-12a",
+      "user-1",
+      makeOverrides(recipe, profile, {
+        callAI: async (systemPrompt) => {
+          capturedPrompt = systemPrompt;
+          return JSON.stringify(DRINKER_ITEMS);
+        },
+      })
+    );
+
+    check("prompt content: <recipe> opening tag present", capturedPrompt.includes("<recipe>"), true);
+    check("prompt content: </recipe> closing tag present", capturedPrompt.includes("</recipe>"), true);
+
+    const recipeStart = capturedPrompt.indexOf("<recipe>");
+    const recipeEnd = capturedPrompt.indexOf("</recipe>") + "</recipe>".length;
+    const insideRecipe = capturedPrompt.slice(recipeStart, recipeEnd);
+    const outsideRecipe = capturedPrompt.slice(0, recipeStart) + capturedPrompt.slice(recipeEnd);
+
+    check("prompt content: title appears inside <recipe>", insideRecipe.includes("Braised Short Rib Supreme"), true);
+    check("prompt content: title does NOT appear outside <recipe>", outsideRecipe.includes("Braised Short Rib Supreme"), false);
+    check("prompt content: description appears inside <recipe>", insideRecipe.includes("red wine jus"), true);
+    check("prompt content: description does NOT appear outside <recipe>", outsideRecipe.includes("red wine jus"), false);
+    check("prompt content: ingredient appears inside <recipe>", insideRecipe.includes("beef short rib"), true);
+    check("prompt content: ingredient does NOT appear outside <recipe>", outsideRecipe.includes("beef short rib"), false);
+    check("prompt content: method appears inside <recipe>", insideRecipe.includes("deeply browned"), true);
+    check("prompt content: method does NOT appear outside <recipe>", outsideRecipe.includes("deeply browned"), false);
+  }
+
+  // -------------------------------------------------------------------------
+  // 13. Prompt content: NULL allergies -> all nine allergen words; confirmed
+  //     -none -> no allergy block
+  // -------------------------------------------------------------------------
+  {
+    const recipe = makeRecipeRecord({ id: "recipe-13a" });
+    const profile = makeProfileRecord({ allergies: null });
+
+    let capturedPrompt = "";
+    await getPairingsForRecipe(
+      "recipe-13a",
+      "user-1",
+      makeOverrides(recipe, profile, {
+        callAI: async (systemPrompt) => {
+          capturedPrompt = systemPrompt;
+          return JSON.stringify(DRINKER_ITEMS);
+        },
+      })
+    );
+
+    check("prompt content: NULL allergies -> allergy block present", capturedPrompt.includes("Allergies:"), true);
+    check(
+      "prompt content: NULL allergies -> all nine Big-9 allergen words appear",
+      ALL_BIG9_IDS.every((id) => capturedPrompt.includes(BIG9_DISPLAY_NAMES[id])),
+      true
+    );
+  }
+  {
+    const recipe = makeRecipeRecord({ id: "recipe-13b" });
+    const profile = makeProfileRecord({ allergies: { big9: [], other: [] } });
+
+    let capturedPrompt = "";
+    await getPairingsForRecipe(
+      "recipe-13b",
+      "user-1",
+      makeOverrides(recipe, profile, {
+        callAI: async (systemPrompt) => {
+          capturedPrompt = systemPrompt;
+          return JSON.stringify(DRINKER_ITEMS);
+        },
+      })
+    );
+
+    check("prompt content: confirmed-none allergies -> no allergy block", capturedPrompt.includes("Allergies:"), false);
+  }
+
+  // -------------------------------------------------------------------------
+  // 14. Prompt content: drinker/non-drinker blocks are mutually exclusive
+  // -------------------------------------------------------------------------
+  const DRINKER_ONLY_PHRASE = "Always include at least 1 non-alcoholic option.";
+  const NON_DRINKER_ONLY_PHRASE = "Give each a descriptive, appetizing name based on what's in it";
+  {
+    const recipe = makeRecipeRecord({ id: "recipe-14a" });
+    const profile = makeProfileRecord({ alcohol_ok: true });
+
+    let capturedPrompt = "";
+    await getPairingsForRecipe(
+      "recipe-14a",
+      "user-1",
+      makeOverrides(recipe, profile, {
+        callAI: async (systemPrompt) => {
+          capturedPrompt = systemPrompt;
+          return JSON.stringify(DRINKER_ITEMS);
+        },
+      })
+    );
+
+    check("prompt content: drinker prompt contains the drinker block", capturedPrompt.includes(DRINKER_ONLY_PHRASE), true);
+    check("prompt content: drinker prompt does NOT contain the non-drinker block", capturedPrompt.includes(NON_DRINKER_ONLY_PHRASE), false);
+  }
+  {
+    const recipe = makeRecipeRecord({ id: "recipe-14b" });
+    const profile = makeProfileRecord({ alcohol_ok: false });
+
+    let capturedPrompt = "";
+    await getPairingsForRecipe(
+      "recipe-14b",
+      "user-1",
+      makeOverrides(recipe, profile, {
+        callAI: async (systemPrompt) => {
+          capturedPrompt = systemPrompt;
+          return JSON.stringify(NON_DRINKER_ITEMS);
+        },
+      })
+    );
+
+    check("prompt content: non-drinker prompt contains the non-drinker block", capturedPrompt.includes(NON_DRINKER_ONLY_PHRASE), true);
+    check("prompt content: non-drinker prompt does NOT contain the drinker block", capturedPrompt.includes(DRINKER_ONLY_PHRASE), false);
+  }
+
+  // -------------------------------------------------------------------------
+  // 15. Prompt content: empty description/palate/drink_preference are
+  //     omitted cleanly (no stray tag, no stray line)
+  // -------------------------------------------------------------------------
+  {
+    const recipe = makeRecipeRecord({ id: "recipe-15", description: "" });
+    const profile = makeProfileRecord({ drink_preference: null, palate: null });
+
+    let capturedPrompt = "";
+    await getPairingsForRecipe(
+      "recipe-15",
+      "user-1",
+      makeOverrides(recipe, profile, {
+        callAI: async (systemPrompt) => {
+          capturedPrompt = systemPrompt;
+          return JSON.stringify(DRINKER_ITEMS);
+        },
+      })
+    );
+
+    check("prompt content: empty description -> no Description: line", capturedPrompt.includes("Description:"), false);
+    check("prompt content: empty drink_preference -> no <drink_preference> tag", capturedPrompt.includes("<drink_preference>"), false);
+    check("prompt content: empty palate -> no <palate> tag", capturedPrompt.includes("<palate>"), false);
+    check("prompt content: title is still present even when other tags are omitted", capturedPrompt.includes(`Title: ${recipe.title}`), true);
   }
 
   console.log();
