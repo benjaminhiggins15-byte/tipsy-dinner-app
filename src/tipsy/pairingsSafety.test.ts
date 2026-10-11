@@ -119,6 +119,36 @@ check(
   )),
   []
 );
+check(
+  "milk allergy drops Spiced Chai (bare 'chai' carrier term)",
+  names(filterPairings(
+    [{ name: "Spiced Chai", why: "A warming, spiced tea drink", is_alcoholic: false }],
+    { alcoholOk: true, allergySet: ["milk"] }
+  )),
+  []
+);
+
+// --- Breakfast cap: more than 1 alcoholic survivor (by NAME) marks incomplete ---
+{
+  const items = [
+    { name: "Mimosa", why: "Bright and bubbly", is_alcoholic: true },
+    { name: "Bloody Mary", why: "Savory and bold", is_alcoholic: true },
+    { name: "Orange Juice", why: "Fresh and sweet", is_alcoholic: false },
+    { name: "Cold Brew", why: "Rich and smooth", is_alcoholic: false },
+  ];
+  const result = filterPairings(items, { alcoholOk: true, allergySet: [], breakfastCap: true });
+  check("breakfast cap: 2 alcoholic survivors -> complete is false", result.complete, false);
+}
+{
+  const items = [
+    { name: "Mimosa", why: "Bright and bubbly", is_alcoholic: true },
+    { name: "Orange Juice", why: "Fresh and sweet", is_alcoholic: false },
+    { name: "Cold Brew", why: "Rich and smooth", is_alcoholic: false },
+    { name: "Sparkling Water", why: "Clean and crisp", is_alcoholic: false },
+  ];
+  const result = filterPairings(items, { alcoholOk: true, allergySet: [], breakfastCap: true });
+  check("breakfast cap: 1 alcoholic survivor -> complete is true", result.complete, true);
+}
 
 // --- Allergen resolution (reused resolver) ---
 check("resolveAllergenSet(null) -> all nine Big-9 ids", [...resolveAllergenSet(null)].sort(), [...ALL_BIG9_IDS].sort());

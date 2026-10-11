@@ -102,9 +102,53 @@ export function computePairingsFingerprint(
 // passing. Keep in sync with the spec text, not with "what reads better."
 const DRINKER_BLOCK = `This person enjoys alcohol. Suggest exactly 4 pairings, usually 3 alcoholic and 1 non-alcoholic. Give the alcoholic options real range across different kinds of drinks (not three wines). Make the non-alcoholic option as considered as the others, never an afterthought. If this is a breakfast or brunch dish, suggest at most 1 alcoholic option, and only a brunch-style one (like sparkling wine); make the rest non-alcoholic. For kids' food or smoothies, suggest no alcohol at all. Always include at least 1 non-alcoholic option.`;
 
-const NON_DRINKER_BLOCK = `Suggest exactly 4 non-alcoholic pairings with real variety (for example: something sparkling, a tea or coffee, a juice or shrub, something built on herbs or spice). Give each a descriptive, appetizing name based on what's in it (e.g. "Sparkling Blackberry Shrub", "Iced Hibiscus Tea with Orange"). Do not mention alcohol at all, and do not use names borrowed from cocktails, beer, or wine (no "virgin", "mocktail", "spritz", "mule", "sour", "ginger beer", "NA beer"). Set is_alcoholic to false for all 4.`;
+const NON_DRINKER_BLOCK = `Suggest exactly 4 non-alcoholic pairings with real variety (for example: something sparkling, a tea or coffee, a juice or shrub, something built on herbs or spice). Give each a descriptive, appetizing name based on what's in it (e.g. "Sparkling Blackberry Shrub", "Iced Hibiscus Tea with Orange"). Do not mention alcohol at all, and do not use names borrowed from cocktails, beer, or wine (no "virgin", "mocktail", "spritz", "mule", "sour", "ginger beer", "NA beer", "cider"). Set is_alcoholic to false for all 4.`;
+
+const BREAKFAST_RETRY_LINE =
+  "This is a breakfast dish: at most 1 alcoholic option, and only a brunch-style one.";
 
 const MAX_METHOD_CHARS = 1500;
+
+// ---------------------------------------------------------------------------
+// Dish occasion (deterministic, title + description only)
+// ---------------------------------------------------------------------------
+
+// "no_alcohol" takes priority over "breakfast" where a dish text could
+// theoretically match both lists — no_alcohol is the strictly stronger/safer
+// restriction, same "bias toward the safer outcome" posture already used
+// elsewhere in this app (e.g. the recipe-origin anchor-severing rule).
+export type DishOccasion = "no_alcohol" | "breakfast" | "normal";
+
+const NO_ALCOHOL_DISH_TERMS: readonly string[] = [
+  "smoothie", "shake", "milkshake", "kids", "kid-friendly", "lunchbox", "baby",
+];
+
+const BREAKFAST_DISH_TERMS: readonly string[] = [
+  "pancake", "waffle", "french toast", "oatmeal", "porridge", "granola",
+  "omelet", "omelette", "frittata", "eggs benedict", "breakfast", "brunch",
+  "scrambled eggs", "crepe", "muffin", "bagel", "cereal",
+];
+
+// Separate from pairingsSafety.ts's own wordBoundaryMatch (and this file's
+// drink-preference wordBoundaryMatch below) since dish-term matching needs
+// simple-plural support ("pancakes", "waffles", "muffins") that those two
+// don't — kept distinct rather than retrofitting plural support onto a
+// helper whose existing exact-match behavior other callers rely on.
+function dishTermMatch(term: string, text: string): boolean {
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+  return new RegExp(`\\b${escaped}s?\\b`, "i").test(text);
+}
+
+function matchesAnyDishTerm(terms: readonly string[], text: string): boolean {
+  return terms.some((term) => dishTermMatch(term, text));
+}
+
+export function classifyDishOccasion(recipe: PairingsFingerprintRecipeContent): DishOccasion {
+  const text = `${recipe.title ?? ""} ${recipe.description ?? ""}`;
+  if (matchesAnyDishTerm(NO_ALCOHOL_DISH_TERMS, text)) return "no_alcohol";
+  if (matchesAnyDishTerm(BREAKFAST_DISH_TERMS, text)) return "breakfast";
+  return "normal";
+}
 
 // Duplicated from pairingsSafety.ts's own (unexported) wordBoundaryMatch on
 // purpose, not shared — same precedent as canonicalizeAllergiesForFingerprint
@@ -220,14 +264,19 @@ function buildIngredientsText(ingredients: { name: string; qty: string }[] | und
 function buildPairingsSystemPrompt(
   recipe: PairingsFingerprintRecipeContent,
   profile: PairingsFingerprintProfileInputs,
-  excludeNames: string[] = []
+  excludeNames: string[] = [],
+  isRetry: boolean = false
 ): string {
   const description = recipe.description?.trim() ?? "";
   const ingredients = buildIngredientsText(recipe.ingredients);
   const method = buildMethodText(recipe.steps);
   const drinkPreference = profile.drinkPreference?.trim() ?? "";
   const palate = profile.palate?.trim() ?? "";
-  const alcoholOk = profile.alcoholOk === true;
+  const dishOccasion = classifyDishOccasion(recipe);
+  // A no_alcohol dish forces non-drinker generation for THIS generation only
+  // — nothing is written to the profile, and the profile's own alcoholOk is
+  // untouched for every other recipe.
+  const alcoholOk = profile.alcoholOk === true && dishOccasion !== "no_alcohol";
 
   const recipeLines = [`Title: ${recipe.title}`];
   if (description) recipeLines.push(`Description: ${description}`);
@@ -252,6 +301,7 @@ function buildPairingsSystemPrompt(
   const allergyBlock = buildAllergyBlock(profile.allergies, alcoholOk);
   const excludeBlock =
     excludeNames.length > 0 ? `Suggest different drinks from these: ${excludeNames.join(", ")}.` : "";
+  const breakfastRetryLine = isRetry && dishOccasion === "breakfast" ? BREAKFAST_RETRY_LINE : "";
   const namingBullet = alcoholOk
     ? `- Name drink styles or types (e.g. "a dry Riesling", "a smoky mezcal", "cold-brewed oolong"), never brands, producers, or where to buy.`
     : `- Name drinks by what's in them (e.g. "cold-brewed oolong", "a tart cherry shrub"), never brands, producers, or where to buy.`;
@@ -273,7 +323,7 @@ ${namingBullet}
 How to write "why":
 - Exactly one sentence, under 25 words, on why this drink works with this dish.
 - Warm, economical, specific. No exclamation points, no health claims, no comments about drinking or not drinking.
-${excludeBlock}
+${excludeBlock}${breakfastRetryLine ? `\n${breakfastRetryLine}` : ""}
 Respond with ONLY raw JSON, nothing else: no preamble, no explanation, no markdown code fences. A JSON array of exactly 4 objects, each shaped:
 {"name": "...", "why": "...", "is_alcoholic": true or false}`;
 }
@@ -450,7 +500,7 @@ async function generatePairingsWithRetries(
   const excludeNames = [...initialExcludeNames];
 
   for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt++) {
-    const systemPrompt = buildPairingsSystemPrompt(recipe, profileInputs, excludeNames);
+    const systemPrompt = buildPairingsSystemPrompt(recipe, profileInputs, excludeNames, attempt > 1);
 
     let parsedItems: unknown[];
     try {
@@ -533,15 +583,19 @@ function buildFilterOptions(
   recipe: PairingsFingerprintRecipeContent,
   profile: PairingsProfileRecord
 ): FilterPairingsOptions {
+  const dishOccasion = classifyDishOccasion(recipe);
   return {
     // alcohol_ok NULL is treated as not-alcohol-ok everywhere it's read —
     // filterPairings itself already fails closed on anything other than
     // `true` (`if (alcoholOk !== true) { ... }`), so passing the raw
     // (possibly null) value through here is correct, not an oversight.
-    alcoholOk: profile.alcohol_ok,
+    // A no_alcohol dish forces the same non-drinker enforcement as the
+    // prompt override above, for this generation only.
+    alcoholOk: dishOccasion === "no_alcohol" ? false : profile.alcohol_ok,
     allergySet: resolveAllergenSet(profile.allergies),
     otherAllergyTerms: profile.allergies?.other ?? [],
     recipeText: buildRecipeTextForFilter(recipe),
+    breakfastCap: dishOccasion === "breakfast",
   };
 }
 

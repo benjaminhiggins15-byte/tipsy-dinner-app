@@ -91,6 +91,8 @@ const DRINK_CARRIER_TERMS: ReadonlyArray<{ term: string; big9: Big9Id }> = [
   { term: "latte", big9: "milk" },
   { term: "cappuccino", big9: "milk" },
   { term: "chai latte", big9: "milk" },
+  { term: "chai", big9: "milk" },
+  { term: "masala chai", big9: "milk" },
   { term: "milkshake", big9: "milk" },
   { term: "lassi", big9: "milk" },
   { term: "horchata", big9: "milk" },
@@ -246,6 +248,11 @@ export interface FilterPairingsOptions {
   // Optional/defaults to "" so existing callers with no recipe text behave
   // exactly as before (no exemptions computed).
   recipeText?: string;
+  // Breakfast/brunch dishes (see classifyDishOccasion in pairingsGeneration.ts):
+  // marks the set incomplete if more than 1 surviving item is alcoholic, by
+  // NAME only (is_alcoholic true OR an ALCOHOL_TERMS hit in the name) — the
+  // "why" text is deliberately not checked here, unlike itemHasAlcoholTextHit.
+  breakfastCap?: boolean;
 }
 
 export interface FilterPairingsResult {
@@ -282,7 +289,7 @@ export function filterPairings(
   items: unknown[],
   options: FilterPairingsOptions
 ): FilterPairingsResult {
-  const { alcoholOk, allergySet, otherAllergyTerms = [], recipeText = "" } = options;
+  const { alcoholOk, allergySet, otherAllergyTerms = [], recipeText = "", breakfastCap } = options;
   const allergySetSet = new Set(allergySet);
   const survivors: PairingItem[] = [];
 
@@ -329,6 +336,12 @@ export function filterPairings(
       (item) => item.is_alcoholic === false && !itemHasAlcoholTextHit(item, exemptAlcoholTerms)
     );
     if (!hasNonAlcoholic) complete = false;
+  }
+  if (complete && breakfastCap) {
+    const alcoholicCount = survivors.filter(
+      (item) => item.is_alcoholic === true || matchesAnyTerm(item.name, ALCOHOL_TERMS)
+    ).length;
+    if (alcoholicCount > 1) complete = false;
   }
 
   return { items: survivors, complete };

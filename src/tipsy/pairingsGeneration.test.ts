@@ -7,6 +7,7 @@ import {
   computePairingsFingerprint,
   getPairingsForRecipe,
   regeneratePairings,
+  classifyDishOccasion,
   type PairingsRecipeRecord,
   type PairingsProfileRecord,
   type PairingsGenerationOverrides,
@@ -802,7 +803,7 @@ async function run() {
     );
 
     const PROHIBITION_LINE =
-      'Do not mention alcohol at all, and do not use names borrowed from cocktails, beer, or wine (no "virgin", "mocktail", "spritz", "mule", "sour", "ginger beer", "NA beer").';
+      'Do not mention alcohol at all, and do not use names borrowed from cocktails, beer, or wine (no "virgin", "mocktail", "spritz", "mule", "sour", "ginger beer", "NA beer", "cider").';
     check(
       "prompt content: the naming-prohibition line is present verbatim",
       capturedPrompt.includes(PROHIBITION_LINE),
@@ -989,6 +990,88 @@ async function run() {
       capturedPrompt.includes("<drink_preference>I love wine, but only red</drink_preference>"),
       true
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // 18. Dish occasion classification (title + description only).
+  // -------------------------------------------------------------------------
+  {
+    check(
+      "classifyDishOccasion: 'Kid-Friendly Mac and Cheese' -> no_alcohol",
+      classifyDishOccasion(
+        makeRecipeRecord({
+          title: "Kid-Friendly Mac and Cheese",
+          description: "A creamy, comforting pasta bake the whole family loves.",
+        })
+      ),
+      "no_alcohol"
+    );
+    check(
+      "classifyDishOccasion: 'Braised Short Rib' -> normal",
+      classifyDishOccasion(
+        makeRecipeRecord({
+          title: "Braised Short Rib",
+          description: "A slow-cooked, red-wine braised short rib.",
+        })
+      ),
+      "normal"
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // 19. A no_alcohol dish (smoothie) forces non-drinker generation for a
+  //     drinker, for this generation only; any alcoholic item that still
+  //     comes back is dropped by the filter.
+  // -------------------------------------------------------------------------
+  {
+    const recipe = makeRecipeRecord({
+      id: "recipe-19",
+      title: "Mango Banana Smoothie",
+      description: "A creamy, fruit-forward blended smoothie.",
+    });
+    const profile = makeProfileRecord({
+      alcohol_ok: true,
+      allergies: { big9: [], other: [] },
+      drink_preference: null,
+    });
+
+    const mixedItems: PairingItem[] = [
+      { name: "Mimosa", why: "Bright and bubbly, a brunch classic.", is_alcoholic: true },
+      { name: "Sparkling Blackberry Shrub", why: "Tart and fizzy, echoes the fruit.", is_alcoholic: false },
+      { name: "Hibiscus Cooler", why: "Bright and floral against the mango.", is_alcoholic: false },
+      { name: "Cucumber Mint Soda", why: "Clean and refreshing alongside the smoothie.", is_alcoholic: false },
+      { name: "Ginger Fizz", why: "Zesty and light, a nice contrast to the sweetness.", is_alcoholic: false },
+    ];
+
+    let capturedPrompt = "";
+    const result = await getPairingsForRecipe(
+      "recipe-19",
+      "user-1",
+      makeOverrides(recipe, profile, {
+        callAI: async (systemPrompt) => {
+          capturedPrompt = systemPrompt;
+          return JSON.stringify(mixedItems);
+        },
+      })
+    );
+
+    check(
+      "smoothie for a drinker: non-drinker block phrase present in prompt",
+      capturedPrompt.includes("Give each a descriptive, appetizing name based on what's in it"),
+      true
+    );
+    check(
+      "smoothie for a drinker: drinker-only phrase absent from prompt",
+      capturedPrompt.includes("Always include at least 1 non-alcoholic option."),
+      false
+    );
+    check("smoothie for a drinker: result status is ok", result.status, "ok");
+
+    let itemNames: string[] = [];
+    if (result.status === "ok") {
+      itemNames = result.items.map((i) => i.name);
+    }
+    check("smoothie for a drinker: alcoholic 'Mimosa' dropped from final result", itemNames.includes("Mimosa"), false);
   }
 
   console.log();
