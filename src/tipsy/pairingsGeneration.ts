@@ -100,7 +100,7 @@ export function computePairingsFingerprint(
 
 // Verbatim prompt blocks — reworded only deliberately, never paraphrased in
 // passing. Keep in sync with the spec text, not with "what reads better."
-const DRINKER_BLOCK = `This person enjoys alcohol. Suggest exactly 4 pairings, usually 3 alcoholic and 1 non-alcoholic. Give the alcoholic options real range across different kinds of drinks (not three wines). Make the non-alcoholic option as considered as the others, never an afterthought. If this dish isn't a natural occasion for alcohol (breakfast or brunch, kids' food, smoothies), flex toward thoughtful non-alcoholic options instead; never force alcohol. Always include at least 1 non-alcoholic option.`;
+const DRINKER_BLOCK = `This person enjoys alcohol. Suggest exactly 4 pairings, usually 3 alcoholic and 1 non-alcoholic. Give the alcoholic options real range across different kinds of drinks (not three wines). Make the non-alcoholic option as considered as the others, never an afterthought. If this is a breakfast or brunch dish, suggest at most 1 alcoholic option, and only a brunch-style one (like sparkling wine); make the rest non-alcoholic. For kids' food or smoothies, suggest no alcohol at all. Always include at least 1 non-alcoholic option.`;
 
 const NON_DRINKER_BLOCK = `Suggest exactly 4 non-alcoholic pairings with real variety (for example: something sparkling, a tea or coffee, a juice or shrub, something built on herbs or spice). Give each a descriptive, appetizing name based on what's in it (e.g. "Sparkling Blackberry Shrub", "Iced Hibiscus Tea with Orange"). Do not mention alcohol at all, and do not use names borrowed from cocktails, beer, or wine (no "virgin", "mocktail", "spritz", "mule", "sour", "ginger beer", "NA beer"). Set is_alcoholic to false for all 4.`;
 
@@ -113,6 +113,57 @@ const MAX_METHOD_CHARS = 1500;
 function wordBoundaryMatch(term: string, text: string): boolean {
   const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
   return new RegExp(`\\b${escaped}\\b`, "i").test(text);
+}
+
+// Verbatim, per-allergen exclusion lines appended after the allergy block's
+// existing sentences — explicit enough to catch what "never suggest a drink
+// that contains X" alone leaves ambiguous (the hidden-carrier drink names
+// filterPairings itself enforces via DRINK_CARRIER_TERMS in
+// pairingsSafety.ts). Only the allergens actually present in the user's
+// resolved set get a line; fish and shellfish share ONE line (never two)
+// since they're nearly always discussed together. wheat/egg/fish-or-
+// shellfish have separate drinker/non-drinker wordings; the rest are
+// identical either way. The non-drinker wordings are deliberately checked
+// (test 16/18) to contain no ALCOHOL_TERMS words — a non-drinker prompt must
+// never give the AI vocabulary it could echo back into a drink name.
+function buildAllergyExclusionLines(allergySet: Big9Id[], alcoholOk: boolean): string[] {
+  const set = new Set(allergySet);
+  const lines: string[] = [];
+
+  if (set.has("wheat")) {
+    lines.push(
+      alcoholOk
+        ? "No beer of any kind (lager, ale, IPA, pilsner, wheat beer, sour beer), no malt drinks, no barley tea."
+        : "No malt drinks and no barley tea."
+    );
+  }
+  if (set.has("milk")) {
+    lines.push("No lattes, cream, or milk- or yogurt-based drinks.");
+  }
+  if (set.has("egg")) {
+    lines.push(alcoholOk ? "No sours, fizzes, flips, or eggnog." : "No eggnog or drinks made with egg.");
+  }
+  if (set.has("tree_nut")) {
+    lines.push("No amaretto, orgeat, or nut milks.");
+  }
+  if (set.has("peanut")) {
+    lines.push("Nothing made with peanuts.");
+  }
+  if (set.has("soy")) {
+    lines.push("No soy milk.");
+  }
+  if (set.has("sesame")) {
+    lines.push("Nothing made with sesame.");
+  }
+  if (set.has("fish") || set.has("shellfish")) {
+    lines.push(
+      alcoholOk
+        ? "No Bloody Mary, Caesar, michelada, or clam juice."
+        : "No clam juice or fish sauce."
+    );
+  }
+
+  return lines;
 }
 
 // Reuses the exact same resolved allergen set filterPairings enforces
@@ -130,8 +181,10 @@ function buildAllergyBlock(allergies: StructuredAllergies | null | undefined, al
   const hiddenIngredientsSentence = alcoholOk
     ? "This includes hidden ingredients (for example, beer contains wheat, cream liqueurs and lattes contain milk, many sours use egg white, a Bloody Mary contains fish)."
     : "This includes hidden ingredients (for example, lattes and many smoothies contain milk, horchata can contain milk or nuts, orgeat syrup contains almonds).";
+  const exclusionLines = buildAllergyExclusionLines(allergySet, alcoholOk);
+  const exclusionBlock = exclusionLines.length > 0 ? ` ${exclusionLines.join(" ")}` : "";
 
-  return `Allergies: never suggest a drink that contains or is traditionally made with ${allergenWords}. ${hiddenIngredientsSentence}`;
+  return `Allergies: never suggest a drink that contains or is traditionally made with ${allergenWords}. ${hiddenIngredientsSentence}${exclusionBlock}`;
 }
 
 function buildMethodText(steps: RecipeStep[] | undefined): string {
@@ -218,7 +271,7 @@ How to choose:
 ${namingBullet}
 
 How to write "why":
-- Exactly one sentence on why this drink works with this dish.
+- Exactly one sentence, under 25 words, on why this drink works with this dish.
 - Warm, economical, specific. No exclamation points, no health claims, no comments about drinking or not drinking.
 ${excludeBlock}
 Respond with ONLY raw JSON, nothing else: no preamble, no explanation, no markdown code fences. A JSON array of exactly 4 objects, each shaped:

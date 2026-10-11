@@ -822,6 +822,96 @@ async function run() {
       leakedTerms,
       []
     );
+
+    check(
+      "prompt content: non-drinker allergy block contains the non-drinker wheat exclusion line",
+      capturedPrompt.includes("No malt drinks and no barley tea."),
+      true
+    );
+    check(
+      "prompt content: non-drinker allergy block contains the non-drinker egg exclusion line",
+      capturedPrompt.includes("No eggnog or drinks made with egg."),
+      true
+    );
+    check(
+      "prompt content: non-drinker allergy block contains the non-drinker fish/shellfish exclusion line",
+      capturedPrompt.includes("No clam juice or fish sauce."),
+      true
+    );
+    check(
+      "prompt content: non-drinker allergy block does NOT contain the drinker-only wheat/egg/fish exclusion lines",
+      [
+        "No beer of any kind (lager, ale, IPA, pilsner, wheat beer, sour beer), no malt drinks, no barley tea.",
+        "No sours, fizzes, flips, or eggnog.",
+        "No Bloody Mary, Caesar, michelada, or clam juice.",
+      ].some((line) => capturedPrompt.includes(line)),
+      false
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // 18. Allergy block: per-allergen exclusion lines, drinker vs non-drinker
+  //     wordings, and fish/shellfish collapsing to one line
+  // -------------------------------------------------------------------------
+  {
+    const recipe = makeRecipeRecord({ id: "recipe-18a" });
+    const profile = makeProfileRecord({ alcohol_ok: true, allergies: { big9: ["wheat", "egg"], other: [] } });
+
+    let capturedPrompt = "";
+    await getPairingsForRecipe(
+      "recipe-18a",
+      "user-1",
+      makeOverrides(recipe, profile, {
+        callAI: async (systemPrompt) => {
+          capturedPrompt = systemPrompt;
+          return JSON.stringify(DRINKER_ITEMS);
+        },
+      })
+    );
+
+    check(
+      "drinker wheat+egg: allergy block contains the drinker wheat exclusion line",
+      capturedPrompt.includes(
+        "No beer of any kind (lager, ale, IPA, pilsner, wheat beer, sour beer), no malt drinks, no barley tea."
+      ),
+      true
+    );
+    check(
+      "drinker wheat+egg: allergy block contains the drinker egg exclusion line",
+      capturedPrompt.includes("No sours, fizzes, flips, or eggnog."),
+      true
+    );
+    check(
+      "drinker wheat+egg: allergy block does NOT contain exclusion lines for allergens not present",
+      [
+        "No lattes, cream, or milk- or yogurt-based drinks.",
+        "No amaretto, orgeat, or nut milks.",
+        "Nothing made with peanuts.",
+        "No soy milk.",
+        "Nothing made with sesame.",
+        "No Bloody Mary, Caesar, michelada, or clam juice.",
+      ].some((line) => capturedPrompt.includes(line)),
+      false
+    );
+  }
+  {
+    const recipe = makeRecipeRecord({ id: "recipe-18b" });
+    const profile = makeProfileRecord({ alcohol_ok: true, allergies: { big9: ["shellfish"], other: [] } });
+
+    let capturedPrompt = "";
+    await getPairingsForRecipe(
+      "recipe-18b",
+      "user-1",
+      makeOverrides(recipe, profile, {
+        callAI: async (systemPrompt) => {
+          capturedPrompt = systemPrompt;
+          return JSON.stringify(DRINKER_ITEMS);
+        },
+      })
+    );
+
+    const occurrences = capturedPrompt.split("No Bloody Mary, Caesar, michelada, or clam juice.").length - 1;
+    check("shellfish-only drinker: fish/shellfish exclusion line appears exactly once (never doubled)", occurrences, 1);
   }
 
   // -------------------------------------------------------------------------
