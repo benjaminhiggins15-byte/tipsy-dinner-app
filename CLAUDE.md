@@ -76,6 +76,7 @@ pointer named — do not duplicate it here.
 - **Chat from Recipe Card moved to FEATURE_SPECS.md** — `transferToRecipeChat` is the only sanctioned path from a saved Recipe Card into Build; RecipeCard has no closure access to App-level setters. Full detail: Chat from Recipe Card in FEATURE_SPECS.md.
 - **Most Standing Cleanup / Watch Items bullets moved to FEATURE_SPECS.md** — only the genuinely universal ones (schema-is-dashboard-only, the TS-error-count-drift caution, the loading-spinner-reuse note, the Fraunces/Lazydog non-loading fact, and the A2A-sharing-items-live-elsewhere pointer) remain in CLAUDE.md. Full detail: Standing Cleanup — Relocated Items in FEATURE_SPECS.md.
 - **`log_event()` (`SECURITY DEFINER`) is the ONLY write path into deny-all `user_events`** — `logEvent` (`src/lib/events.ts`) is fire-and-forget (never await/chain/gate control flow on it), props are IDs/small enums only, never free text or recipe content. Full detail: Behavior & Funnel Instrumentation (user_events) in FEATURE_SPECS.md.
+- **Pairings non-negotiables: `alcohol_ok` NULL reads as no-alcohol everywhere; pairings/drink prefs never enter a share or send snapshot; the drink-carrier list stays separate from `ALLERGEN_SYNONYM_MAP`; `filterPairings` runs on every generated AND every cached set, never skipped.** Full detail: Pairings in FEATURE_SPECS.md.
 
 ---
 
