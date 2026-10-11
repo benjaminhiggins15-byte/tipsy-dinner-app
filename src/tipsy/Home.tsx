@@ -5,7 +5,7 @@ import {
   saveReceivedRecipe,
   dismissReceivedRecipe,
   addRecipeToMenuSection,
-  computeMySlice,
+  computeMySliceDeduped,
   getSuggestedRecipeDetail,
   saveRecipe,
   recordSharedRecipeDiscovery,
@@ -195,17 +195,20 @@ export default function Home({
   }, []);
 
   // Layer 3/4 — mint or fetch today's slice, then hand pick_details to the
-  // carousel below. computeMySlice() itself returns null with no session
-  // (theoretical here, Home is post-auth) — sliceResult stays null in that
-  // case and the carousel renders nothing. Runs once on mount; the onboarding
-  // handoff (Onboarding.tsx's Loader) is responsible for making sure
-  // taste_profile is populated before Home ever mounts, since compute-slice's
-  // existing-slice short-circuit means a re-fetch here can't recover a
-  // same-day slice already computed against a blank profile.
+  // carousel below. computeMySliceDeduped() itself returns null with no
+  // session (theoretical here, Home is post-auth) — sliceResult stays null
+  // in that case and the carousel renders nothing. Runs once on mount; the
+  // onboarding handoff (Onboarding.tsx's Loader) is responsible for making
+  // sure taste_profile is populated before Home ever mounts, since
+  // compute-slice's existing-slice short-circuit means a re-fetch here can't
+  // recover a same-day slice already computed against a blank profile.
+  // computeMySliceDeduped joins an in-flight call for the same user+date
+  // instead of starting a second one, so a quick tab-away-and-back doesn't
+  // double the AI spend — see data.ts's inFlightSliceComputes.
   useEffect(() => {
     let ignore = false;
     (async () => {
-      const result = await computeMySlice();
+      const result = await computeMySliceDeduped(userId);
       if (ignore) return;
       setSliceResult(result);
       setSliceLoading(false);
@@ -213,6 +216,7 @@ export default function Home({
     return () => {
       ignore = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const firstName = profile?.display_name?.split(" ")[0] || profile?.display_name || "";

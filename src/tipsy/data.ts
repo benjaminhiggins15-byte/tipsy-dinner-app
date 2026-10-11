@@ -923,6 +923,29 @@ export async function computeMySlice(): Promise<ComputeSliceResult | null> {
   }
 }
 
+// In-flight dedupe for computeMySlice, keyed on userId + local date. A Home
+// remount firing the mount effect again while the first call is still
+// in-flight (e.g. a quick tab-away-and-back) joins the same promise instead
+// of issuing a second network request / second compute-slice invocation. The
+// entry is removed the moment the promise settles, so this is NOT a
+// same-day cache — a later Home open after the first call has finished goes
+// straight back to the server, which still applies its own freshness/
+// gate_fingerprint check. That's deliberate: a legitimate rebuild after a
+// profile/allergy change must keep working exactly as it does today.
+const inFlightSliceComputes = new Map<string, Promise<ComputeSliceResult | null>>();
+
+export function computeMySliceDeduped(userId: string): Promise<ComputeSliceResult | null> {
+  const key = `${userId}-${localDateString()}`;
+  const existing = inFlightSliceComputes.get(key);
+  if (existing) return existing;
+
+  const promise = computeMySlice().finally(() => {
+    inFlightSliceComputes.delete(key);
+  });
+  inFlightSliceComputes.set(key, promise);
+  return promise;
+}
+
 // Pool-recipe shape returned by get_suggested_recipe (security-definer,
 // membership-gated against the caller's own user_recipe_slices — see
 // supabase/migrations/20260823000001_get_suggested_recipe.sql). Ingredients
