@@ -34,6 +34,8 @@ import {
 } from "@tabler/icons-react";
 import { selectDailyChips, getRecentlyShownChipIds, recordShownChipIds } from "./chips";
 import { ChatBubble, TypingBubble, CookInputBar } from "./ChatUI";
+import { getPairingsForRecipe, regeneratePairings } from "./pairingsGeneration";
+import { type PairingItem } from "./pairingsSafety";
 
 type RecipeDraft = {
   title: string;
@@ -2921,7 +2923,7 @@ function RecipeCard({
   profile?: ProfileType | null;
   onUpdate?: (updates: Partial<ProfileType>) => Promise<void>;
 }) {
-  const [tab, setTab] = useState<"ingredients" | "steps" | "history">("ingredients");
+  const [tab, setTab] = useState<"ingredients" | "steps" | "history" | "pairings">("ingredients");
   const [shareConfirm, setShareConfirm] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
   // "Show my name" toggle, initialized from the persisted profile default
@@ -2961,6 +2963,22 @@ function RecipeCard({
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [sentConfirm, setSentConfirm] = useState(false);
+  // Pairings tab state — kept per-mount (reset on recipe change below) so
+  // switching tabs back and forth never refetches. "off" means the server
+  // truth (wants_pairings read fresh in getPairingsForRecipe) disagreed with
+  // the profile prop's wants_pairings — body renders nothing, same as the
+  // tab button hiding once the profile prop catches up.
+  type PairingsTabState =
+    | { status: "idle" }
+    | { status: "loading" }
+    | { status: "ok"; items: PairingItem[] }
+    | { status: "failed" }
+    | { status: "off" };
+  const [pairingsState, setPairingsState] = useState<PairingsTabState>({ status: "idle" });
+  const [expandedPairings, setExpandedPairings] = useState<Set<number>>(new Set());
+  const [regeneratingPairings, setRegeneratingPairings] = useState(false);
+  const [regenerateFailed, setRegenerateFailed] = useState(false);
+  const wantsPairings = profile?.wants_pairings === true;
   const ingredients = recipe.ingredients ?? [];
   const steps = recipe.steps ?? [];
   const headlineRating = headlineRatingFromEvents(cookEvents);
@@ -2971,6 +2989,41 @@ function RecipeCard({
     if (!recipe.savedId) return;
     logEvent("recipe_opened", { recipe_id: recipe.savedId });
   }, [recipe.savedId]);
+
+  // Pairings state resets whenever the displayed recipe changes, so a stale
+  // result from the previous recipe never bleeds into the new one.
+  useEffect(() => {
+    setPairingsState({ status: "idle" });
+    setExpandedPairings(new Set());
+    setRegeneratingPairings(false);
+    setRegenerateFailed(false);
+  }, [recipe.savedId]);
+
+  // Generation only fires once the Pairings tab is actually opened, never on
+  // card mount. The pairingsState.status !== "idle" guard makes this safe to
+  // depend on its own status: setting "loading" below re-runs the effect,
+  // which then no-ops instead of double-firing the request.
+  useEffect(() => {
+    if (tab !== "pairings" || !wantsPairings || !recipe.savedId) return;
+    if (pairingsState.status !== "idle") return;
+    let ignore = false;
+    setPairingsState({ status: "loading" });
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      const userId = data.user?.id;
+      if (ignore) return;
+      if (!userId) {
+        setPairingsState({ status: "failed" });
+        return;
+      }
+      const result = await getPairingsForRecipe(recipe.savedId!.toString(), userId);
+      if (ignore) return;
+      setPairingsState(result.status === "ok" ? { status: "ok", items: result.items } : { status: result.status });
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [tab, wantsPairings, recipe.savedId, pairingsState.status]);
 
   // Debounced server search — the ignore flag guards against a slow earlier
   // query's response landing after a newer one (same pattern as every other
@@ -3035,6 +3088,52 @@ function RecipeCard({
       next.add(idx);
     }
     setExpandedSteps(next);
+  };
+
+  const togglePairing = (idx: number) => {
+    const next = new Set(expandedPairings);
+    if (next.has(idx)) {
+      next.delete(idx);
+    } else {
+      next.add(idx);
+    }
+    setExpandedPairings(next);
+  };
+
+  const handleRetryPairings = async () => {
+    if (!recipe.savedId) return;
+    setPairingsState({ status: "loading" });
+    const { data } = await supabase.auth.getUser();
+    const userId = data.user?.id;
+    if (!userId) {
+      setPairingsState({ status: "failed" });
+      return;
+    }
+    const result = await getPairingsForRecipe(recipe.savedId.toString(), userId);
+    setPairingsState(result.status === "ok" ? { status: "ok", items: result.items } : { status: result.status });
+  };
+
+  const handleRegeneratePairings = async () => {
+    if (!recipe.savedId) return;
+    setRegeneratingPairings(true);
+    setRegenerateFailed(false);
+    const { data } = await supabase.auth.getUser();
+    const userId = data.user?.id;
+    if (!userId) {
+      setRegeneratingPairings(false);
+      setRegenerateFailed(true);
+      return;
+    }
+    const result = await regeneratePairings(recipe.savedId.toString(), userId);
+    setRegeneratingPairings(false);
+    if (result.status === "ok") {
+      setExpandedPairings(new Set());
+      setPairingsState({ status: "ok", items: result.items });
+    } else if (result.status === "off") {
+      setPairingsState({ status: "off" });
+    } else {
+      setRegenerateFailed(true);
+    }
   };
 
   const formatCookedOn = (dateStr: string): string => {
@@ -3811,6 +3910,37 @@ function RecipeCard({
               }} />
             )}
           </button>
+          {wantsPairings && (
+            <button
+              onClick={() => setTab("pairings")}
+              style={{
+                paddingBottom: 12,
+                fontFamily: "Inter, sans-serif",
+                fontSize: 11,
+                fontWeight: 500,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: tab === "pairings" ? "#233C00" : "rgba(35,60,0,0.3)",
+                position: "relative",
+                cursor: "pointer",
+                background: "transparent",
+                border: "none",
+              }}
+            >
+              Pairings
+              {tab === "pairings" && (
+                <div style={{
+                  position: "absolute",
+                  bottom: -1,
+                  left: 0,
+                  right: 0,
+                  height: 1.5,
+                  background: "#233C00",
+                  borderRadius: 2,
+                }} />
+              )}
+            </button>
+          )}
         </div>
 
         {/* Tab content */}
@@ -4127,6 +4257,134 @@ function RecipeCard({
               }}>no cooks logged yet.</p>
             )}
           </div>
+          {wantsPairings && (
+            <div style={{ display: tab === "pairings" ? "block" : "none", padding: "20px 24px" }}>
+              {(pairingsState.status === "idle" || pairingsState.status === "loading") && (
+                <p style={{
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 13,
+                  color: "rgba(35,60,0,0.4)",
+                }}>Finding something to drink with this…</p>
+              )}
+              {pairingsState.status === "failed" && (
+                <>
+                  <p style={{
+                    fontFamily: "Inter, sans-serif",
+                    fontSize: 13,
+                    color: "rgba(35,60,0,0.4)",
+                    marginBottom: 12,
+                  }}>Couldn't come up with pairings right now.</p>
+                  <button
+                    onClick={handleRetryPairings}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      padding: 0,
+                      cursor: "pointer",
+                      fontFamily: "Inter, sans-serif",
+                      fontSize: 14,
+                      fontWeight: 500,
+                      color: "rgba(35,60,0,0.5)",
+                    }}
+                  >
+                    Try again
+                  </button>
+                </>
+              )}
+              {pairingsState.status === "ok" && (
+                regeneratingPairings ? (
+                  <p style={{
+                    fontFamily: "Inter, sans-serif",
+                    fontSize: 13,
+                    color: "rgba(35,60,0,0.4)",
+                  }}>Finding something to drink with this…</p>
+                ) : (
+                  <>
+                    {pairingsState.items.map((item, idx) => {
+                      const isExpanded = expandedPairings.has(idx);
+                      return (
+                        <div key={idx} style={{ marginBottom: idx === pairingsState.items.length - 1 ? 0 : 10 }}>
+                          <button
+                            onClick={() => togglePairing(idx)}
+                            style={{
+                              width: "100%",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              gap: 10,
+                              padding: "12px 14px",
+                              background: "rgba(35,60,0,0.03)",
+                              border: "1px solid rgba(35,60,0,0.08)",
+                              borderRadius: isExpanded ? "10px 10px 0 0" : 10,
+                              borderBottom: isExpanded ? "none" : "1px solid rgba(35,60,0,0.08)",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <span style={{
+                              fontFamily: "Inter, sans-serif",
+                              fontSize: 14,
+                              fontWeight: 500,
+                              color: "#233C00",
+                              textAlign: "left",
+                            }}>{item.name}</span>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.25)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{
+                              transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                              transition: "transform 200ms ease",
+                              flexShrink: 0,
+                            }}>
+                              <polyline points="9 18 15 12 9 6" />
+                            </svg>
+                          </button>
+                          {isExpanded && (
+                            <div style={{
+                              background: "rgba(35,60,0,0.03)",
+                              border: "1px solid rgba(35,60,0,0.08)",
+                              borderTop: "none",
+                              borderRadius: "0 0 10px 10px",
+                              padding: "12px 14px",
+                            }}>
+                              <p style={{
+                                fontFamily: "Inter, sans-serif",
+                                fontSize: 14,
+                                color: "#233C00",
+                                lineHeight: 1.6,
+                                margin: 0,
+                              }}>{item.why}</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    <button
+                      onClick={handleRegeneratePairings}
+                      style={{
+                        display: "block",
+                        marginTop: 14,
+                        background: "transparent",
+                        border: "none",
+                        padding: 0,
+                        cursor: "pointer",
+                        fontFamily: "Inter, sans-serif",
+                        fontSize: 14,
+                        fontWeight: 500,
+                        color: "rgba(35,60,0,0.5)",
+                      }}
+                    >
+                      Suggest different pairings
+                    </button>
+                    {regenerateFailed && (
+                      <p style={{
+                        fontFamily: "Inter, sans-serif",
+                        fontSize: 12,
+                        color: "#B85C5C",
+                        marginTop: 8,
+                      }}>Couldn't find different ones right now.</p>
+                    )}
+                  </>
+                )
+              )}
+            </div>
+          )}
         </div>
       </div>
 
