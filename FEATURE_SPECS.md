@@ -3810,3 +3810,194 @@ fire from an authenticated-but-not-yet-onboarded session (post-signup, pre-
   deferred** — this build is write/log-path only. The Read Rules above are
   necessary because there is no view layer yet encoding them; building that
   view layer is the natural fast-follow.
+
+---
+
+## Pairings
+
+Branch `feature/pairings`. Opt-in AI drink-pairing suggestions on a saved
+recipe's 4th RecipeCard tab (alongside Ingredients/Steps/History), shown as 4
+collapsible rows of a drink name plus a one-sentence why. Off by default;
+gated end-to-end on `profiles.wants_pairings`.
+
+### Data
+
+- `profiles.wants_pairings` (boolean, nullable), `profiles.drink_preference`
+  (text, nullable), `profiles.alcohol_ok` (boolean, nullable) — added by
+  migration `20261006000001_add_pairings_fields.sql`. `NULL` in any of the
+  three means "never asked"/"not yet parsed," distinct from an explicit
+  false/empty answer. `alcohol_ok` fails closed: `NULL` is read as "no
+  alcohol" everywhere it's consumed, mirroring the allergies fail-closed
+  convention elsewhere in the app.
+- `recipes.pairings` (jsonb, nullable), `recipes.pairings_fingerprint` (text,
+  nullable) — same migration. `pairings` is an array of up to 4
+  `{name, why, is_alcoholic}` items, generated lazily on first open of the
+  Pairings tab, cached in place. `NULL` means never generated for this
+  recipe.
+- `llm_usage.call_type` whitelist widened (same migration) to add
+  `'drink-parse'` (the onboarding/Profile drink-preference → `alcohol_ok`
+  classifier) and `'pairings-gen'` (the actual pairings generation call) —
+  additive only, every prior value preserved.
+
+### Capture
+
+- **Onboarding** — a 4th onboarding question, inserted between the existing
+  inspiration and constraints stages (`Onboarding.tsx`'s `OnboardingChat`):
+  new `"drinks"` and `"drinksFollowup"` stages. The yes/no branch is
+  deterministic, not AI — `classifyDrinksAnswer()` in `drinksYesNo.ts`
+  whole-answer-matches a fixed set of clear "no" and bare "yes" phrases (never
+  a prefix/substring match, so "no beer, but i love wine" correctly falls to
+  "other," not "no"). A clear "no" writes `wants_pairings: false` and skips
+  straight to constraints with a fixed-text reply ("No problem — just the
+  food, then.") — no AI reflection call, unlike the palate/inspiration
+  stages. A bare "yes" asks "What do you like to drink?" and moves to
+  `"drinksFollowup"`; any other free-text answer is treated as naming a drink
+  preference directly. Both paths that capture an actual answer call
+  `saveDrinkPreference` and then a fixed-text reply ("Got it — I'll keep that
+  in mind."), never a generated reflection. `enterConstraintsStage()` is a
+  small extracted helper (byte-identical to the original constraints-question
+  line) so both the "no" and "answered" paths can reach it, not just the one
+  place it used to fire from.
+- **Profile** — a toggle (`wants_pairings`) plus, when on, a row to edit free
+  text `drink_preference` (`Profile.tsx`'s `ProfileEditDrinks`). The toggle
+  uses a local `ToggleRow` component — see Known follow-ups below.
+- **`saveDrinkPreference`** (`data.ts`) is the ONLY sanctioned writer of
+  `profiles.drink_preference`. It does two writes: (1) an unconditional,
+  awaited write of `{drink_preference: text, alcohol_ok: null}` via the
+  caller's own `onUpdate`/`safeUpdate` path — resetting `alcohol_ok` to null
+  immediately so a changed preference never keeps serving a stale alcohol
+  classification while the new one is still parsing; (2) a background,
+  fire-and-forget call to `parseDrinkPreference`, which conditionally writes
+  `alcohol_ok` straight to Supabase (`writeAlcoholOkIfStillCurrent`) scoped by
+  `id` AND a match on `drink_preference` still equaling the text that was
+  parsed — so a slower-resolving parse of an older answer can never clobber a
+  newer one; it just updates zero rows. The second write can only ever raise
+  `alcohol_ok` away from `null`, never block or delay the caller.
+
+### The alcohol flag
+
+`parseDrinkPreference` (`data.ts`) decides `profiles.alcohol_ok`, biased
+toward `false` at every stage:
+1. Blank input → `false` immediately, no AI call.
+2. **Deterministic person-level override, checked before any AI call**
+   (`matchesNoAlcoholOverride`) — a fixed phrase list (`"sober"`, `"teetotal"`,
+   `"pregnant"`, `"recovery"`, `"no alcohol"`, `"only non-alcoholic"`, etc.)
+   plus a regex for general refusals ("don't drink," "quit drinking," ...)
+   that only fires when the refusal is about the person in general (end of
+   text/punctuation, or followed by "alcohol"/"anymore"/"at all"), not when
+   followed by a specific drink ("don't drink white wine" is a taste
+   preference, left for the AI). This override can only ever produce `false`
+   — it is a fast path, not a trust boundary the AI result needs to clear.
+3. Otherwise, an AI call (`call_type: 'drink-parse'`) classifies the free
+   text; strict JSON-shape validation (`parseAlcoholOkResponse`) rejects
+   anything but exactly `{"alcohol_ok": <boolean>}`.
+4. Timeout (`DRINK_PREFERENCE_PARSE_TIMEOUT_MS = 4000`), network error, or
+   malformed/ambiguous model output → `null` (never throws) — distinct from an
+   affirmative model `false`, since both read as "no alcohol" wherever
+   `alcohol_ok` is consumed, but keeping them distinct preserves the option to
+   retry a `null` later without re-litigating a real `false` answer.
+
+### Generation (`pairingsGeneration.ts`)
+
+- **`getPairingsForRecipe`** is the single read-path entry point, gated first
+  on `wants_pairings !== true` (returns `{status: "off"}`, no DB/AI work).
+  It reads the recipe's cached `pairings`/`pairings_fingerprint` AND the
+  profile's `drink_preference`/`alcohol_ok`/`allergies`/`palate` **fresh from
+  the DB on every call** — never from passed-in app state — so a profile
+  edited in another tab/session is picked up on the next open.
+- **Fingerprint** (`computePairingsFingerprint`) pins the cache to the
+  recipe's own content (title + description + ingredients + steps — any edit
+  invalidates it) and the profile inputs pairings were generated under
+  (`drinkPreference` + `alcoholOk` + `allergies` + `palate`). `description`
+  and `palate` are included even though an edit to either isn't an obviously
+  "pairings-relevant" change, because both are interpolated directly into the
+  system prompt — leaving them out would let an edited description or a
+  changed palate silently serve a stale cached result forever. Mirrors
+  `user_recipe_slices.gate_fingerprint` in `compute-slice`.
+- **Cache hits are re-filtered on every read**, not trusted blindly — acting
+  as defense-in-depth in case the safety filter itself has changed since the
+  pairings were cached. A cache hit that fails the re-filter is never
+  returned shrunken; it's treated as a miss and falls through to full
+  regeneration.
+- **Dish-occasion rules** (`classifyDishOccasion`, deterministic, title +
+  description only): smoothie/kids/shake/lunchbox/baby terms → non-alcoholic
+  only; breakfast/brunch terms → at most 1 alcoholic option, and only a
+  brunch-style one. `no_alcohol` takes priority over `breakfast` where a dish
+  could match both lists (the safer restriction wins).
+- **`generatePairingsWithRetries`** retries up to 3 attempts and never
+  returns or persists a partial set — a caller only ever sees a complete,
+  filtered, exactly-4-item result or a `"failed"` status.
+- **In-flight dedupe** (`inFlightByRecipeId` / `runExclusive`) — concurrent
+  calls for the same recipe id share one in-progress promise rather than
+  firing duplicate AI calls.
+- **Session failure memo** (`sessionFailedRecipeIds`) — once generation
+  exhausts its retries for a recipe, that recipe short-circuits to `"failed"`
+  with zero further AI calls for the rest of the session; cleared only by an
+  explicit `clearPairingsFailureMemo` (the user's own "Try again"), or a
+  subsequent successful generation.
+- **Session AI-call cap** (`PAIRINGS_SESSION_AI_CALL_CAP = 20`) — a
+  module-level counter of every pairings AI call (every attempt, including
+  regenerate) across the whole session; once reached, further generation is
+  refused with a console warning. Both circuit breakers reset only on a full
+  page reload — same lifetime as `inFlightByRecipeId`.
+- **UI-side 45s timeout** (`PAIRINGS_TIMEOUT_MS` in `App.tsx`,
+  `withPairingsTimeout`) wraps the call from `RecipeCard`; on timeout it also
+  clears `pairingsGeneration.ts`'s in-flight dedupe entry so a hung call
+  doesn't permanently block retries for that recipe.
+- **Generation triggers only when the Pairings tab is actually opened**
+  (`tab === "pairings"`), never on card mount, and at most once per recipe
+  per mount (`pairingsFetchedForRef`).
+
+### Safety (`pairingsSafety.ts`)
+
+`filterPairings` is the deterministic enforcement boundary — the system
+prompt is a quality layer only; nothing the AI returns is trusted, retried
+around, or persisted without passing this filter first, same two-layer
+posture as Build/cook-chat's allergy hardening.
+
+- **Alcohol gate** — when `alcohol_ok !== true`, any item with
+  `is_alcoholic: true`, or whose `name` matches an `ALCOHOL_TERMS` entry, or
+  whose `why` matches one (except a term that's also present in the recipe's
+  own text, exempted so e.g. a beer-braised dish's own ingredient list
+  doesn't get treated as a drink-name hit), is dropped.
+- **Allergen scan** — reuses, read-only, the exact same Big-9 resolution and
+  free-text scan Build/cook-chat's allergy hardening uses
+  (`effectiveAllergensForScan`/`scanFreeTextForBig9` from `allergyMap.ts`):
+  `NULL` allergies → fail-closed to all nine Big-9 ids; confirmed-none →
+  empty set; `unparsed` → deterministic scan of the raw failed-answer text.
+- **`DRINK_CARRIER_TERMS`** — a separate, pairings-only list of drink/cocktail
+  names that carry a Big-9 allergen even when the allergen word itself never
+  appears (e.g. "IPA" never says "wheat," "Baileys" never says "milk").
+  Deliberately kept separate from `ALLERGEN_SYNONYM_MAP` in `allergyMap.ts`
+  (which is about raw ingredient text, not drink names) — merging them would
+  risk off-target matches in the ingredient-scanning paths that map already
+  serves. Checked against `ALLERGEN_SYNONYM_MAP` for conflicts (no shared key
+  maps to a different Big-9 id).
+- **`allergies.other[]`** free-text terms are matched the same way as the
+  Big-9/carrier lists.
+- **Drink names are scanned strictly, with no exemptions** (an item's `name`
+  can never be excused by appearing in the recipe's own text) — the `why`
+  text gets the recipe-text exemptions described above, since a why-sentence
+  can legitimately reference the dish's own ingredients.
+
+### Shares/sends
+
+Pairings and drink preferences never travel through either sharing path —
+`recipe_shares` snapshots (public share links) and received/saved copies
+(account-to-account sends) carry no `pairings`, `pairings_fingerprint`,
+`drink_preference`, or `alcohol_ok` data. A recipient generates their own
+pairings from scratch, under their own profile, on their own first open of
+the Pairings tab on their own saved copy — confirmed live via a real
+two-account share/save/open test (clean snapshot JSON, a distinct `recipes`
+row for the recipient, exactly one `pairings-gen` call on their first open,
+all-non-alcoholic output matching their own `alcohol_ok: false`).
+
+### Known follow-ups
+
+- **No shared toggle component exists.** `Profile.tsx`'s pairings toggle uses
+  a local `ToggleRow` — the first toggle in the codebase — built in place
+  rather than extracted, since there was nothing to extract from yet.
+- **`ProfileType` is independently declared in multiple files** (already a
+  pre-existing duplication, not introduced by this feature) and each
+  declaration now includes `wants_pairings`/`drink_preference`/`alcohol_ok` —
+  keep them in sync by hand until/unless that duplication is ever resolved.

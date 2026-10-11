@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, type CSSProperties } from "react";
-import { generateTasteProfile, generateOnboardingReflection, composeConstraintsAndAllergies, recordSharedRecipeDiscovery, PENDING_SHARE_TOKEN_KEY, type StructuredAllergies } from "./data";
+import { generateTasteProfile, generateOnboardingReflection, composeConstraintsAndAllergies, recordSharedRecipeDiscovery, saveDrinkPreference, PENDING_SHARE_TOKEN_KEY, type StructuredAllergies } from "./data";
 import { buildConstraintsConfirmation } from "./constraintsConfirmation";
+import { classifyDrinksAnswer } from "./drinksYesNo";
 import { supabase } from "../lib/supabase";
 import { logEvent } from "../lib/events";
 import { ChatBubble, TypingBubble, CookInputBar } from "./ChatUI";
@@ -15,6 +16,9 @@ type ProfileType = {
   handle: string;
   onboarding_complete: boolean;
   taste_profile: string | null;
+  wants_pairings: boolean | null;
+  drink_preference: string | null;
+  alcohol_ok: boolean | null;
 };
 
 type Props = {
@@ -65,7 +69,7 @@ async function waitForTasteProfile(profileId: string, maxWaitMs: number, interva
 }
 
 type ChatMessage = { id: number; role: "user" | "ai"; text: string };
-type Stage = "palate" | "inspiration" | "constraints" | "done";
+type Stage = "palate" | "inspiration" | "drinks" | "drinksFollowup" | "constraints" | "done";
 
 // Build's AI text reveal (App.tsx's fireAICall/sendMessage) is driven by real
 // token arrival over the ai-chat SSE stream — there's no timing constant to
@@ -272,6 +276,29 @@ function OnboardingChat({
     }
   };
 
+  // Relocated, byte-identical copy of the original constraints-question line
+  // so it can be reached from the new drinks/drinksFollowup branches as well
+  // as from the inspiration branch — not just the single place it used to
+  // fire from.
+  const enterConstraintsStage = async () => {
+    await sayAI("Last thing, and this one I'll always respect. Any allergies I should know about? And then, separately, anything you'd just rather not see.");
+    setStage("constraints");
+    setAwaitingInput(true);
+  };
+
+  // Fire-and-forget-safe wrapper around saveDrinkPreference — userId comes
+  // from profile.id, the same source already used by runHandoffOnce above.
+  // Fails soft (console error only) if profile isn't available yet, since
+  // this is a brand-new user mid-onboarding and must never hang or surface
+  // an error.
+  const maybeSaveDrinkPreference = async (answer: string): Promise<void> => {
+    if (!profile?.id) {
+      console.error("maybeSaveDrinkPreference: no profile id available, skipping save");
+      return;
+    }
+    await saveDrinkPreference(answer, safeUpdate, profile.id);
+  };
+
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
@@ -281,8 +308,8 @@ function OnboardingChat({
     (async () => {
       await sayAI(
         firstName
-          ? `Hey ${firstName}! Welcome to Tipsy Dinner, excited to cook together. Before we get going, I want to learn your taste a little. Three quick things, then I'll set up your kitchen around them.`
-          : "Hey — welcome to Tipsy Dinner, excited to cook together. Before we get going, I want to learn your taste a little. Three quick things, then I'll set up your kitchen around them."
+          ? `Hey ${firstName}! Welcome to Tipsy Dinner, excited to cook together. Before we get going, I want to learn your taste a little. A few quick things, then I'll set up your kitchen around them.`
+          : "Hey — welcome to Tipsy Dinner, excited to cook together. Before we get going, I want to learn your taste a little. A few quick things, then I'll set up your kitchen around them."
       );
       await sayAI("So: what makes your cooking yours? Cuisines you keep coming back to, flavors you lean on, the way you like to cook.");
       setAwaitingInput(true);
@@ -325,9 +352,49 @@ function OnboardingChat({
       logEvent("onboarding_step_answered", { step: "inspiration" });
       await sayReflection("inspiration", val, nextFallbackAck());
       await writePromise;
-      await sayAI("Last thing, and this one I'll always respect. Any allergies I should know about? And then, separately, anything you'd just rather not see.");
-      setStage("constraints");
+      await sayAI("Do you want to see drink pairings with recipes? If so, what do you like to drink?");
+      setStage("drinks");
       setAwaitingInput(true);
+      return;
+    }
+
+    if (stage === "drinks") {
+      const classification = classifyDrinksAnswer(val);
+      if (classification === "no") {
+        const writePromise = safeUpdate({ wants_pairings: false });
+        // onboarding_step_answered — drinks question answered
+        logEvent("onboarding_step_answered", { step: "drinks" });
+        await sayAI("No problem — just the food, then.");
+        await writePromise;
+        await enterConstraintsStage();
+        return;
+      }
+      if (classification === "yes") {
+        const writePromise = safeUpdate({ wants_pairings: true });
+        await sayAI("What do you like to drink?");
+        await writePromise;
+        setStage("drinksFollowup");
+        setAwaitingInput(true);
+        return;
+      }
+      const writePromise = safeUpdate({ wants_pairings: true });
+      const savePromise = maybeSaveDrinkPreference(val);
+      // onboarding_step_answered — drinks question answered
+      logEvent("onboarding_step_answered", { step: "drinks" });
+      await sayAI("Got it — I'll keep that in mind.");
+      await writePromise;
+      await savePromise;
+      await enterConstraintsStage();
+      return;
+    }
+
+    if (stage === "drinksFollowup") {
+      const savePromise = maybeSaveDrinkPreference(val);
+      // onboarding_step_answered — drinks question answered
+      logEvent("onboarding_step_answered", { step: "drinks" });
+      await sayAI("Got it — I'll keep that in mind.");
+      await savePromise;
+      await enterConstraintsStage();
       return;
     }
 
