@@ -34,7 +34,7 @@ import {
 } from "@tabler/icons-react";
 import { selectDailyChips, getRecentlyShownChipIds, recordShownChipIds } from "./chips";
 import { ChatBubble, TypingBubble, CookInputBar } from "./ChatUI";
-import { getPairingsForRecipe, regeneratePairings, clearInFlightPairings } from "./pairingsGeneration";
+import { getPairingsForRecipe, regeneratePairings, clearInFlightPairings, clearPairingsFailureMemo } from "./pairingsGeneration";
 import { type PairingItem } from "./pairingsSafety";
 
 type RecipeDraft = {
@@ -3148,6 +3148,9 @@ function RecipeCard({
   const handleRetryPairings = async () => {
     if (!recipe.savedId) return;
     const recipeKey = recipe.savedId.toString();
+    // Explicit retry is the only thing allowed to clear the session failure
+    // memo — automatic calls (tab open, remount) must keep bouncing off it.
+    clearPairingsFailureMemo(recipeKey);
     setPairingsState({ status: "loading" });
     try {
       const { data } = await supabase.auth.getUser();

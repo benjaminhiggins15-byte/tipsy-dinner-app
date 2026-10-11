@@ -483,6 +483,45 @@ const persistPairingsToDb: PersistPairings = async (recipeId, userId, pairings, 
 
 const MAX_GENERATION_ATTEMPTS = 3;
 
+// ---------------------------------------------------------------------------
+// Cost circuit breakers (both module-level, both reset only on a full page
+// reload — same lifetime as inFlightByRecipeId below)
+// ---------------------------------------------------------------------------
+
+// 1. Session failure memo. A recipe that reaches "failed" (3 exhausted
+// attempts via getPairingsForRecipe) stays memoized for the rest of this
+// session: every AUTOMATIC call (Pairings tab auto-open, a RecipeCard
+// remount re-running the same fetch effect) short-circuits to "failed" with
+// zero AI calls, rather than re-spending up to 3 AI calls on a dish that
+// just failed. The only way back in is the user's own explicit "Try again,"
+// which calls clearPairingsFailureMemo first — see handleRetryPairings in
+// App.tsx.
+const sessionFailedRecipeIds = new Set<string>();
+
+export function clearPairingsFailureMemo(recipeId: string): void {
+  sessionFailedRecipeIds.delete(recipeId);
+}
+
+// 2. Session AI-call cap. Counts every pairings-gen AI call across the whole
+// session — every attempt of every getPairingsForRecipe/regeneratePairings
+// invocation, shared since both route through generatePairingsWithRetries
+// below. A cache hit never reaches that loop, so it never counts. Once the
+// cap is reached, generatePairingsWithRetries refuses to make another call
+// and logs a warning instead of silently continuing to spend; the caller
+// sees the same "failed" outcome as any other exhausted-attempts case.
+// Exported as a single named constant so the limit is a one-line change.
+export const PAIRINGS_SESSION_AI_CALL_CAP = 20;
+let sessionAiCallCount = 0;
+
+// Test-only reset hook. Both counters above are intentionally process-
+// lifetime state (mirroring a real browser tab's lifetime); this lets each
+// test run the cap/memo logic deterministically instead of inheriting
+// leftover state from earlier tests in the same file.
+export function __resetPairingsSessionStateForTests(): void {
+  sessionFailedRecipeIds.clear();
+  sessionAiCallCount = 0;
+}
+
 // Generates up to MAX_GENERATION_ATTEMPTS times, filtering every attempt.
 // Returns the first COMPLETE filtered result; returns null if every attempt
 // was incomplete (a malformed/unparseable response counts as an attempt,
@@ -500,6 +539,14 @@ async function generatePairingsWithRetries(
   const excludeNames = [...initialExcludeNames];
 
   for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt++) {
+    if (sessionAiCallCount >= PAIRINGS_SESSION_AI_CALL_CAP) {
+      console.warn(
+        `Pairings generation: session AI-call cap (${PAIRINGS_SESSION_AI_CALL_CAP}) reached; refusing further pairings AI calls this session.`
+      );
+      return null;
+    }
+    sessionAiCallCount += 1;
+
     const systemPrompt = buildPairingsSystemPrompt(recipe, profileInputs, excludeNames, attempt > 1);
 
     let parsedItems: unknown[];
@@ -635,6 +682,13 @@ export async function getPairingsForRecipe(
   userId: string,
   overrides: PairingsGenerationOverrides = {}
 ): Promise<PairingsOutcome> {
+  // Session failure memo short-circuit — zero AI calls, zero DB reads, no
+  // in-flight dedupe entry created. Only an explicit clearPairingsFailureMemo
+  // call (the user's own "Try again") removes a recipe from this set.
+  if (sessionFailedRecipeIds.has(recipeId)) {
+    return { status: "failed" };
+  }
+
   return runExclusive(recipeId, async () => {
     const { fetchRecipe, fetchProfile, callAI, persistPairings } = resolveDeps(overrides);
 
@@ -667,10 +721,12 @@ export async function getPairingsForRecipe(
 
     const generated = await generatePairingsWithRetries(recipe, profileInputs, filterOptions, callAI, userId);
     if (!generated) {
+      sessionFailedRecipeIds.add(recipeId);
       return { status: "failed" };
     }
 
     await persistPairings(recipeId, userId, generated.items, currentFingerprint);
+    sessionFailedRecipeIds.delete(recipeId);
     return { status: "ok", items: generated.items };
   });
 }
@@ -733,6 +789,7 @@ export async function regeneratePairings(
     }
 
     await persistPairings(recipeId, userId, generated.items, currentFingerprint);
+    sessionFailedRecipeIds.delete(recipeId);
     return { status: "ok", items: generated.items };
   });
 }

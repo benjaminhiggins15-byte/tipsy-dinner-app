@@ -8,6 +8,9 @@ import {
   getPairingsForRecipe,
   regeneratePairings,
   classifyDishOccasion,
+  clearPairingsFailureMemo,
+  PAIRINGS_SESSION_AI_CALL_CAP,
+  __resetPairingsSessionStateForTests,
   type PairingsRecipeRecord,
   type PairingsProfileRecord,
   type PairingsGenerationOverrides,
@@ -188,6 +191,7 @@ async function run() {
   // 1. Cache hit, fingerprint match, passes re-filter -> zero AI calls
   // -------------------------------------------------------------------------
   {
+    __resetPairingsSessionStateForTests();
     const recipe = makeRecipeRecord();
     const profile = makeProfileRecord();
     recipe.pairings = DRINKER_ITEMS;
@@ -224,6 +228,7 @@ async function run() {
   //    allergy) -> regenerates
   // -------------------------------------------------------------------------
   {
+    __resetPairingsSessionStateForTests();
     const profile = makeProfileRecord({ allergies: { big9: ["wheat"], other: [] } });
     const recipe = makeRecipeRecord({ id: "recipe-2" });
     // Fingerprint is computed from CURRENT recipe/profile — a cache hit here
@@ -263,6 +268,7 @@ async function run() {
   // 3. Recipe ingredients changed -> regenerates
   // -------------------------------------------------------------------------
   {
+    __resetPairingsSessionStateForTests();
     const profile = makeProfileRecord();
     const recipe = makeRecipeRecord({ id: "recipe-3" });
     // Stamp the cache under the OLD ingredients, then change them — the
@@ -297,6 +303,7 @@ async function run() {
     ["allergies", (p) => ({ ...p, allergies: { big9: ["milk"] as Big9Id[], other: [] } })],
   ];
   for (const [label, mutate] of mutations) {
+    __resetPairingsSessionStateForTests();
     const originalProfile = makeProfileRecord();
     const recipe = makeRecipeRecord({ id: `recipe-4-${label}` });
     recipe.pairings = DRINKER_ITEMS;
@@ -326,6 +333,7 @@ async function run() {
   // 5. wants_pairings false and null -> "off", zero AI calls, no writes
   // -------------------------------------------------------------------------
   for (const wantsPairings of [false, null] as const) {
+    __resetPairingsSessionStateForTests();
     const recipe = makeRecipeRecord({ id: `recipe-5-${String(wantsPairings)}` });
     const profile = makeProfileRecord({ wants_pairings: wantsPairings });
 
@@ -356,6 +364,7 @@ async function run() {
   //    anything but the freshly-fetched DB profile)
   // -------------------------------------------------------------------------
   {
+    __resetPairingsSessionStateForTests();
     const staleProfile = makeProfileRecord({ alcohol_ok: true });
     const recipe = makeRecipeRecord({ id: "recipe-6" });
     recipe.pairings = DRINKER_ITEMS;
@@ -383,6 +392,7 @@ async function run() {
   // alcohol_ok NULL is treated as false (fail-closed), never as true
   // -------------------------------------------------------------------------
   {
+    __resetPairingsSessionStateForTests();
     const profile = makeProfileRecord({ alcohol_ok: null });
     const recipe = makeRecipeRecord({ id: "recipe-6b" });
 
@@ -409,6 +419,7 @@ async function run() {
   // 7. Two concurrent calls, same recipe -> exactly one AI call
   // -------------------------------------------------------------------------
   {
+    __resetPairingsSessionStateForTests();
     const recipe = makeRecipeRecord({ id: "recipe-7" });
     const profile = makeProfileRecord();
     let aiCalls = 0;
@@ -434,6 +445,7 @@ async function run() {
   // 8. Attempt 1 has an alcoholic item for a non-drinker, attempt 2 clean -> saved
   // -------------------------------------------------------------------------
   {
+    __resetPairingsSessionStateForTests();
     const recipe = makeRecipeRecord({ id: "recipe-8" });
     const profile = makeProfileRecord({ alcohol_ok: false });
     let aiCalls = 0;
@@ -468,6 +480,7 @@ async function run() {
   // 9. 3 incomplete attempts -> "failed", nothing saved
   // -------------------------------------------------------------------------
   {
+    __resetPairingsSessionStateForTests();
     const recipe = makeRecipeRecord({ id: "recipe-9" });
     const profile = makeProfileRecord({ alcohol_ok: false });
     let aiCalls = 0;
@@ -498,6 +511,7 @@ async function run() {
   // 10. Malformed JSON counts as an attempt
   // -------------------------------------------------------------------------
   {
+    __resetPairingsSessionStateForTests();
     const recipe = makeRecipeRecord({ id: "recipe-10" });
     const profile = makeProfileRecord();
     let aiCalls = 0;
@@ -517,6 +531,7 @@ async function run() {
     check("malformed JSON on attempt 1, clean attempt 2: status is ok", result.status, "ok");
   }
   {
+    __resetPairingsSessionStateForTests();
     // All 3 attempts malformed -> failed, not an infinite retry and not a thrown error.
     const recipe = makeRecipeRecord({ id: "recipe-10b" });
     const profile = makeProfileRecord();
@@ -541,6 +556,7 @@ async function run() {
   // 11. regenerate: failure keeps old pairings; success overwrites
   // -------------------------------------------------------------------------
   {
+    __resetPairingsSessionStateForTests();
     // 11a. regenerate success: overwrites, and asks the AI to avoid the
     // currently-cached names.
     const recipe = makeRecipeRecord({ id: "recipe-11a" });
@@ -625,6 +641,7 @@ async function run() {
   // 12. Prompt content: tags present, recipe text confined to <recipe>
   // -------------------------------------------------------------------------
   {
+    __resetPairingsSessionStateForTests();
     const recipe = makeRecipeRecord({
       id: "recipe-12a",
       title: "Braised Short Rib Supreme",
@@ -669,6 +686,7 @@ async function run() {
   //     -none -> no allergy block
   // -------------------------------------------------------------------------
   {
+    __resetPairingsSessionStateForTests();
     const recipe = makeRecipeRecord({ id: "recipe-13a" });
     const profile = makeProfileRecord({ allergies: null });
 
@@ -692,6 +710,7 @@ async function run() {
     );
   }
   {
+    __resetPairingsSessionStateForTests();
     const recipe = makeRecipeRecord({ id: "recipe-13b" });
     const profile = makeProfileRecord({ allergies: { big9: [], other: [] } });
 
@@ -716,6 +735,7 @@ async function run() {
   const DRINKER_ONLY_PHRASE = "Always include at least 1 non-alcoholic option.";
   const NON_DRINKER_ONLY_PHRASE = "Give each a descriptive, appetizing name based on what's in it";
   {
+    __resetPairingsSessionStateForTests();
     const recipe = makeRecipeRecord({ id: "recipe-14a" });
     const profile = makeProfileRecord({ alcohol_ok: true });
 
@@ -735,6 +755,7 @@ async function run() {
     check("prompt content: drinker prompt does NOT contain the non-drinker block", capturedPrompt.includes(NON_DRINKER_ONLY_PHRASE), false);
   }
   {
+    __resetPairingsSessionStateForTests();
     const recipe = makeRecipeRecord({ id: "recipe-14b" });
     const profile = makeProfileRecord({ alcohol_ok: false });
 
@@ -759,6 +780,7 @@ async function run() {
   //     omitted cleanly (no stray tag, no stray line)
   // -------------------------------------------------------------------------
   {
+    __resetPairingsSessionStateForTests();
     const recipe = makeRecipeRecord({ id: "recipe-15", description: "" });
     const profile = makeProfileRecord({ drink_preference: null, palate: null });
 
@@ -787,6 +809,7 @@ async function run() {
   //     to avoid).
   // -------------------------------------------------------------------------
   {
+    __resetPairingsSessionStateForTests();
     const recipe = makeRecipeRecord({ id: "recipe-16" });
     const profile = makeProfileRecord({ alcohol_ok: false, allergies: null, drink_preference: null });
 
@@ -855,6 +878,7 @@ async function run() {
   //     wordings, and fish/shellfish collapsing to one line
   // -------------------------------------------------------------------------
   {
+    __resetPairingsSessionStateForTests();
     const recipe = makeRecipeRecord({ id: "recipe-18a" });
     const profile = makeProfileRecord({ alcohol_ok: true, allergies: { big9: ["wheat", "egg"], other: [] } });
 
@@ -896,6 +920,7 @@ async function run() {
     );
   }
   {
+    __resetPairingsSessionStateForTests();
     const recipe = makeRecipeRecord({ id: "recipe-18b" });
     const profile = makeProfileRecord({ alcohol_ok: true, allergies: { big9: ["shellfish"], other: [] } });
 
@@ -921,6 +946,7 @@ async function run() {
   //     non-drinkers when it names no alcohol term.
   // -------------------------------------------------------------------------
   {
+    __resetPairingsSessionStateForTests();
     const recipe = makeRecipeRecord({ id: "recipe-17a" });
     const profile = makeProfileRecord({ alcohol_ok: false, drink_preference: "I used to love whiskey" });
 
@@ -948,6 +974,7 @@ async function run() {
     );
   }
   {
+    __resetPairingsSessionStateForTests();
     const recipe = makeRecipeRecord({ id: "recipe-17b" });
     const profile = makeProfileRecord({ alcohol_ok: false, drink_preference: "tea and sparkling water" });
 
@@ -970,6 +997,7 @@ async function run() {
     );
   }
   {
+    __resetPairingsSessionStateForTests();
     const recipe = makeRecipeRecord({ id: "recipe-17c" });
     const profile = makeProfileRecord({ alcohol_ok: true, drink_preference: "I love wine, but only red" });
 
@@ -996,6 +1024,7 @@ async function run() {
   // 18. Dish occasion classification (title + description only).
   // -------------------------------------------------------------------------
   {
+    __resetPairingsSessionStateForTests();
     check(
       "classifyDishOccasion: 'Kid-Friendly Mac and Cheese' -> no_alcohol",
       classifyDishOccasion(
@@ -1024,6 +1053,7 @@ async function run() {
   //     comes back is dropped by the filter.
   // -------------------------------------------------------------------------
   {
+    __resetPairingsSessionStateForTests();
     const recipe = makeRecipeRecord({
       id: "recipe-19",
       title: "Mango Banana Smoothie",
@@ -1072,6 +1102,127 @@ async function run() {
       itemNames = result.items.map((i) => i.name);
     }
     check("smoothie for a drinker: alcoholic 'Mimosa' dropped from final result", itemNames.includes("Mimosa"), false);
+  }
+
+  // -------------------------------------------------------------------------
+  // 20. Cost circuit breaker #1: session failure memo
+  // -------------------------------------------------------------------------
+  __resetPairingsSessionStateForTests();
+  {
+    const recipe = makeRecipeRecord({ id: "recipe-cb-memo" });
+    const profile = makeProfileRecord();
+
+    let aiCalls = 0;
+    const firstResult = await getPairingsForRecipe(
+      "recipe-cb-memo",
+      "user-1",
+      makeOverrides(recipe, profile, {
+        callAI: async () => {
+          aiCalls += 1;
+          return "{ not valid json";
+        },
+      })
+    );
+    check("circuit breaker: 3 exhausted attempts produces status failed", firstResult.status, "failed");
+    check("circuit breaker: 3 exhausted attempts makes exactly 3 AI calls", aiCalls, 3);
+
+    // Automatic re-open (tab reopen / remount) of the SAME recipe: must
+    // short-circuit to "failed" with zero new AI calls.
+    let autoReopenAiCalls = 0;
+    const autoReopenResult = await getPairingsForRecipe(
+      "recipe-cb-memo",
+      "user-1",
+      makeOverrides(recipe, profile, {
+        callAI: async () => {
+          autoReopenAiCalls += 1;
+          return JSON.stringify(DRINKER_ITEMS);
+        },
+      })
+    );
+    check("failed recipe re-opened automatically: status is failed", autoReopenResult.status, "failed");
+    check("failed recipe re-opened automatically: zero new AI calls", autoReopenAiCalls, 0);
+
+    // Explicit "Try again": clears the memo first, so the call actually reaches the AI.
+    clearPairingsFailureMemo("recipe-cb-memo");
+    let retryAiCalls = 0;
+    const retryResult = await getPairingsForRecipe(
+      "recipe-cb-memo",
+      "user-1",
+      makeOverrides(recipe, profile, {
+        callAI: async () => {
+          retryAiCalls += 1;
+          return JSON.stringify(DRINKER_ITEMS);
+        },
+      })
+    );
+    check("Try again after a failure: AI is called again", retryAiCalls, 1);
+    check("Try again after a failure: status is ok", retryResult.status, "ok");
+  }
+
+  // -------------------------------------------------------------------------
+  // 21. Cost circuit breaker #2: session AI-call cap
+  // -------------------------------------------------------------------------
+  __resetPairingsSessionStateForTests();
+  {
+    // Spend exactly PAIRINGS_SESSION_AI_CALL_CAP AI calls across
+    // PAIRINGS_SESSION_AI_CALL_CAP distinct recipes, each succeeding on its
+    // first attempt (so each consumes exactly 1 AI call).
+    for (let i = 0; i < PAIRINGS_SESSION_AI_CALL_CAP; i++) {
+      const recipe = makeRecipeRecord({ id: `recipe-cb-cap-${i}` });
+      const profile = makeProfileRecord();
+      const result = await getPairingsForRecipe(
+        `recipe-cb-cap-${i}`,
+        "user-1",
+        makeOverrides(recipe, profile, {
+          callAI: async () => JSON.stringify(DRINKER_ITEMS),
+        })
+      );
+      check(`cap warm-up call ${i + 1}/${PAIRINGS_SESSION_AI_CALL_CAP}: status is ok`, result.status, "ok");
+    }
+
+    // The next (cap + 1-th) AI call in the session must be blocked entirely.
+    let blockedAiCalls = 0;
+    const blockedResult = await getPairingsForRecipe(
+      "recipe-cb-cap-overflow",
+      "user-1",
+      makeOverrides(makeRecipeRecord({ id: "recipe-cb-cap-overflow" }), makeProfileRecord(), {
+        callAI: async () => {
+          blockedAiCalls += 1;
+          return JSON.stringify(DRINKER_ITEMS);
+        },
+      })
+    );
+    check(
+      `the ${PAIRINGS_SESSION_AI_CALL_CAP + 1}th AI call in a session is blocked: zero AI calls made`,
+      blockedAiCalls,
+      0
+    );
+    check(
+      `the ${PAIRINGS_SESSION_AI_CALL_CAP + 1}th AI call in a session is blocked: status is failed`,
+      blockedResult.status,
+      "failed"
+    );
+
+    // A cache hit must not count toward the cap — proven here by succeeding
+    // via cache alone while the cap above is still fully exhausted.
+    const cachedRecipe = makeRecipeRecord({ id: "recipe-cb-cache-hit" });
+    const cachedProfile = makeProfileRecord();
+    cachedRecipe.pairings = DRINKER_ITEMS;
+    cachedRecipe.pairings_fingerprint = fingerprintFor(cachedRecipe, cachedProfile);
+
+    let cacheHitAiCalls = 0;
+    const cacheHitResult = await getPairingsForRecipe(
+      "recipe-cb-cache-hit",
+      "user-1",
+      makeOverrides(cachedRecipe, cachedProfile, {
+        callAI: async () => {
+          cacheHitAiCalls += 1;
+          return JSON.stringify(DRINKER_ITEMS);
+        },
+      })
+    );
+    check("cache hit while session cap is exhausted: zero AI calls", cacheHitAiCalls, 0);
+    check("cache hit while session cap is exhausted: status is ok", cacheHitResult.status, "ok");
   }
 
   console.log();
