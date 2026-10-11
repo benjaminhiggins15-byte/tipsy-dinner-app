@@ -34,7 +34,7 @@ import {
 } from "@tabler/icons-react";
 import { selectDailyChips, getRecentlyShownChipIds, recordShownChipIds } from "./chips";
 import { ChatBubble, TypingBubble, CookInputBar } from "./ChatUI";
-import { getPairingsForRecipe, regeneratePairings } from "./pairingsGeneration";
+import { getPairingsForRecipe, regeneratePairings, clearInFlightPairings } from "./pairingsGeneration";
 import { type PairingItem } from "./pairingsSafety";
 
 type RecipeDraft = {
@@ -2901,6 +2901,32 @@ function AllRecipes({
   );
 }
 
+const PAIRINGS_TIMEOUT_MS = 45000;
+
+// UI-side timeout for pairings calls. A hung AI call has no real
+// cancellation path, so this races the real promise against a timer; on
+// timeout it also clears pairingsGeneration.ts's in-flight dedupe entry so a
+// subsequent call (e.g. Try again) starts a fresh attempt instead of
+// awaiting the same stuck promise forever.
+function withPairingsTimeout<T>(promise: Promise<T>, onTimeout: () => void, ms: number = PAIRINGS_TIMEOUT_MS): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      onTimeout();
+      reject(new Error("Pairings request timed out"));
+    }, ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
 /* ---------------- Recipe Card ---------------- */
 function RecipeCard({
   recipe,
@@ -2990,9 +3016,22 @@ function RecipeCard({
     logEvent("recipe_opened", { recipe_id: recipe.savedId });
   }, [recipe.savedId]);
 
+  // Tracks which recipe the effect below has already fired a fetch for.
+  // Deliberately a ref, not state: putting pairingsState.status in that
+  // effect's dependency array (previous version of this code) meant the
+  // setPairingsState("loading") call INSIDE the effect was itself a
+  // dependency change, so React re-ran the effect immediately — cleaning up
+  // the in-flight instance (flipping its `ignore`/`cancelled` flag) before
+  // the request had even resolved. The result then arrived to a closure that
+  // had already been told to discard it, leaving the UI stuck on "loading"
+  // forever on every single invocation. A ref sidesteps this: it changes
+  // without triggering a re-render or an effect re-run.
+  const pairingsFetchedForRef = useRef<string | null>(null);
+
   // Pairings state resets whenever the displayed recipe changes, so a stale
   // result from the previous recipe never bleeds into the new one.
   useEffect(() => {
+    pairingsFetchedForRef.current = null;
     setPairingsState({ status: "idle" });
     setExpandedPairings(new Set());
     setRegeneratingPairings(false);
@@ -3000,30 +3039,36 @@ function RecipeCard({
   }, [recipe.savedId]);
 
   // Generation only fires once the Pairings tab is actually opened, never on
-  // card mount. The pairingsState.status !== "idle" guard makes this safe to
-  // depend on its own status: setting "loading" below re-runs the effect,
-  // which then no-ops instead of double-firing the request.
+  // card mount, and at most once per recipe (pairingsFetchedForRef). Any
+  // thrown error or rejection (including the 45s timeout below) resolves to
+  // "failed" rather than leaving status stuck on "loading".
   useEffect(() => {
     if (tab !== "pairings" || !wantsPairings || !recipe.savedId) return;
-    if (pairingsState.status !== "idle") return;
-    let ignore = false;
+    const recipeKey = recipe.savedId.toString();
+    if (pairingsFetchedForRef.current === recipeKey) return;
+    pairingsFetchedForRef.current = recipeKey;
+    let cancelled = false;
     setPairingsState({ status: "loading" });
     (async () => {
-      const { data } = await supabase.auth.getUser();
-      const userId = data.user?.id;
-      if (ignore) return;
-      if (!userId) {
+      try {
+        const { data } = await supabase.auth.getUser();
+        const userId = data.user?.id;
+        if (!userId) throw new Error("Not signed in");
+        const result = await withPairingsTimeout(
+          getPairingsForRecipe(recipeKey, userId),
+          () => clearInFlightPairings(recipeKey)
+        );
+        if (cancelled) return;
+        setPairingsState(result.status === "ok" ? { status: "ok", items: result.items } : { status: result.status });
+      } catch {
+        if (cancelled) return;
         setPairingsState({ status: "failed" });
-        return;
       }
-      const result = await getPairingsForRecipe(recipe.savedId!.toString(), userId);
-      if (ignore) return;
-      setPairingsState(result.status === "ok" ? { status: "ok", items: result.items } : { status: result.status });
     })();
     return () => {
-      ignore = true;
+      cancelled = true;
     };
-  }, [tab, wantsPairings, recipe.savedId, pairingsState.status]);
+  }, [tab, wantsPairings, recipe.savedId]);
 
   // Debounced server search — the ignore flag guards against a slow earlier
   // query's response landing after a newer one (same pattern as every other
@@ -3102,37 +3147,47 @@ function RecipeCard({
 
   const handleRetryPairings = async () => {
     if (!recipe.savedId) return;
+    const recipeKey = recipe.savedId.toString();
     setPairingsState({ status: "loading" });
-    const { data } = await supabase.auth.getUser();
-    const userId = data.user?.id;
-    if (!userId) {
+    try {
+      const { data } = await supabase.auth.getUser();
+      const userId = data.user?.id;
+      if (!userId) throw new Error("Not signed in");
+      const result = await withPairingsTimeout(
+        getPairingsForRecipe(recipeKey, userId),
+        () => clearInFlightPairings(recipeKey)
+      );
+      setPairingsState(result.status === "ok" ? { status: "ok", items: result.items } : { status: result.status });
+    } catch {
       setPairingsState({ status: "failed" });
-      return;
     }
-    const result = await getPairingsForRecipe(recipe.savedId.toString(), userId);
-    setPairingsState(result.status === "ok" ? { status: "ok", items: result.items } : { status: result.status });
   };
 
   const handleRegeneratePairings = async () => {
     if (!recipe.savedId) return;
+    const recipeKey = recipe.savedId.toString();
     setRegeneratingPairings(true);
     setRegenerateFailed(false);
-    const { data } = await supabase.auth.getUser();
-    const userId = data.user?.id;
-    if (!userId) {
+    try {
+      const { data } = await supabase.auth.getUser();
+      const userId = data.user?.id;
+      if (!userId) throw new Error("Not signed in");
+      const result = await withPairingsTimeout(
+        regeneratePairings(recipeKey, userId),
+        () => clearInFlightPairings(recipeKey)
+      );
+      if (result.status === "ok") {
+        setExpandedPairings(new Set());
+        setPairingsState({ status: "ok", items: result.items });
+      } else if (result.status === "off") {
+        setPairingsState({ status: "off" });
+      } else {
+        setRegenerateFailed(true);
+      }
+    } catch {
+      setRegenerateFailed(true);
+    } finally {
       setRegeneratingPairings(false);
-      setRegenerateFailed(true);
-      return;
-    }
-    const result = await regeneratePairings(recipe.savedId.toString(), userId);
-    setRegeneratingPairings(false);
-    if (result.status === "ok") {
-      setExpandedPairings(new Set());
-      setPairingsState({ status: "ok", items: result.items });
-    } else if (result.status === "off") {
-      setPairingsState({ status: "off" });
-    } else {
-      setRegenerateFailed(true);
     }
   };
 
@@ -4264,7 +4319,7 @@ function RecipeCard({
                   fontFamily: "Inter, sans-serif",
                   fontSize: 13,
                   color: "rgba(35,60,0,0.4)",
-                }}>Finding something to drink with this…</p>
+                }}>Loading pairings…</p>
               )}
               {pairingsState.status === "failed" && (
                 <>
@@ -4297,7 +4352,7 @@ function RecipeCard({
                     fontFamily: "Inter, sans-serif",
                     fontSize: 13,
                     color: "rgba(35,60,0,0.4)",
-                  }}>Finding something to drink with this…</p>
+                  }}>Loading pairings…</p>
                 ) : (
                   <>
                     {pairingsState.items.map((item, idx) => {

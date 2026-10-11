@@ -554,6 +554,17 @@ export type PairingsOutcome =
 // at once. Shared between getPairingsForRecipe and regeneratePairings.
 const inFlightByRecipeId = new Map<string, Promise<PairingsOutcome>>();
 
+// Escape hatch for a UI-side timeout: if the underlying AI call hangs long
+// enough that the caller gives up, the entry above would otherwise sit
+// forever (nothing else ever rejects or resolves it), silently blocking
+// every future get/regenerate call for this recipe behind the same stuck
+// promise. Deleting the map entry does NOT cancel the stuck promise itself
+// (no real cancellation exists here) — it only lets the NEXT call start a
+// fresh attempt instead of re-awaiting the abandoned one.
+export function clearInFlightPairings(recipeId: string): void {
+  inFlightByRecipeId.delete(recipeId);
+}
+
 function resolveDeps(overrides: PairingsGenerationOverrides) {
   return {
     fetchRecipe: overrides.fetchRecipe ?? fetchRecipeFromDb,
