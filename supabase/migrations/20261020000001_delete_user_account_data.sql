@@ -38,6 +38,21 @@
 --     row (the exact leak identified in the pre-build sender-identity
 --     check). Clearing both columns explicitly, before the profile is
 --     touched, is the fix.
+--
+-- Verification strategy (revised 2026-10-20): per-statement row-count
+-- checks, NOT whole-table total comparisons. A whole-table total
+-- comparison (total_after = total_before - this_user's_rows) is spuriously
+-- tripped by any OTHER session inserting/deleting concurrently in the same
+-- table while this function runs — user_events and llm_usage are both
+-- under constant write traffic from the live app (the deleting user's own
+-- client may even be logging the delete action itself). For every DIRECT
+-- delete/update below, GET DIAGNOSTICS immediately after the statement is
+-- compared against that exact table's user-row count captured in the
+-- BEFORE snapshot — both numbers are scoped to this single user_id, so
+-- neither is affected by concurrent activity on other users' rows. For the
+-- tables only emptied indirectly via the profiles cascade, there is no
+-- direct statement to attach a diagnostics check to, so those keep a
+-- post-cascade zero-rows-for-this-user check instead.
 create or replace function public.delete_user_account_data(p_user_id uuid)
 returns jsonb
 language plpgsql
@@ -45,68 +60,41 @@ security definer
 set search_path = public
 as $$
 declare
-  -- before-state (captured before any write in this function)
+  -- before-state: this user's row count in each table, captured before any
+  -- write in this function. Used both as the expected row_count for that
+  -- table's own direct delete/update statement, and in the return payload.
   v_recipes_inspired_before bigint;
 
   v_notifications_user_before bigint;
-  v_notifications_total_before bigint;
-  v_notifications_cascade_extra bigint; -- other users' notifications that will cascade away via recipe_sends.ref_id
+  v_notifications_cascade_extra bigint; -- other users' notifications that will cascade away via recipe_sends.ref_id when this user's recipe_sends rows are deleted below; tracked for the return payload only, not part of any guard
 
   v_recipe_sends_user_before bigint;
-  v_recipe_sends_total_before bigint;
-
   v_connections_user_before bigint;
-  v_connections_total_before bigint;
-
   v_grocery_list_shares_user_before bigint;
-  v_grocery_list_shares_total_before bigint;
-
   v_grocery_items_user_before bigint;
-  v_grocery_items_total_before bigint;
-
   v_cook_events_user_before bigint;
-  v_cook_events_total_before bigint;
-
   v_recipe_shares_user_before bigint;
-  v_recipe_shares_total_before bigint;
-
   v_user_recipe_slices_user_before bigint;
-  v_user_recipe_slices_total_before bigint;
-
   v_llm_usage_user_before bigint;
-  v_llm_usage_total_before bigint;
-
   v_user_events_user_before bigint;
-  v_user_events_total_before bigint;
-
   v_profiles_user_before bigint;
-  v_profiles_total_before bigint;
 
+  -- cascade tables: emptied indirectly by the profiles delete, so there is
+  -- no direct statement/row_count to check against before-counts. Their
+  -- before-counts feed only the return payload; their after-counts feed
+  -- the zero-rows-remaining check below.
   v_categories_user_before bigint;
-  v_categories_total_before bigint;
-
   v_recipes_owned_user_before bigint;
-  v_recipes_owned_total_before bigint;
-
   v_ingredients_user_before bigint;
-  v_ingredients_total_before bigint;
-
   v_recipe_categories_user_before bigint;
-  v_recipe_categories_total_before bigint;
-
   v_occasions_user_before bigint;
-  v_occasions_total_before bigint;
-
   v_menus_user_before bigint;
-  v_menus_total_before bigint;
-
   v_menu_recipes_user_before bigint;
-  v_menu_recipes_total_before bigint;
-
   v_shared_recipe_discoveries_user_before bigint;
-  v_shared_recipe_discoveries_total_before bigint;
 
-  -- write results (rows updated/deleted by THIS function's own statements)
+  -- write results (rows updated/deleted by THIS function's own direct
+  -- statements) — each is checked against its matching *_before value
+  -- immediately after its statement runs.
   v_inspired_by_cleared bigint;
   v_notifications_deleted bigint;
   v_recipe_sends_deleted bigint;
@@ -120,125 +108,63 @@ declare
   v_user_events_deleted bigint;
   v_profiles_deleted bigint;
 
-  -- after-state (captured after every write above)
-  v_recipes_inspired_after bigint;
-  v_notifications_user_after bigint;
-  v_notifications_total_after bigint;
-  v_recipe_sends_user_after bigint;
-  v_recipe_sends_total_after bigint;
-  v_connections_user_after bigint;
-  v_connections_total_after bigint;
-  v_grocery_list_shares_user_after bigint;
-  v_grocery_list_shares_total_after bigint;
-  v_grocery_items_user_after bigint;
-  v_grocery_items_total_after bigint;
-  v_cook_events_user_after bigint;
-  v_cook_events_total_after bigint;
-  v_recipe_shares_user_after bigint;
-  v_recipe_shares_total_after bigint;
-  v_user_recipe_slices_user_after bigint;
-  v_user_recipe_slices_total_after bigint;
-  v_llm_usage_user_after bigint;
-  v_llm_usage_total_after bigint;
-  v_user_events_user_after bigint;
-  v_user_events_total_after bigint;
-  v_profiles_user_after bigint;
-  v_profiles_total_after bigint;
+  -- after-state: cascade tables only (zero-rows-remaining check).
   v_categories_user_after bigint;
-  v_categories_total_after bigint;
   v_recipes_owned_user_after bigint;
-  v_recipes_owned_total_after bigint;
   v_ingredients_user_after bigint;
-  v_ingredients_total_after bigint;
   v_recipe_categories_user_after bigint;
-  v_recipe_categories_total_after bigint;
   v_occasions_user_after bigint;
-  v_occasions_total_after bigint;
   v_menus_user_after bigint;
-  v_menus_total_after bigint;
   v_menu_recipes_user_after bigint;
-  v_menu_recipes_total_after bigint;
   v_shared_recipe_discoveries_user_after bigint;
-  v_shared_recipe_discoveries_total_after bigint;
 begin
   if p_user_id is null then
     raise exception 'delete_user_account_data: p_user_id must not be null';
   end if;
 
   -- =====================================================================
-  -- BEFORE SNAPSHOT — must run before any write below.
+  -- BEFORE SNAPSHOT — this user's row count per table, captured before any
+  -- write below.
   -- =====================================================================
   select count(*) into v_recipes_inspired_before from public.recipes where inspired_by_id = p_user_id;
 
   select count(*) into v_notifications_user_before from public.notifications where recipient_id = p_user_id;
-  select count(*) into v_notifications_total_before from public.notifications;
 
   select count(*) into v_recipe_sends_user_before from public.recipe_sends where sender_id = p_user_id or recipient_id = p_user_id;
-  select count(*) into v_recipe_sends_total_before from public.recipe_sends;
 
   -- Notifications belonging to OTHER users that will cascade away (via
   -- notifications.ref_id -> recipe_sends ON DELETE CASCADE) once this
-  -- user's recipe_sends rows are deleted below. This user's own
-  -- notifications (recipient_id = p_user_id) are counted separately above
-  -- and excluded here to avoid double-counting.
+  -- user's recipe_sends rows are deleted below. Tracked for the return
+  -- payload only — see header comment on the revised verification
+  -- strategy for why this is no longer part of a guard.
   select count(*) into v_notifications_cascade_extra
     from public.notifications n
     join public.recipe_sends rs on rs.id = n.ref_id
     where rs.sender_id = p_user_id and n.recipient_id <> p_user_id;
 
   select count(*) into v_connections_user_before from public.connections where user_a = p_user_id or user_b = p_user_id;
-  select count(*) into v_connections_total_before from public.connections;
-
   select count(*) into v_grocery_list_shares_user_before from public.grocery_list_shares where user_id = p_user_id;
-  select count(*) into v_grocery_list_shares_total_before from public.grocery_list_shares;
-
   select count(*) into v_grocery_items_user_before from public.grocery_items where user_id = p_user_id;
-  select count(*) into v_grocery_items_total_before from public.grocery_items;
-
   select count(*) into v_cook_events_user_before from public.cook_events where user_id = p_user_id;
-  select count(*) into v_cook_events_total_before from public.cook_events;
-
   select count(*) into v_recipe_shares_user_before from public.recipe_shares where user_id = p_user_id;
-  select count(*) into v_recipe_shares_total_before from public.recipe_shares;
-
   select count(*) into v_user_recipe_slices_user_before from public.user_recipe_slices where user_id = p_user_id;
-  select count(*) into v_user_recipe_slices_total_before from public.user_recipe_slices;
-
   select count(*) into v_llm_usage_user_before from public.llm_usage where user_id = p_user_id;
-  select count(*) into v_llm_usage_total_before from public.llm_usage;
-
   select count(*) into v_user_events_user_before from public.user_events where user_id = p_user_id;
-  select count(*) into v_user_events_total_before from public.user_events;
-
   select count(*) into v_profiles_user_before from public.profiles where id = p_user_id;
-  select count(*) into v_profiles_total_before from public.profiles;
 
   select count(*) into v_categories_user_before from public.categories where user_id = p_user_id;
-  select count(*) into v_categories_total_before from public.categories;
-
   select count(*) into v_recipes_owned_user_before from public.recipes where user_id = p_user_id;
-  select count(*) into v_recipes_owned_total_before from public.recipes;
-
   select count(*) into v_ingredients_user_before from public.ingredients where user_id = p_user_id;
-  select count(*) into v_ingredients_total_before from public.ingredients;
-
   select count(*) into v_recipe_categories_user_before from public.recipe_categories where user_id = p_user_id;
-  select count(*) into v_recipe_categories_total_before from public.recipe_categories;
-
   select count(*) into v_occasions_user_before from public.occasions where user_id = p_user_id;
-  select count(*) into v_occasions_total_before from public.occasions;
-
   select count(*) into v_menus_user_before from public.menus where user_id = p_user_id;
-  select count(*) into v_menus_total_before from public.menus;
-
   select count(*) into v_menu_recipes_user_before from public.menu_recipes where user_id = p_user_id;
-  select count(*) into v_menu_recipes_total_before from public.menu_recipes;
-
   select count(*) into v_shared_recipe_discoveries_user_before from public.shared_recipe_discoveries where user_id = p_user_id;
-  select count(*) into v_shared_recipe_discoveries_total_before from public.shared_recipe_discoveries;
 
   -- =====================================================================
-  -- DELETIONS — fixed order, see header comment for why.
+  -- DELETIONS — fixed order, see header comment for why. Each DIRECT
+  -- delete/update is immediately followed by a row_count check against its
+  -- matching *_before value — not a whole-table total.
   -- =====================================================================
 
   -- 1. Sever attribution on OTHER users' recipes BEFORE the profile delete.
@@ -246,267 +172,116 @@ begin
      set inspired_by_name = null, inspired_by_id = null
    where inspired_by_id = p_user_id;
   get diagnostics v_inspired_by_cleared = row_count;
+  if v_inspired_by_cleared <> v_recipes_inspired_before then
+    raise exception 'delete_user_account_data: inspired_by clear mismatch on recipes (expected %, cleared %)', v_recipes_inspired_before, v_inspired_by_cleared;
+  end if;
 
   delete from public.notifications where recipient_id = p_user_id;
   get diagnostics v_notifications_deleted = row_count;
+  if v_notifications_deleted <> v_notifications_user_before then
+    raise exception 'delete_user_account_data: delete count mismatch on notifications (expected %, deleted %)', v_notifications_user_before, v_notifications_deleted;
+  end if;
 
   delete from public.recipe_sends where sender_id = p_user_id or recipient_id = p_user_id;
   get diagnostics v_recipe_sends_deleted = row_count;
+  if v_recipe_sends_deleted <> v_recipe_sends_user_before then
+    raise exception 'delete_user_account_data: delete count mismatch on recipe_sends (expected %, deleted %)', v_recipe_sends_user_before, v_recipe_sends_deleted;
+  end if;
 
   delete from public.connections where user_a = p_user_id or user_b = p_user_id;
   get diagnostics v_connections_deleted = row_count;
+  if v_connections_deleted <> v_connections_user_before then
+    raise exception 'delete_user_account_data: delete count mismatch on connections (expected %, deleted %)', v_connections_user_before, v_connections_deleted;
+  end if;
 
   delete from public.grocery_list_shares where user_id = p_user_id;
   get diagnostics v_grocery_list_shares_deleted = row_count;
+  if v_grocery_list_shares_deleted <> v_grocery_list_shares_user_before then
+    raise exception 'delete_user_account_data: delete count mismatch on grocery_list_shares (expected %, deleted %)', v_grocery_list_shares_user_before, v_grocery_list_shares_deleted;
+  end if;
 
   delete from public.grocery_items where user_id = p_user_id;
   get diagnostics v_grocery_items_deleted = row_count;
+  if v_grocery_items_deleted <> v_grocery_items_user_before then
+    raise exception 'delete_user_account_data: delete count mismatch on grocery_items (expected %, deleted %)', v_grocery_items_user_before, v_grocery_items_deleted;
+  end if;
 
   delete from public.cook_events where user_id = p_user_id;
   get diagnostics v_cook_events_deleted = row_count;
+  if v_cook_events_deleted <> v_cook_events_user_before then
+    raise exception 'delete_user_account_data: delete count mismatch on cook_events (expected %, deleted %)', v_cook_events_user_before, v_cook_events_deleted;
+  end if;
 
   delete from public.recipe_shares where user_id = p_user_id;
   get diagnostics v_recipe_shares_deleted = row_count;
+  if v_recipe_shares_deleted <> v_recipe_shares_user_before then
+    raise exception 'delete_user_account_data: delete count mismatch on recipe_shares (expected %, deleted %)', v_recipe_shares_user_before, v_recipe_shares_deleted;
+  end if;
 
   delete from public.user_recipe_slices where user_id = p_user_id;
   get diagnostics v_user_recipe_slices_deleted = row_count;
+  if v_user_recipe_slices_deleted <> v_user_recipe_slices_user_before then
+    raise exception 'delete_user_account_data: delete count mismatch on user_recipe_slices (expected %, deleted %)', v_user_recipe_slices_user_before, v_user_recipe_slices_deleted;
+  end if;
 
   delete from public.llm_usage where user_id = p_user_id;
   get diagnostics v_llm_usage_deleted = row_count;
+  if v_llm_usage_deleted <> v_llm_usage_user_before then
+    raise exception 'delete_user_account_data: delete count mismatch on llm_usage (expected %, deleted %)', v_llm_usage_user_before, v_llm_usage_deleted;
+  end if;
 
   delete from public.user_events where user_id = p_user_id;
   get diagnostics v_user_events_deleted = row_count;
+  if v_user_events_deleted <> v_user_events_user_before then
+    raise exception 'delete_user_account_data: delete count mismatch on user_events (expected %, deleted %)', v_user_events_user_before, v_user_events_deleted;
+  end if;
 
   -- Cascades: categories, recipes (owned), ingredients, recipe_categories,
   -- occasions, menus, menu_recipes, shared_recipe_discoveries.
   delete from public.profiles where id = p_user_id;
   get diagnostics v_profiles_deleted = row_count;
+  if v_profiles_deleted <> v_profiles_user_before then
+    raise exception 'delete_user_account_data: delete count mismatch on profiles (expected %, deleted %)', v_profiles_user_before, v_profiles_deleted;
+  end if;
 
   -- =====================================================================
-  -- AFTER SNAPSHOT
+  -- AFTER SNAPSHOT — cascade tables only. These were never the target of a
+  -- direct statement in this function, so there is no row_count to check;
+  -- the only available guarantee is that, after the profiles delete above
+  -- cascaded, this user has zero rows left in each.
   -- =====================================================================
-  select count(*) into v_recipes_inspired_after from public.recipes where inspired_by_id = p_user_id;
-
-  select count(*) into v_notifications_user_after from public.notifications where recipient_id = p_user_id;
-  select count(*) into v_notifications_total_after from public.notifications;
-
-  select count(*) into v_recipe_sends_user_after from public.recipe_sends where sender_id = p_user_id or recipient_id = p_user_id;
-  select count(*) into v_recipe_sends_total_after from public.recipe_sends;
-
-  select count(*) into v_connections_user_after from public.connections where user_a = p_user_id or user_b = p_user_id;
-  select count(*) into v_connections_total_after from public.connections;
-
-  select count(*) into v_grocery_list_shares_user_after from public.grocery_list_shares where user_id = p_user_id;
-  select count(*) into v_grocery_list_shares_total_after from public.grocery_list_shares;
-
-  select count(*) into v_grocery_items_user_after from public.grocery_items where user_id = p_user_id;
-  select count(*) into v_grocery_items_total_after from public.grocery_items;
-
-  select count(*) into v_cook_events_user_after from public.cook_events where user_id = p_user_id;
-  select count(*) into v_cook_events_total_after from public.cook_events;
-
-  select count(*) into v_recipe_shares_user_after from public.recipe_shares where user_id = p_user_id;
-  select count(*) into v_recipe_shares_total_after from public.recipe_shares;
-
-  select count(*) into v_user_recipe_slices_user_after from public.user_recipe_slices where user_id = p_user_id;
-  select count(*) into v_user_recipe_slices_total_after from public.user_recipe_slices;
-
-  select count(*) into v_llm_usage_user_after from public.llm_usage where user_id = p_user_id;
-  select count(*) into v_llm_usage_total_after from public.llm_usage;
-
-  select count(*) into v_user_events_user_after from public.user_events where user_id = p_user_id;
-  select count(*) into v_user_events_total_after from public.user_events;
-
-  select count(*) into v_profiles_user_after from public.profiles where id = p_user_id;
-  select count(*) into v_profiles_total_after from public.profiles;
-
   select count(*) into v_categories_user_after from public.categories where user_id = p_user_id;
-  select count(*) into v_categories_total_after from public.categories;
-
   select count(*) into v_recipes_owned_user_after from public.recipes where user_id = p_user_id;
-  select count(*) into v_recipes_owned_total_after from public.recipes;
-
   select count(*) into v_ingredients_user_after from public.ingredients where user_id = p_user_id;
-  select count(*) into v_ingredients_total_after from public.ingredients;
-
   select count(*) into v_recipe_categories_user_after from public.recipe_categories where user_id = p_user_id;
-  select count(*) into v_recipe_categories_total_after from public.recipe_categories;
-
   select count(*) into v_occasions_user_after from public.occasions where user_id = p_user_id;
-  select count(*) into v_occasions_total_after from public.occasions;
-
   select count(*) into v_menus_user_after from public.menus where user_id = p_user_id;
-  select count(*) into v_menus_total_after from public.menus;
-
   select count(*) into v_menu_recipes_user_after from public.menu_recipes where user_id = p_user_id;
-  select count(*) into v_menu_recipes_total_after from public.menu_recipes;
-
   select count(*) into v_shared_recipe_discoveries_user_after from public.shared_recipe_discoveries where user_id = p_user_id;
-  select count(*) into v_shared_recipe_discoveries_total_after from public.shared_recipe_discoveries;
 
-  -- =====================================================================
-  -- VERIFICATION (a): zero rows remaining for this user, every table.
-  -- =====================================================================
-  if v_recipes_inspired_after <> 0 then
-    raise exception 'delete_user_account_data: recipes.inspired_by_id still has % row(s) referencing % (expected 0)', v_recipes_inspired_after, p_user_id;
-  end if;
-  if v_notifications_user_after <> 0 then
-    raise exception 'delete_user_account_data: notifications still has % row(s) for % (expected 0)', v_notifications_user_after, p_user_id;
-  end if;
-  if v_recipe_sends_user_after <> 0 then
-    raise exception 'delete_user_account_data: recipe_sends still has % row(s) for % (expected 0)', v_recipe_sends_user_after, p_user_id;
-  end if;
-  if v_connections_user_after <> 0 then
-    raise exception 'delete_user_account_data: connections still has % row(s) for % (expected 0)', v_connections_user_after, p_user_id;
-  end if;
-  if v_grocery_list_shares_user_after <> 0 then
-    raise exception 'delete_user_account_data: grocery_list_shares still has % row(s) for % (expected 0)', v_grocery_list_shares_user_after, p_user_id;
-  end if;
-  if v_grocery_items_user_after <> 0 then
-    raise exception 'delete_user_account_data: grocery_items still has % row(s) for % (expected 0)', v_grocery_items_user_after, p_user_id;
-  end if;
-  if v_cook_events_user_after <> 0 then
-    raise exception 'delete_user_account_data: cook_events still has % row(s) for % (expected 0)', v_cook_events_user_after, p_user_id;
-  end if;
-  if v_recipe_shares_user_after <> 0 then
-    raise exception 'delete_user_account_data: recipe_shares still has % row(s) for % (expected 0)', v_recipe_shares_user_after, p_user_id;
-  end if;
-  if v_user_recipe_slices_user_after <> 0 then
-    raise exception 'delete_user_account_data: user_recipe_slices still has % row(s) for % (expected 0)', v_user_recipe_slices_user_after, p_user_id;
-  end if;
-  if v_llm_usage_user_after <> 0 then
-    raise exception 'delete_user_account_data: llm_usage still has % row(s) for % (expected 0)', v_llm_usage_user_after, p_user_id;
-  end if;
-  if v_user_events_user_after <> 0 then
-    raise exception 'delete_user_account_data: user_events still has % row(s) for % (expected 0)', v_user_events_user_after, p_user_id;
-  end if;
-  if v_profiles_user_after <> 0 then
-    raise exception 'delete_user_account_data: profiles still has % row(s) for % (expected 0)', v_profiles_user_after, p_user_id;
-  end if;
   if v_categories_user_after <> 0 then
-    raise exception 'delete_user_account_data: categories still has % row(s) for % (expected 0, should have cascaded from profiles)', v_categories_user_after, p_user_id;
+    raise exception 'delete_user_account_data: categories still has % row(s) for % after cascade (expected 0)', v_categories_user_after, p_user_id;
   end if;
   if v_recipes_owned_user_after <> 0 then
-    raise exception 'delete_user_account_data: recipes (owned) still has % row(s) for % (expected 0, should have cascaded from profiles)', v_recipes_owned_user_after, p_user_id;
+    raise exception 'delete_user_account_data: recipes (owned) still has % row(s) for % after cascade (expected 0)', v_recipes_owned_user_after, p_user_id;
   end if;
   if v_ingredients_user_after <> 0 then
-    raise exception 'delete_user_account_data: ingredients still has % row(s) for % (expected 0, should have cascaded from profiles)', v_ingredients_user_after, p_user_id;
+    raise exception 'delete_user_account_data: ingredients still has % row(s) for % after cascade (expected 0)', v_ingredients_user_after, p_user_id;
   end if;
   if v_recipe_categories_user_after <> 0 then
-    raise exception 'delete_user_account_data: recipe_categories still has % row(s) for % (expected 0, should have cascaded from profiles)', v_recipe_categories_user_after, p_user_id;
+    raise exception 'delete_user_account_data: recipe_categories still has % row(s) for % after cascade (expected 0)', v_recipe_categories_user_after, p_user_id;
   end if;
   if v_occasions_user_after <> 0 then
-    raise exception 'delete_user_account_data: occasions still has % row(s) for % (expected 0, should have cascaded from profiles)', v_occasions_user_after, p_user_id;
+    raise exception 'delete_user_account_data: occasions still has % row(s) for % after cascade (expected 0)', v_occasions_user_after, p_user_id;
   end if;
   if v_menus_user_after <> 0 then
-    raise exception 'delete_user_account_data: menus still has % row(s) for % (expected 0, should have cascaded from profiles)', v_menus_user_after, p_user_id;
+    raise exception 'delete_user_account_data: menus still has % row(s) for % after cascade (expected 0)', v_menus_user_after, p_user_id;
   end if;
   if v_menu_recipes_user_after <> 0 then
-    raise exception 'delete_user_account_data: menu_recipes still has % row(s) for % (expected 0, should have cascaded from profiles)', v_menu_recipes_user_after, p_user_id;
+    raise exception 'delete_user_account_data: menu_recipes still has % row(s) for % after cascade (expected 0)', v_menu_recipes_user_after, p_user_id;
   end if;
   if v_shared_recipe_discoveries_user_after <> 0 then
-    raise exception 'delete_user_account_data: shared_recipe_discoveries still has % row(s) for % (expected 0, should have cascaded from profiles)', v_shared_recipe_discoveries_user_after, p_user_id;
-  end if;
-
-  -- =====================================================================
-  -- VERIFICATION (b): over-deletion guard. total_after must equal
-  -- total_before minus exactly this user's rows (plus the explicit
-  -- notifications cascade adjustment).
-  -- =====================================================================
-  if v_notifications_total_after <> (v_notifications_total_before - v_notifications_user_before - v_notifications_cascade_extra) then
-    raise exception 'delete_user_account_data: over-deletion guard failed for notifications (before=%, user_rows=%, cascade_extra=%, after=%, expected_after=%)',
-      v_notifications_total_before, v_notifications_user_before, v_notifications_cascade_extra, v_notifications_total_after,
-      (v_notifications_total_before - v_notifications_user_before - v_notifications_cascade_extra);
-  end if;
-
-  if v_recipe_sends_total_after <> (v_recipe_sends_total_before - v_recipe_sends_user_before) then
-    raise exception 'delete_user_account_data: over-deletion guard failed for recipe_sends (before=%, user_rows=%, after=%, expected_after=%)',
-      v_recipe_sends_total_before, v_recipe_sends_user_before, v_recipe_sends_total_after, (v_recipe_sends_total_before - v_recipe_sends_user_before);
-  end if;
-
-  if v_connections_total_after <> (v_connections_total_before - v_connections_user_before) then
-    raise exception 'delete_user_account_data: over-deletion guard failed for connections (before=%, user_rows=%, after=%, expected_after=%)',
-      v_connections_total_before, v_connections_user_before, v_connections_total_after, (v_connections_total_before - v_connections_user_before);
-  end if;
-
-  if v_grocery_list_shares_total_after <> (v_grocery_list_shares_total_before - v_grocery_list_shares_user_before) then
-    raise exception 'delete_user_account_data: over-deletion guard failed for grocery_list_shares (before=%, user_rows=%, after=%, expected_after=%)',
-      v_grocery_list_shares_total_before, v_grocery_list_shares_user_before, v_grocery_list_shares_total_after, (v_grocery_list_shares_total_before - v_grocery_list_shares_user_before);
-  end if;
-
-  if v_grocery_items_total_after <> (v_grocery_items_total_before - v_grocery_items_user_before) then
-    raise exception 'delete_user_account_data: over-deletion guard failed for grocery_items (before=%, user_rows=%, after=%, expected_after=%)',
-      v_grocery_items_total_before, v_grocery_items_user_before, v_grocery_items_total_after, (v_grocery_items_total_before - v_grocery_items_user_before);
-  end if;
-
-  if v_cook_events_total_after <> (v_cook_events_total_before - v_cook_events_user_before) then
-    raise exception 'delete_user_account_data: over-deletion guard failed for cook_events (before=%, user_rows=%, after=%, expected_after=%)',
-      v_cook_events_total_before, v_cook_events_user_before, v_cook_events_total_after, (v_cook_events_total_before - v_cook_events_user_before);
-  end if;
-
-  if v_recipe_shares_total_after <> (v_recipe_shares_total_before - v_recipe_shares_user_before) then
-    raise exception 'delete_user_account_data: over-deletion guard failed for recipe_shares (before=%, user_rows=%, after=%, expected_after=%)',
-      v_recipe_shares_total_before, v_recipe_shares_user_before, v_recipe_shares_total_after, (v_recipe_shares_total_before - v_recipe_shares_user_before);
-  end if;
-
-  if v_user_recipe_slices_total_after <> (v_user_recipe_slices_total_before - v_user_recipe_slices_user_before) then
-    raise exception 'delete_user_account_data: over-deletion guard failed for user_recipe_slices (before=%, user_rows=%, after=%, expected_after=%)',
-      v_user_recipe_slices_total_before, v_user_recipe_slices_user_before, v_user_recipe_slices_total_after, (v_user_recipe_slices_total_before - v_user_recipe_slices_user_before);
-  end if;
-
-  if v_llm_usage_total_after <> (v_llm_usage_total_before - v_llm_usage_user_before) then
-    raise exception 'delete_user_account_data: over-deletion guard failed for llm_usage (before=%, user_rows=%, after=%, expected_after=%)',
-      v_llm_usage_total_before, v_llm_usage_user_before, v_llm_usage_total_after, (v_llm_usage_total_before - v_llm_usage_user_before);
-  end if;
-
-  if v_user_events_total_after <> (v_user_events_total_before - v_user_events_user_before) then
-    raise exception 'delete_user_account_data: over-deletion guard failed for user_events (before=%, user_rows=%, after=%, expected_after=%)',
-      v_user_events_total_before, v_user_events_user_before, v_user_events_total_after, (v_user_events_total_before - v_user_events_user_before);
-  end if;
-
-  if v_profiles_total_after <> (v_profiles_total_before - v_profiles_user_before) then
-    raise exception 'delete_user_account_data: over-deletion guard failed for profiles (before=%, user_rows=%, after=%, expected_after=%)',
-      v_profiles_total_before, v_profiles_user_before, v_profiles_total_after, (v_profiles_total_before - v_profiles_user_before);
-  end if;
-
-  if v_categories_total_after <> (v_categories_total_before - v_categories_user_before) then
-    raise exception 'delete_user_account_data: over-deletion guard failed for categories (before=%, user_rows=%, after=%, expected_after=%)',
-      v_categories_total_before, v_categories_user_before, v_categories_total_after, (v_categories_total_before - v_categories_user_before);
-  end if;
-
-  if v_recipes_owned_total_after <> (v_recipes_owned_total_before - v_recipes_owned_user_before) then
-    raise exception 'delete_user_account_data: over-deletion guard failed for recipes/owned (before=%, user_rows=%, after=%, expected_after=%)',
-      v_recipes_owned_total_before, v_recipes_owned_user_before, v_recipes_owned_total_after, (v_recipes_owned_total_before - v_recipes_owned_user_before);
-  end if;
-
-  if v_ingredients_total_after <> (v_ingredients_total_before - v_ingredients_user_before) then
-    raise exception 'delete_user_account_data: over-deletion guard failed for ingredients (before=%, user_rows=%, after=%, expected_after=%)',
-      v_ingredients_total_before, v_ingredients_user_before, v_ingredients_total_after, (v_ingredients_total_before - v_ingredients_user_before);
-  end if;
-
-  if v_recipe_categories_total_after <> (v_recipe_categories_total_before - v_recipe_categories_user_before) then
-    raise exception 'delete_user_account_data: over-deletion guard failed for recipe_categories (before=%, user_rows=%, after=%, expected_after=%)',
-      v_recipe_categories_total_before, v_recipe_categories_user_before, v_recipe_categories_total_after, (v_recipe_categories_total_before - v_recipe_categories_user_before);
-  end if;
-
-  if v_occasions_total_after <> (v_occasions_total_before - v_occasions_user_before) then
-    raise exception 'delete_user_account_data: over-deletion guard failed for occasions (before=%, user_rows=%, after=%, expected_after=%)',
-      v_occasions_total_before, v_occasions_user_before, v_occasions_total_after, (v_occasions_total_before - v_occasions_user_before);
-  end if;
-
-  if v_menus_total_after <> (v_menus_total_before - v_menus_user_before) then
-    raise exception 'delete_user_account_data: over-deletion guard failed for menus (before=%, user_rows=%, after=%, expected_after=%)',
-      v_menus_total_before, v_menus_user_before, v_menus_total_after, (v_menus_total_before - v_menus_user_before);
-  end if;
-
-  if v_menu_recipes_total_after <> (v_menu_recipes_total_before - v_menu_recipes_user_before) then
-    raise exception 'delete_user_account_data: over-deletion guard failed for menu_recipes (before=%, user_rows=%, after=%, expected_after=%)',
-      v_menu_recipes_total_before, v_menu_recipes_user_before, v_menu_recipes_total_after, (v_menu_recipes_total_before - v_menu_recipes_user_before);
-  end if;
-
-  if v_shared_recipe_discoveries_total_after <> (v_shared_recipe_discoveries_total_before - v_shared_recipe_discoveries_user_before) then
-    raise exception 'delete_user_account_data: over-deletion guard failed for shared_recipe_discoveries (before=%, user_rows=%, after=%, expected_after=%)',
-      v_shared_recipe_discoveries_total_before, v_shared_recipe_discoveries_user_before, v_shared_recipe_discoveries_total_after, (v_shared_recipe_discoveries_total_before - v_shared_recipe_discoveries_user_before);
+    raise exception 'delete_user_account_data: shared_recipe_discoveries still has % row(s) for % after cascade (expected 0)', v_shared_recipe_discoveries_user_after, p_user_id;
   end if;
 
   -- =====================================================================
