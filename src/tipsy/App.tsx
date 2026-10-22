@@ -633,6 +633,29 @@ function fireAppOpen(trigger: AppOpenTrigger) {
   logEvent("app_open", { tz: Intl.DateTimeFormat().resolvedOptions().timeZone, trigger });
 }
 
+// A locally-persisted session can outlive the account it belongs to — e.g.
+// the user closed the app on the post-delete "Done" screen before tapping
+// Done, or deleted via another device/session. getSession() only reads the
+// (still cryptographically valid but orphaned) JWT from local storage, so it
+// can't detect this; getUser() hits the Auth server and fails for a deleted
+// user. A missing profiles row is the same stale-session case from the data
+// side. Only a genuine "this user is gone" rejection (401/403) counts as
+// stale — any other error (network blip, etc.) is left alone so a flaky
+// connection never signs a legitimate user out.
+async function isSessionStale(session: Session): Promise<boolean> {
+  const { data, error } = await supabase.auth.getUser();
+  if (error) return error.status === 401 || error.status === 403;
+  if (!data.user) return true;
+
+  const { data: profileRow, error: profileError } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('id', session.user.id)
+    .maybeSingle();
+  if (profileError) return false;
+  return !profileRow;
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>("home");
   const [tabStacks, setTabStacks] = useState<Record<TabId, Screen[]>>({
@@ -930,6 +953,22 @@ export default function App() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (
+        session &&
+        (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') &&
+        !profileInitialized.current &&
+        (await isSessionStale(session))
+      ) {
+        // Stale session for an already-deleted account. Sign out locally
+        // (no server call needed — the account is already gone) and bail
+        // before setSession/fireAppOpen/profile-init run, so nothing is
+        // logged and no UI renders for a user that no longer exists. The
+        // resulting SIGNED_OUT event re-enters this same handler and does
+        // the normal logged-out reset (see the `!session` branch below).
+        await supabase.auth.signOut({ scope: 'local' });
+        return;
+      }
+
       setSession(session);
 
       if (session && document.visibilityState === 'visible') {
