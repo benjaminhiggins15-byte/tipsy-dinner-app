@@ -5,7 +5,7 @@ import { type Big9Id, BIG9_DISPLAY_NAMES, effectiveAllergensForScan, scanIngredi
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
-import Profile, { ProfileEdit } from "./Profile";
+import Profile, { ProfileEdit, AccountPrivacy, DeleteAccountConfirm } from "./Profile";
 import Occasions from "./Occasions";
 import Menus from "./Menus";
 import MenuInterior from "./MenuInterior";
@@ -16,7 +16,7 @@ import SharedRecipeView from "./SharedRecipeView";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
 import Home, { ReceivedPending, ReceivedRecipeView, SuggestionDetailView, DiscoveredDetailView } from "./Home";
 import { supabase } from "../lib/supabase";
-import { logEvent } from "../lib/events";
+import { logEvent, isAccountDeletionInFlight } from "../lib/events";
 import type { Session } from "@supabase/supabase-js";
 import watermarkSquare from "../Logos/watermark_square.png";
 import watermarkCircle from "../Logos/watermark_circle.png";
@@ -323,6 +323,8 @@ type Screen =
   | { name: "recipepicker"; menuId: string; section: MenuSection }
   | { name: "profile" }
   | { name: "profileedit"; fieldKey: "email" | "palate" | "inspiration" | "table" | "constraints" | "identity" | "drinks" }
+  | { name: "accountPrivacy" }
+  | { name: "deleteAccountConfirm" }
   | { name: "placeholder"; title: string }
   | { name: "home" }
   | { name: "receivedPending"; items: PendingReceivedRecipe[] }
@@ -376,6 +378,8 @@ function screenKey(s: Screen): string {
     case "recipepicker": return `recipepicker:${s.menuId}:${s.section}`;
     case "profile": return "profile";
     case "profileedit": return `profileedit:${s.fieldKey}`;
+    case "accountPrivacy": return "accountPrivacy";
+    case "deleteAccountConfirm": return "deleteAccountConfirm";
     case "placeholder": return `placeholder:${s.title}`;
     case "home": return "home";
     case "receivedPending": return "receivedPending";
@@ -541,8 +545,10 @@ function renderScreen(
         ensureRecipesLoaded={ensureRecipesLoaded}
       />
     );
-    case "profile": return <Profile back={back} openEdit={(k) => push({ name: "profileedit", fieldKey: k })} isTabRoot={isTabRoot} onSignOut={onSignOut!} profile={profile || null} onUpdate={onUpdate || (async () => {})} />;
+    case "profile": return <Profile back={back} openEdit={(k) => push({ name: "profileedit", fieldKey: k })} isTabRoot={isTabRoot} onSignOut={onSignOut!} profile={profile || null} onUpdate={onUpdate || (async () => {})} openAccountPrivacy={() => push({ name: "accountPrivacy" })} />;
     case "profileedit": return <ProfileEdit fieldKey={s.fieldKey} back={back} profile={profile || null} onUpdate={onUpdate || (async () => {})} />;
+    case "accountPrivacy": return <AccountPrivacy back={back} openDeleteAccount={() => push({ name: "deleteAccountConfirm" })} />;
+    case "deleteAccountConfirm": return <DeleteAccountConfirm back={back} onSignOut={onSignOut!} profile={profile || null} />;
     case "placeholder": return <Placeholder title={s.title} back={back} />;
     case "home": return <Home profile={profile || null} push={push} seedBuildFromChip={seedBuildFromChip || (() => {})} goToReceivedShelf={goToReceivedShelf || (() => {})} switchToTab={switchToTab || (() => {})} />;
     case "receivedPending": return <ReceivedPending items={s.items} back={back} push={push} />;
@@ -6088,6 +6094,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
   }, [messages, conversationHistory, typing, currentRecipe, seedTick]);
 
   const fireAICall = async (history: ConversationMessage[]) => {
+    if (isAccountDeletionInFlight()) return;
     setTyping(true);
     setGeneratingRecipe(false);
 
@@ -6255,6 +6262,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
 
   const sendMessage = async () => {
     if (!input.trim() || typing) return;
+    if (isAccountDeletionInFlight()) return;
 
     // Collapse expanded recipe card if open
     if (expanded) {
@@ -6569,6 +6577,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
 
   const handleChipClick = (text: string) => {
     if (typing) return;
+    if (isAccountDeletionInFlight()) return;
     // Directly send the chip text as a message
     const userText = text.trim();
     const userMsg: BuildMessage = { id: ++messageIdRef.current, role: "user", text: userText };

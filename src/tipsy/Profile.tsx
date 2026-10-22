@@ -1,6 +1,7 @@
-import { useState, type CSSProperties } from "react";
+import { useState, useEffect, type CSSProperties } from "react";
 import { supabase } from "../lib/supabase";
 import { isValidHandleFormat, generateTasteProfile, splitConstraintsForDisplay, buildConstraintsString, composeAllergyBoxEdit, saveDrinkPreference, type StructuredAllergies } from "./data";
+import { beginAccountDeletion, cancelAccountDeletion } from "../lib/events";
 
 type ProfileType = {
   id: string;
@@ -160,7 +161,7 @@ const fieldLabelStyle: CSSProperties = {
   marginBottom: 6,
 };
 
-export default function Profile({ back, openEdit, isTabRoot = false, onSignOut, profile, onUpdate }: { back: () => void; openEdit: (k: FieldKey) => void; isTabRoot?: boolean; onSignOut: () => void; profile: ProfileType | null; onUpdate: (updates: Partial<ProfileType>) => Promise<void> }) {
+export default function Profile({ back, openEdit, isTabRoot = false, onSignOut, profile, onUpdate, openAccountPrivacy }: { back: () => void; openEdit: (k: FieldKey) => void; isTabRoot?: boolean; onSignOut: () => void; profile: ProfileType | null; onUpdate: (updates: Partial<ProfileType>) => Promise<void>; openAccountPrivacy: () => void }) {
   const handleSignOut = async () => {
     try {
       const { error } = await supabase.auth.signOut();
@@ -240,6 +241,297 @@ export default function Profile({ back, openEdit, isTabRoot = false, onSignOut, 
             window.location.href = "mailto:info@tipsydinner.com?subject=Tipsy%20Dinner%20%E2%80%94%20question";
           }}
         />
+
+        <div style={sectionLabel}>Privacy</div>
+        <Row title="Account & privacy" onClick={openAccountPrivacy} noBorder />
+      </div>
+    </div>
+  );
+}
+
+// Minimal settings screen (Phase 3 Step 7). Structured so future sections
+// (e.g. membership) can be inserted between "Account" and the bottom
+// delete-account link without disturbing either.
+function PlaceholderRow({ title }: { title: string }) {
+  return (
+    <div style={{ ...rowStyle, cursor: "default" }}>
+      <div style={titleStyle}>{title}</div>
+      <div style={{ ...subStyle, marginTop: 0 }}>Coming soon</div>
+    </div>
+  );
+}
+
+function providerLabel(provider: string): string {
+  if (provider === "google") return "Google";
+  if (provider === "email") return "email & password";
+  return provider;
+}
+
+export function AccountPrivacy({ back, openDeleteAccount }: { back: () => void; openDeleteAccount: () => void }) {
+  // TODO(founder): no Privacy Policy / Terms of Service page exists anywhere
+  // in the app yet (confirmed by repo-wide search) — these two rows are
+  // inert placeholders until real pages/links exist. Flagged in the session
+  // report; no policy copy was written here per instruction.
+  const [authInfo, setAuthInfo] = useState<{ email: string; provider: string } | null>(null);
+
+  useEffect(() => {
+    let ignore = false;
+    async function load() {
+      const { data } = await supabase.auth.getUser();
+      if (ignore) return;
+      const user = data.user;
+      if (!user) return;
+      const provider = user.app_metadata?.provider || user.identities?.[0]?.provider || "email";
+      setAuthInfo({ email: user.email || "", provider });
+    }
+    load();
+    return () => { ignore = true; };
+  }, []);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#FAF7F2" }}>
+      <div style={{
+        display: "grid", gridTemplateColumns: "44px 1fr 44px", alignItems: "center",
+        padding: "20px 16px 14px",
+      }}>
+        <button onClick={back} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(35,60,0,0.6)", fontSize: 22, padding: 0, textAlign: "left" }}>‹</button>
+        <div style={{ textAlign: "center", fontFamily: "'Inter', sans-serif", fontSize: 20, fontWeight: 700, textTransform: "uppercase", color: "#233C00" }}>
+          Account & Privacy
+        </div>
+        <div />
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+        <div style={sectionLabel}>Account</div>
+        <div style={{ ...rowStyle, cursor: "default" }}>
+          <div>
+            <div style={titleStyle}>
+              {authInfo ? `Signed in with ${providerLabel(authInfo.provider)}` : "Signed in"}
+            </div>
+            {authInfo?.email && <div style={subStyle}>{authInfo.email}</div>}
+          </div>
+        </div>
+
+        <div style={sectionLabel}>Legal</div>
+        <PlaceholderRow title="Privacy Policy" />
+        <PlaceholderRow title="Terms of Service" />
+
+        <div style={{ flex: 1 }} />
+
+        <div style={{ marginTop: 24, paddingTop: 24, paddingBottom: 32, borderTop: "1px solid rgba(35,60,0,0.06)", textAlign: "center" }}>
+          <button
+            onClick={openDeleteAccount}
+            style={{
+              background: "none", border: "none", cursor: "pointer", padding: 0,
+              fontFamily: "'Inter', sans-serif", fontSize: 13, fontWeight: 500,
+              color: "#B85C5C", textDecoration: "underline",
+            }}
+          >
+            Delete account
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const DELETE_ACCOUNT_LOCAL_STORAGE_KEYS = [
+  "tipsyDinnerName", "tipsyDinnerEmail", "tipsyDinnerPalate", "tipsyDinnerInspiration",
+  "tipsyDinnerTable", "tipsyDinnerConstraints", "tipsyDinnerRecipes", "tipsyDinnerOccasions",
+  "tipsyDinnerMenus", "tipsyDinnerCategories", "tipsyDinnerOnboardingComplete",
+  "tipsyDinnerPendingShareToken", "tipsyDinnerAnonId",
+];
+
+// Best-effort only — the user is about to be signed out regardless, so a
+// localStorage failure here (Safari private mode, quota) must never block
+// the rest of the success path.
+function purgeLocalAppState(userId?: string | null) {
+  try {
+    for (const key of DELETE_ACCOUNT_LOCAL_STORAGE_KEYS) localStorage.removeItem(key);
+    if (userId) localStorage.removeItem(`recentlyShown:${userId}`);
+  } catch {
+    /* noop */
+  }
+}
+
+type DeleteFlowState = "idle" | "deleting" | "failed" | "success";
+
+export function DeleteAccountConfirm({ back, onSignOut, profile }: { back: () => void; onSignOut: () => void; profile: ProfileType | null }) {
+  const [confirmText, setConfirmText] = useState("");
+  const [state, setState] = useState<DeleteFlowState>("idle");
+
+  const matchesDelete = confirmText.trim() === "DELETE";
+  const canSubmit = state === "idle" || state === "failed";
+  const isBusy = state === "deleting";
+
+  // The ONLY place the account-deletion kill switch is turned back off —
+  // per spec, a failed attempt leaves it on (nothing should log while a
+  // retry might still happen); only backing out of this screen entirely
+  // resumes normal logEvent/ai-chat behavior. Safe to call unconditionally:
+  // it's a no-op if the flag was never set (e.g. idle Cancel, pre-attempt).
+  const handleCancel = () => {
+    if (isBusy) return;
+    cancelAccountDeletion();
+    back();
+  };
+
+  const handleDelete = async () => {
+    if (!matchesDelete || !canSubmit) return;
+    setState("deleting");
+    beginAccountDeletion();
+    try {
+      const { data, error } = await supabase.functions.invoke("delete-account", { body: {} });
+      // NOTE (flagged for founder review): the spec for this screen says to
+      // treat only `{ success: true }` as success. The already-deployed
+      // delete-account edge function (supabase/functions/delete-account/index.ts)
+      // returns `{ deleted: true, user_id, data, storage, auth }` on success
+      // and `{ success: false, step, message }` on failure — there is no
+      // `success: true` success shape today. Checking both `deleted === true`
+      // and `success === true` matches the actual deployed contract while
+      // staying forward-compatible if that function is ever changed to add
+      // `success: true`. Not redeploying the function as part of this step.
+      const body = data as { deleted?: boolean; success?: boolean } | null;
+      const ok = !error && !!body && (body.deleted === true || body.success === true);
+      if (ok) {
+        purgeLocalAppState(profile?.id);
+        setState("success");
+      } else {
+        console.error("delete-account failed:", error?.message, data);
+        setState("failed");
+      }
+    } catch (err) {
+      console.error("delete-account threw:", err);
+      setState("failed");
+    }
+  };
+
+  // Deferred to the Done tap, not fired immediately on success: the app's
+  // existing onAuthStateChange listener (App.tsx) reacts to session becoming
+  // null by unmounting the whole app shell (back to AuthFlow) and resetting
+  // tabStacks/profile — if signOut ran immediately on success, that teardown
+  // would race the render of this very success screen and could make the
+  // "your account has been deleted" confirmation flash by unseen or never
+  // render at all. Waiting for an explicit Done tap guarantees the user
+  // actually sees the confirmation before the session is torn down.
+  const handleDone = async () => {
+    try {
+      await supabase.auth.signOut({ scope: "local" });
+    } catch (err) {
+      console.error("local sign-out after account deletion failed:", err);
+    }
+    onSignOut();
+  };
+
+  if (state === "success") {
+    return (
+      <div style={{
+        display: "flex", flexDirection: "column", height: "100%", background: "#FAF7F2",
+        padding: "0 24px", justifyContent: "center", alignItems: "center", textAlign: "center", gap: 24,
+      }}>
+        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 18, fontWeight: 700, color: "#233C00", lineHeight: 1.4 }}>
+          Your account and data have been deleted.
+        </div>
+        <button
+          onClick={handleDone}
+          style={{
+            background: "#233C00", color: "#FAF7F2", border: "none",
+            borderRadius: 100, padding: "14px 40px",
+            fontFamily: "'Inter', sans-serif", fontSize: 12, fontWeight: 500,
+            letterSpacing: "0.12em", textTransform: "uppercase", cursor: "pointer",
+          }}
+        >
+          Done
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#FAF7F2" }}>
+      <div style={{
+        display: "grid", gridTemplateColumns: "44px 1fr 44px", alignItems: "center",
+        padding: "20px 16px 14px",
+      }}>
+        <button
+          onClick={handleCancel}
+          disabled={isBusy}
+          style={{
+            background: "none", border: "none", color: "rgba(35,60,0,0.6)", fontSize: 22,
+            padding: 0, textAlign: "left", cursor: isBusy ? "default" : "pointer", opacity: isBusy ? 0.4 : 1,
+          }}
+        >
+          ‹
+        </button>
+        <div />
+        <div />
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", padding: "0 24px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 20, fontWeight: 700, color: "#233C00" }}>
+          Delete your account?
+        </div>
+        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 14, color: "#233C00", lineHeight: 1.5 }}>
+          This permanently deletes your account and everything in it — your recipes, menus, grocery list, cooking history, and friend connections.
+        </div>
+        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 14, color: "#233C00", lineHeight: 1.5 }}>
+          Recipes you've shared that friends already saved will stay in their libraries, but your name will be removed from them.
+        </div>
+        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 14, fontWeight: 600, color: "#233C00", lineHeight: 1.5 }}>
+          This can't be undone.
+        </div>
+
+        <div style={{ marginTop: 12 }}>
+          <div style={fieldLabelStyle}>Type DELETE to confirm</div>
+          <input
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            disabled={isBusy}
+            type="text"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            style={{
+              width: "100%", background: "rgba(35,60,0,0.05)",
+              border: "1px solid rgba(35,60,0,0.12)", borderRadius: 12,
+              padding: "12px 14px", fontFamily: "'Inter', sans-serif", fontSize: 16,
+              color: "#233C00", outline: "none", boxSizing: "border-box",
+            }}
+          />
+        </div>
+
+        {state === "failed" && (
+          <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: "#B85C5C" }}>
+            Something went wrong and your account was not deleted. Please try again.
+          </div>
+        )}
+
+        <div style={{ flex: 1 }} />
+
+        <button
+          onClick={handleCancel}
+          disabled={isBusy}
+          style={{
+            width: "100%", padding: "14px 0", borderRadius: 100,
+            background: "#233C00", border: "none", color: "#FAF7F2",
+            fontFamily: "'Inter', sans-serif", fontSize: 12, fontWeight: 500,
+            letterSpacing: "0.12em", textTransform: "uppercase",
+            cursor: isBusy ? "default" : "pointer", opacity: isBusy ? 0.5 : 1,
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleDelete}
+          disabled={!matchesDelete || !canSubmit}
+          style={{
+            width: "100%", padding: "14px 0", borderRadius: 100,
+            background: "#B85C5C", border: "none", color: "#FAF7F2",
+            fontFamily: "'Inter', sans-serif", fontSize: 12, fontWeight: 500,
+            letterSpacing: "0.12em", textTransform: "uppercase",
+            cursor: (!matchesDelete || !canSubmit) ? "default" : "pointer",
+            opacity: (!matchesDelete || !canSubmit) ? 0.4 : 1,
+          }}
+        >
+          {isBusy ? "Deleting your account…" : "Delete my account"}
+        </button>
       </div>
     </div>
   );

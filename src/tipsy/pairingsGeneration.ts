@@ -15,6 +15,7 @@ import { supabase } from "../lib/supabase";
 import { type RecipeStep, normalizeStep, parseSSEStream } from "./data";
 import { type Big9Id, type StructuredAllergies, BIG9_DISPLAY_NAMES } from "./allergyMap";
 import { ALCOHOL_TERMS, filterPairings, resolveAllergenSet, type PairingItem, type FilterPairingsOptions } from "./pairingsSafety";
+import { isAccountDeletionInFlight } from "../lib/events";
 
 // Note: BIG9_DISPLAY_NAMES is used below (allergy block of the system
 // prompt) — kept on the existing import line with Big9Id/StructuredAllergies.
@@ -434,6 +435,7 @@ const fetchProfileFromDb: FetchPairingsProfile = async (userId) => {
 };
 
 const callPairingsAIViaEdgeFunction: CallPairingsAI = async (systemPrompt, userId) => {
+  if (isAccountDeletionInFlight()) throw new Error("Account deletion in progress");
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseAnonKey) throw new Error("Supabase config missing");
