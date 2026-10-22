@@ -39,20 +39,41 @@
 --     check). Clearing both columns explicitly, before the profile is
 --     touched, is the fix.
 --
--- Verification strategy (revised 2026-10-20): per-statement row-count
--- checks, NOT whole-table total comparisons. A whole-table total
--- comparison (total_after = total_before - this_user's_rows) is spuriously
--- tripped by any OTHER session inserting/deleting concurrently in the same
--- table while this function runs — user_events and llm_usage are both
--- under constant write traffic from the live app (the deleting user's own
--- client may even be logging the delete action itself). For every DIRECT
--- delete/update below, GET DIAGNOSTICS immediately after the statement is
--- compared against that exact table's user-row count captured in the
--- BEFORE snapshot — both numbers are scoped to this single user_id, so
--- neither is affected by concurrent activity on other users' rows. For the
--- tables only emptied indirectly via the profiles cascade, there is no
--- direct statement to attach a diagnostics check to, so those keep a
--- post-cascade zero-rows-for-this-user check instead.
+-- Verification strategy (revised 2026-10-21, second pass): every DIRECT
+-- DELETE uses `RETURNING` and a per-row ownership check inside a PL/pgSQL
+-- FOR loop, instead of comparing an aggregate row count against anything.
+-- This is deliberately NOT "row_count must equal the before-snapshot
+-- count" (that was the first revision, 2026-10-20) — an exact-equality
+-- count check is itself vulnerable to a race if a row for this SAME user
+-- is inserted between the before-count and the delete (e.g. user_events/
+-- llm_usage are fire-and-forget, high-volume tables the deleting user's own
+-- client could still be writing to mid-request), and a non-strict
+-- "deleted >= expected" relaxation would silently let a WRONG WHERE CLAUSE
+-- that also deletes other users' rows pass undetected. Per-row RETURNING
+-- checks solve both problems at once: every single row actually touched by
+-- a DELETE is individually asserted to belong to p_user_id (catching a bad
+-- WHERE clause regardless of row counts), and no snapshot-vs-delete count
+-- comparison exists to be raced by a legitimate concurrent insert. The
+-- inspired_by UPDATE above keeps its own exact row-count check instead
+-- (see the statement itself) — it runs against `recipes`, not a
+-- high-write-volume logging table, so this race does not apply there.
+-- After every delete/update has run (including the profiles cascade), a
+-- final AFTER snapshot confirms this user has zero rows left in EVERY
+-- inventory table, direct or cascaded, as a last-line sanity check.
+--
+-- Known, accepted side effect (not a bug): the inspired_by-clearing UPDATE
+-- above fires recipes' own `updated_at` BEFORE UPDATE trigger on the other
+-- user's recipe row (bumping only `updated_at` — no other column changes,
+-- and nothing in the app currently reads/sorts/invalidates on
+-- recipes.updated_at). Separately, connections.created_via references
+-- recipe_sends(id) ON DELETE SET NULL, so deleting this user's recipe_sends
+-- rows (below) can transiently null created_via on a connections row
+-- immediately before that same connections row is deleted by this
+-- function's very next statement — every connections row reachable via
+-- that FK necessarily has this user as user_a or user_b (finish_received_
+-- recipe_save always sets the pair from the triggering send's own sender_id/
+-- recipient_id), so no connections row outside this user's own rows is
+-- ever touched, transiently or otherwise.
 create or replace function public.delete_user_account_data(p_user_id uuid)
 returns jsonb
 language plpgsql
@@ -60,28 +81,16 @@ security definer
 set search_path = public
 as $$
 declare
-  -- before-state: this user's row count in each table, captured before any
-  -- write in this function. Used both as the expected row_count for that
-  -- table's own direct delete/update statement, and in the return payload.
+  -- Only needed where a statement's own exact-count check requires it
+  -- (the inspired_by UPDATE) or where a before-count is informational only
+  -- (cascade tables' "*_cascaded" fields in the return payload). Direct
+  -- DELETE statements no longer compare against a before-count at all —
+  -- see header comment.
   v_recipes_inspired_before bigint;
-
-  v_notifications_user_before bigint;
   v_notifications_cascade_extra bigint; -- other users' notifications that will cascade away via recipe_sends.ref_id when this user's recipe_sends rows are deleted below; tracked for the return payload only, not part of any guard
 
-  v_recipe_sends_user_before bigint;
-  v_connections_user_before bigint;
-  v_grocery_list_shares_user_before bigint;
-  v_grocery_items_user_before bigint;
-  v_cook_events_user_before bigint;
-  v_recipe_shares_user_before bigint;
-  v_user_recipe_slices_user_before bigint;
-  v_llm_usage_user_before bigint;
-  v_user_events_user_before bigint;
-  v_profiles_user_before bigint;
-
-  -- cascade tables: emptied indirectly by the profiles delete, so there is
-  -- no direct statement/row_count to check against before-counts. Their
-  -- before-counts feed only the return payload; their after-counts feed
+  -- cascade tables: emptied indirectly by the profiles delete. Before-counts
+  -- feed only the return payload's "*_cascaded" fields; after-counts feed
   -- the zero-rows-remaining check below.
   v_categories_user_before bigint;
   v_recipes_owned_user_before bigint;
@@ -93,8 +102,7 @@ declare
   v_shared_recipe_discoveries_user_before bigint;
 
   -- write results (rows updated/deleted by THIS function's own direct
-  -- statements) — each is checked against its matching *_before value
-  -- immediately after its statement runs.
+  -- statements), accumulated by the RETURNING-loop pattern below.
   v_inspired_by_cleared bigint;
   v_notifications_deleted bigint;
   v_recipe_sends_deleted bigint;
@@ -108,7 +116,23 @@ declare
   v_user_events_deleted bigint;
   v_profiles_deleted bigint;
 
-  -- after-state: cascade tables only (zero-rows-remaining check).
+  -- loop variable, reused across every RETURNING-loop below.
+  v_row record;
+
+  -- after-state: EVERY inventory table (direct and cascade alike) — final
+  -- zero-rows-for-this-user sanity check.
+  v_recipes_inspired_after bigint;
+  v_notifications_user_after bigint;
+  v_recipe_sends_user_after bigint;
+  v_connections_user_after bigint;
+  v_grocery_list_shares_user_after bigint;
+  v_grocery_items_user_after bigint;
+  v_cook_events_user_after bigint;
+  v_recipe_shares_user_after bigint;
+  v_user_recipe_slices_user_after bigint;
+  v_llm_usage_user_after bigint;
+  v_user_events_user_after bigint;
+  v_profiles_user_after bigint;
   v_categories_user_after bigint;
   v_recipes_owned_user_after bigint;
   v_ingredients_user_after bigint;
@@ -123,34 +147,20 @@ begin
   end if;
 
   -- =====================================================================
-  -- BEFORE SNAPSHOT — this user's row count per table, captured before any
-  -- write below.
+  -- BEFORE SNAPSHOT — only what's still needed: the inspired_by count (for
+  -- its exact-match UPDATE check) and the cascade tables' counts (return
+  -- payload only).
   -- =====================================================================
   select count(*) into v_recipes_inspired_before from public.recipes where inspired_by_id = p_user_id;
-
-  select count(*) into v_notifications_user_before from public.notifications where recipient_id = p_user_id;
-
-  select count(*) into v_recipe_sends_user_before from public.recipe_sends where sender_id = p_user_id or recipient_id = p_user_id;
 
   -- Notifications belonging to OTHER users that will cascade away (via
   -- notifications.ref_id -> recipe_sends ON DELETE CASCADE) once this
   -- user's recipe_sends rows are deleted below. Tracked for the return
-  -- payload only — see header comment on the revised verification
-  -- strategy for why this is no longer part of a guard.
+  -- payload only.
   select count(*) into v_notifications_cascade_extra
     from public.notifications n
     join public.recipe_sends rs on rs.id = n.ref_id
     where rs.sender_id = p_user_id and n.recipient_id <> p_user_id;
-
-  select count(*) into v_connections_user_before from public.connections where user_a = p_user_id or user_b = p_user_id;
-  select count(*) into v_grocery_list_shares_user_before from public.grocery_list_shares where user_id = p_user_id;
-  select count(*) into v_grocery_items_user_before from public.grocery_items where user_id = p_user_id;
-  select count(*) into v_cook_events_user_before from public.cook_events where user_id = p_user_id;
-  select count(*) into v_recipe_shares_user_before from public.recipe_shares where user_id = p_user_id;
-  select count(*) into v_user_recipe_slices_user_before from public.user_recipe_slices where user_id = p_user_id;
-  select count(*) into v_llm_usage_user_before from public.llm_usage where user_id = p_user_id;
-  select count(*) into v_user_events_user_before from public.user_events where user_id = p_user_id;
-  select count(*) into v_profiles_user_before from public.profiles where id = p_user_id;
 
   select count(*) into v_categories_user_before from public.categories where user_id = p_user_id;
   select count(*) into v_recipes_owned_user_before from public.recipes where user_id = p_user_id;
@@ -162,9 +172,10 @@ begin
   select count(*) into v_shared_recipe_discoveries_user_before from public.shared_recipe_discoveries where user_id = p_user_id;
 
   -- =====================================================================
-  -- DELETIONS — fixed order, see header comment for why. Each DIRECT
-  -- delete/update is immediately followed by a row_count check against its
-  -- matching *_before value — not a whole-table total.
+  -- DELETIONS — fixed order, see header comment for why. Every direct
+  -- DELETE uses RETURNING + a per-row ownership check (see header comment
+  -- on verification strategy); the inspired_by UPDATE keeps its own exact
+  -- row-count check.
   -- =====================================================================
 
   -- 1. Sever attribution on OTHER users' recipes BEFORE the profile delete.
@@ -176,80 +187,145 @@ begin
     raise exception 'delete_user_account_data: inspired_by clear mismatch on recipes (expected %, cleared %)', v_recipes_inspired_before, v_inspired_by_cleared;
   end if;
 
-  delete from public.notifications where recipient_id = p_user_id;
-  get diagnostics v_notifications_deleted = row_count;
-  if v_notifications_deleted <> v_notifications_user_before then
-    raise exception 'delete_user_account_data: delete count mismatch on notifications (expected %, deleted %)', v_notifications_user_before, v_notifications_deleted;
-  end if;
+  v_notifications_deleted := 0;
+  for v_row in
+    delete from public.notifications where recipient_id = p_user_id
+    returning recipient_id
+  loop
+    if v_row.recipient_id <> p_user_id then
+      raise exception 'delete_user_account_data: notifications delete returned a row not owned by % (recipient_id=%)', p_user_id, v_row.recipient_id;
+    end if;
+    v_notifications_deleted := v_notifications_deleted + 1;
+  end loop;
 
-  delete from public.recipe_sends where sender_id = p_user_id or recipient_id = p_user_id;
-  get diagnostics v_recipe_sends_deleted = row_count;
-  if v_recipe_sends_deleted <> v_recipe_sends_user_before then
-    raise exception 'delete_user_account_data: delete count mismatch on recipe_sends (expected %, deleted %)', v_recipe_sends_user_before, v_recipe_sends_deleted;
-  end if;
+  v_recipe_sends_deleted := 0;
+  for v_row in
+    delete from public.recipe_sends where sender_id = p_user_id or recipient_id = p_user_id
+    returning sender_id, recipient_id
+  loop
+    if v_row.sender_id <> p_user_id and v_row.recipient_id <> p_user_id then
+      raise exception 'delete_user_account_data: recipe_sends delete returned a row not owned by % (sender_id=%, recipient_id=%)', p_user_id, v_row.sender_id, v_row.recipient_id;
+    end if;
+    v_recipe_sends_deleted := v_recipe_sends_deleted + 1;
+  end loop;
 
-  delete from public.connections where user_a = p_user_id or user_b = p_user_id;
-  get diagnostics v_connections_deleted = row_count;
-  if v_connections_deleted <> v_connections_user_before then
-    raise exception 'delete_user_account_data: delete count mismatch on connections (expected %, deleted %)', v_connections_user_before, v_connections_deleted;
-  end if;
+  v_connections_deleted := 0;
+  for v_row in
+    delete from public.connections where user_a = p_user_id or user_b = p_user_id
+    returning user_a, user_b
+  loop
+    if v_row.user_a <> p_user_id and v_row.user_b <> p_user_id then
+      raise exception 'delete_user_account_data: connections delete returned a row not owned by % (user_a=%, user_b=%)', p_user_id, v_row.user_a, v_row.user_b;
+    end if;
+    v_connections_deleted := v_connections_deleted + 1;
+  end loop;
 
-  delete from public.grocery_list_shares where user_id = p_user_id;
-  get diagnostics v_grocery_list_shares_deleted = row_count;
-  if v_grocery_list_shares_deleted <> v_grocery_list_shares_user_before then
-    raise exception 'delete_user_account_data: delete count mismatch on grocery_list_shares (expected %, deleted %)', v_grocery_list_shares_user_before, v_grocery_list_shares_deleted;
-  end if;
+  v_grocery_list_shares_deleted := 0;
+  for v_row in
+    delete from public.grocery_list_shares where user_id = p_user_id
+    returning user_id
+  loop
+    if v_row.user_id <> p_user_id then
+      raise exception 'delete_user_account_data: grocery_list_shares delete returned a row not owned by % (user_id=%)', p_user_id, v_row.user_id;
+    end if;
+    v_grocery_list_shares_deleted := v_grocery_list_shares_deleted + 1;
+  end loop;
 
-  delete from public.grocery_items where user_id = p_user_id;
-  get diagnostics v_grocery_items_deleted = row_count;
-  if v_grocery_items_deleted <> v_grocery_items_user_before then
-    raise exception 'delete_user_account_data: delete count mismatch on grocery_items (expected %, deleted %)', v_grocery_items_user_before, v_grocery_items_deleted;
-  end if;
+  v_grocery_items_deleted := 0;
+  for v_row in
+    delete from public.grocery_items where user_id = p_user_id
+    returning user_id
+  loop
+    if v_row.user_id <> p_user_id then
+      raise exception 'delete_user_account_data: grocery_items delete returned a row not owned by % (user_id=%)', p_user_id, v_row.user_id;
+    end if;
+    v_grocery_items_deleted := v_grocery_items_deleted + 1;
+  end loop;
 
-  delete from public.cook_events where user_id = p_user_id;
-  get diagnostics v_cook_events_deleted = row_count;
-  if v_cook_events_deleted <> v_cook_events_user_before then
-    raise exception 'delete_user_account_data: delete count mismatch on cook_events (expected %, deleted %)', v_cook_events_user_before, v_cook_events_deleted;
-  end if;
+  v_cook_events_deleted := 0;
+  for v_row in
+    delete from public.cook_events where user_id = p_user_id
+    returning user_id
+  loop
+    if v_row.user_id <> p_user_id then
+      raise exception 'delete_user_account_data: cook_events delete returned a row not owned by % (user_id=%)', p_user_id, v_row.user_id;
+    end if;
+    v_cook_events_deleted := v_cook_events_deleted + 1;
+  end loop;
 
-  delete from public.recipe_shares where user_id = p_user_id;
-  get diagnostics v_recipe_shares_deleted = row_count;
-  if v_recipe_shares_deleted <> v_recipe_shares_user_before then
-    raise exception 'delete_user_account_data: delete count mismatch on recipe_shares (expected %, deleted %)', v_recipe_shares_user_before, v_recipe_shares_deleted;
-  end if;
+  v_recipe_shares_deleted := 0;
+  for v_row in
+    delete from public.recipe_shares where user_id = p_user_id
+    returning user_id
+  loop
+    if v_row.user_id <> p_user_id then
+      raise exception 'delete_user_account_data: recipe_shares delete returned a row not owned by % (user_id=%)', p_user_id, v_row.user_id;
+    end if;
+    v_recipe_shares_deleted := v_recipe_shares_deleted + 1;
+  end loop;
 
-  delete from public.user_recipe_slices where user_id = p_user_id;
-  get diagnostics v_user_recipe_slices_deleted = row_count;
-  if v_user_recipe_slices_deleted <> v_user_recipe_slices_user_before then
-    raise exception 'delete_user_account_data: delete count mismatch on user_recipe_slices (expected %, deleted %)', v_user_recipe_slices_user_before, v_user_recipe_slices_deleted;
-  end if;
+  v_user_recipe_slices_deleted := 0;
+  for v_row in
+    delete from public.user_recipe_slices where user_id = p_user_id
+    returning user_id
+  loop
+    if v_row.user_id <> p_user_id then
+      raise exception 'delete_user_account_data: user_recipe_slices delete returned a row not owned by % (user_id=%)', p_user_id, v_row.user_id;
+    end if;
+    v_user_recipe_slices_deleted := v_user_recipe_slices_deleted + 1;
+  end loop;
 
-  delete from public.llm_usage where user_id = p_user_id;
-  get diagnostics v_llm_usage_deleted = row_count;
-  if v_llm_usage_deleted <> v_llm_usage_user_before then
-    raise exception 'delete_user_account_data: delete count mismatch on llm_usage (expected %, deleted %)', v_llm_usage_user_before, v_llm_usage_deleted;
-  end if;
+  v_llm_usage_deleted := 0;
+  for v_row in
+    delete from public.llm_usage where user_id = p_user_id
+    returning user_id
+  loop
+    if v_row.user_id <> p_user_id then
+      raise exception 'delete_user_account_data: llm_usage delete returned a row not owned by % (user_id=%)', p_user_id, v_row.user_id;
+    end if;
+    v_llm_usage_deleted := v_llm_usage_deleted + 1;
+  end loop;
 
-  delete from public.user_events where user_id = p_user_id;
-  get diagnostics v_user_events_deleted = row_count;
-  if v_user_events_deleted <> v_user_events_user_before then
-    raise exception 'delete_user_account_data: delete count mismatch on user_events (expected %, deleted %)', v_user_events_user_before, v_user_events_deleted;
-  end if;
+  v_user_events_deleted := 0;
+  for v_row in
+    delete from public.user_events where user_id = p_user_id
+    returning user_id
+  loop
+    if v_row.user_id <> p_user_id then
+      raise exception 'delete_user_account_data: user_events delete returned a row not owned by % (user_id=%)', p_user_id, v_row.user_id;
+    end if;
+    v_user_events_deleted := v_user_events_deleted + 1;
+  end loop;
 
   -- Cascades: categories, recipes (owned), ingredients, recipe_categories,
   -- occasions, menus, menu_recipes, shared_recipe_discoveries.
-  delete from public.profiles where id = p_user_id;
-  get diagnostics v_profiles_deleted = row_count;
-  if v_profiles_deleted <> v_profiles_user_before then
-    raise exception 'delete_user_account_data: delete count mismatch on profiles (expected %, deleted %)', v_profiles_user_before, v_profiles_deleted;
-  end if;
+  v_profiles_deleted := 0;
+  for v_row in
+    delete from public.profiles where id = p_user_id
+    returning id
+  loop
+    if v_row.id <> p_user_id then
+      raise exception 'delete_user_account_data: profiles delete returned a row not owned by % (id=%)', p_user_id, v_row.id;
+    end if;
+    v_profiles_deleted := v_profiles_deleted + 1;
+  end loop;
 
   -- =====================================================================
-  -- AFTER SNAPSHOT — cascade tables only. These were never the target of a
-  -- direct statement in this function, so there is no row_count to check;
-  -- the only available guarantee is that, after the profiles delete above
-  -- cascaded, this user has zero rows left in each.
+  -- AFTER SNAPSHOT + VERIFICATION — zero rows remaining for this user,
+  -- EVERY inventory table, direct or cascaded.
   -- =====================================================================
+  select count(*) into v_recipes_inspired_after from public.recipes where inspired_by_id = p_user_id;
+  select count(*) into v_notifications_user_after from public.notifications where recipient_id = p_user_id;
+  select count(*) into v_recipe_sends_user_after from public.recipe_sends where sender_id = p_user_id or recipient_id = p_user_id;
+  select count(*) into v_connections_user_after from public.connections where user_a = p_user_id or user_b = p_user_id;
+  select count(*) into v_grocery_list_shares_user_after from public.grocery_list_shares where user_id = p_user_id;
+  select count(*) into v_grocery_items_user_after from public.grocery_items where user_id = p_user_id;
+  select count(*) into v_cook_events_user_after from public.cook_events where user_id = p_user_id;
+  select count(*) into v_recipe_shares_user_after from public.recipe_shares where user_id = p_user_id;
+  select count(*) into v_user_recipe_slices_user_after from public.user_recipe_slices where user_id = p_user_id;
+  select count(*) into v_llm_usage_user_after from public.llm_usage where user_id = p_user_id;
+  select count(*) into v_user_events_user_after from public.user_events where user_id = p_user_id;
+  select count(*) into v_profiles_user_after from public.profiles where id = p_user_id;
   select count(*) into v_categories_user_after from public.categories where user_id = p_user_id;
   select count(*) into v_recipes_owned_user_after from public.recipes where user_id = p_user_id;
   select count(*) into v_ingredients_user_after from public.ingredients where user_id = p_user_id;
@@ -259,6 +335,42 @@ begin
   select count(*) into v_menu_recipes_user_after from public.menu_recipes where user_id = p_user_id;
   select count(*) into v_shared_recipe_discoveries_user_after from public.shared_recipe_discoveries where user_id = p_user_id;
 
+  if v_recipes_inspired_after <> 0 then
+    raise exception 'delete_user_account_data: recipes.inspired_by_id still has % row(s) referencing % (expected 0)', v_recipes_inspired_after, p_user_id;
+  end if;
+  if v_notifications_user_after <> 0 then
+    raise exception 'delete_user_account_data: notifications still has % row(s) for % (expected 0)', v_notifications_user_after, p_user_id;
+  end if;
+  if v_recipe_sends_user_after <> 0 then
+    raise exception 'delete_user_account_data: recipe_sends still has % row(s) for % (expected 0)', v_recipe_sends_user_after, p_user_id;
+  end if;
+  if v_connections_user_after <> 0 then
+    raise exception 'delete_user_account_data: connections still has % row(s) for % (expected 0)', v_connections_user_after, p_user_id;
+  end if;
+  if v_grocery_list_shares_user_after <> 0 then
+    raise exception 'delete_user_account_data: grocery_list_shares still has % row(s) for % (expected 0)', v_grocery_list_shares_user_after, p_user_id;
+  end if;
+  if v_grocery_items_user_after <> 0 then
+    raise exception 'delete_user_account_data: grocery_items still has % row(s) for % (expected 0)', v_grocery_items_user_after, p_user_id;
+  end if;
+  if v_cook_events_user_after <> 0 then
+    raise exception 'delete_user_account_data: cook_events still has % row(s) for % (expected 0)', v_cook_events_user_after, p_user_id;
+  end if;
+  if v_recipe_shares_user_after <> 0 then
+    raise exception 'delete_user_account_data: recipe_shares still has % row(s) for % (expected 0)', v_recipe_shares_user_after, p_user_id;
+  end if;
+  if v_user_recipe_slices_user_after <> 0 then
+    raise exception 'delete_user_account_data: user_recipe_slices still has % row(s) for % (expected 0)', v_user_recipe_slices_user_after, p_user_id;
+  end if;
+  if v_llm_usage_user_after <> 0 then
+    raise exception 'delete_user_account_data: llm_usage still has % row(s) for % (expected 0)', v_llm_usage_user_after, p_user_id;
+  end if;
+  if v_user_events_user_after <> 0 then
+    raise exception 'delete_user_account_data: user_events still has % row(s) for % (expected 0)', v_user_events_user_after, p_user_id;
+  end if;
+  if v_profiles_user_after <> 0 then
+    raise exception 'delete_user_account_data: profiles still has % row(s) for % (expected 0)', v_profiles_user_after, p_user_id;
+  end if;
   if v_categories_user_after <> 0 then
     raise exception 'delete_user_account_data: categories still has % row(s) for % after cascade (expected 0)', v_categories_user_after, p_user_id;
   end if;

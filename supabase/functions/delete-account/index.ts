@@ -73,6 +73,30 @@ async function removeInBatches(
   }
 }
 
+// Shared handling for auth.admin.getUserById, used both BEFORE and AFTER
+// the delete call. A user counts as "gone" ONLY on a confirmed 404, or a
+// successful call that returns no user. Any other error (timeout, 5xx,
+// rate limit, etc.) is NOT evidence of deletion — treating it as "gone"
+// would let a transient read error on the final confirmation produce a
+// false success response that the caller never retries.
+type UserGoneCheck =
+  | { outcome: 'gone' }
+  | { outcome: 'present' }
+  | { outcome: 'error'; message: string }
+
+async function checkUserGone(
+  adminClient: ReturnType<typeof createClient>,
+  uid: string,
+): Promise<UserGoneCheck> {
+  const { data, error } = await adminClient.auth.admin.getUserById(uid)
+  if (error) {
+    if (error.status === 404) return { outcome: 'gone' }
+    return { outcome: 'error', message: error.message }
+  }
+  if (!data?.user) return { outcome: 'gone' }
+  return { outcome: 'present' }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -127,6 +151,29 @@ Deno.serve(async (req) => {
   }
 
   // --- Step 2: storage ------------------------------------------------------
+  // Confirmed present at review time: both 'recipe-photos' (public) and
+  // 'menu-photos' (private) exist as real buckets in storage.buckets. Still
+  // verify on every call rather than assuming — a bucket could be renamed
+  // or removed later, and a missing bucket must be a loud, named failure
+  // here, not a silent no-op inside the sweep loop below.
+  const { data: buckets, error: bucketsError } = await adminClient.storage.listBuckets()
+  if (bucketsError) {
+    console.error(`delete-account: could not list storage buckets: ${bucketsError.message}`)
+    return jsonResponse(
+      { error: 'could not list storage buckets', step: 'storage', details: bucketsError.message },
+      500,
+    )
+  }
+  const bucketNames = new Set((buckets ?? []).map((b) => b.name))
+  const missingBuckets = STORAGE_BUCKETS.filter((b) => !bucketNames.has(b))
+  if (missingBuckets.length > 0) {
+    console.error(`delete-account: required storage bucket(s) missing: ${missingBuckets.join(', ')}`)
+    return jsonResponse(
+      { error: `required storage bucket(s) missing: ${missingBuckets.join(', ')}`, step: 'storage', missingBuckets },
+      500,
+    )
+  }
+
   // Sweep every bucket under the caller's own prefix only. Re-list after
   // remove() to CONFIRM zero objects remain — storage.remove() reports
   // success even for paths that never existed, so it cannot be trusted on
@@ -159,15 +206,15 @@ Deno.serve(async (req) => {
   // Idempotency: if a prior call already deleted the auth user but crashed
   // before returning (e.g. the response never reached the client), a retry
   // must not treat "already gone" as a failure.
-  const { data: existingUser, error: getBeforeError } = await adminClient.auth.admin.getUserById(uid)
-  if (getBeforeError && getBeforeError.status !== 404) {
+  const beforeCheck = await checkUserGone(adminClient, uid)
+  if (beforeCheck.outcome === 'error') {
     return jsonResponse(
-      { error: 'could not verify auth user before deletion', step: 'auth', details: getBeforeError.message },
+      { error: 'could not verify auth user before deletion', step: 'auth', details: beforeCheck.message },
       500,
     )
   }
 
-  if (existingUser?.user) {
+  if (beforeCheck.outcome === 'present') {
     const { error: deleteAuthError } = await adminClient.auth.admin.deleteUser(uid)
     if (deleteAuthError) {
       return jsonResponse(
@@ -179,9 +226,16 @@ Deno.serve(async (req) => {
 
   // Confirm via a fresh read — never trust deleteUser's own success signal
   // alone, same "re-list to confirm" discipline as the storage step above.
-  const { data: confirmUser, error: getAfterError } = await adminClient.auth.admin.getUserById(uid)
-  const stillExists = !getAfterError && !!confirmUser?.user
-  if (stillExists) {
+  // Uses the SAME gone/present/error handling as the pre-delete check above
+  // — an error here must fail the request, not be read as "deleted."
+  const afterCheck = await checkUserGone(adminClient, uid)
+  if (afterCheck.outcome === 'error') {
+    return jsonResponse(
+      { error: 'could not verify auth user after deletion', step: 'auth', details: afterCheck.message },
+      500,
+    )
+  }
+  if (afterCheck.outcome === 'present') {
     return jsonResponse({ error: 'auth user still exists after deletion', step: 'auth' }, 500)
   }
 
