@@ -87,6 +87,30 @@ async function logUsage(
     const costUsd = (inputTokens / 1_000_000) * INPUT_RATE_PER_MTOK + (outputTokens / 1_000_000) * OUTPUT_RATE_PER_MTOK
 
     const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
+
+    // Review finding F2 (account-deletion build): this is the only direct
+    // (non-RPC) write path into llm_usage, and userId here comes from the
+    // client-supplied request body (ai-chat is the unauthenticated proxy —
+    // see CLAUDE.md), not a verified session — so a deleted account's id can
+    // still show up here after delete_user_account_data() has already
+    // cleared that user's llm_usage rows. Skip the insert rather than let a
+    // deleted user's usage log reappear. A failed/erroring check fails open
+    // (keeps logging) since usage metering must never be the reason a real
+    // request's cost goes unrecorded.
+    if (userId) {
+      const { data: profileRow, error: profileCheckError } = await adminClient
+        .from('profiles')
+        .select('id')
+        .eq('id', userId)
+        .maybeSingle()
+      if (profileCheckError) {
+        console.error('llm_usage profile check failed:', profileCheckError.message, { callType, userId })
+      } else if (!profileRow) {
+        console.error('llm_usage insert skipped: no profiles row for user_id (account likely deleted)', { callType, userId })
+        return
+      }
+    }
+
     const { error } = await adminClient.from('llm_usage').insert({
       user_id: userId,
       call_type: callType,

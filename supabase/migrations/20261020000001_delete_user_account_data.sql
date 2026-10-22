@@ -61,6 +61,30 @@
 -- final AFTER snapshot confirms this user has zero rows left in EVERY
 -- inventory table, direct or cascaded, as a last-line sanity check.
 --
+-- NULL-safe ownership checks (revised 2026-10-21, third pass — review finding
+-- F1): every per-row RETURNING check now uses `coalesce(<comparison>, false)`
+-- instead of a bare `<>`/`=` comparison. A bare `<>` evaluates to NULL (which
+-- PL/pgSQL's `if` treats as false, i.e. "don't raise") when either side is
+-- NULL — so a NULL in an ownership column would have silently passed the
+-- very guard meant to catch a wrong WHERE clause. Confirmed via a read-only
+-- schema check that `recipe_sends.{sender_id,recipient_id}` and
+-- `connections.{user_a,user_b}` are all NOT NULL (so today's fixed WHERE
+-- clauses can't actually produce a NULL in those columns), but
+-- `llm_usage.user_id` and `user_events.user_id` ARE nullable (by design —
+-- pre-signup/anon rows) — the coalesce pattern below is defense-in-depth
+-- against any future change to these statements' WHERE clauses, not a fix
+-- for a currently-reachable hole.
+--
+-- Sanitized exception messages (revised 2026-10-21, third pass — review
+-- finding F3): every per-row ownership-check exception now names only the
+-- table and the check, never any row's id — a prior revision interpolated
+-- the mismatched row's id/columns directly into the message text, which
+-- would have propagated another real user's UUID back to the deleting
+-- user's own client on the (should-never-happen) path where this guard
+-- actually trips. The final zero-rows and inspired_by-count checks below
+-- still reference p_user_id (the caller's own id, already known to them)
+-- and plain counts — never another user's id or data.
+--
 -- Known, accepted side effect (not a bug): the inspired_by-clearing UPDATE
 -- above fires recipes' own `updated_at` BEFORE UPDATE trigger on the other
 -- user's recipe row (bumping only `updated_at` — no other column changes,
@@ -192,8 +216,8 @@ begin
     delete from public.notifications where recipient_id = p_user_id
     returning recipient_id
   loop
-    if v_row.recipient_id <> p_user_id then
-      raise exception 'delete_user_account_data: notifications delete returned a row not owned by % (recipient_id=%)', p_user_id, v_row.recipient_id;
+    if not coalesce(v_row.recipient_id = p_user_id, false) then
+      raise exception 'delete_user_account_data: ownership check failed (table=notifications, check=recipient_id_match)';
     end if;
     v_notifications_deleted := v_notifications_deleted + 1;
   end loop;
@@ -203,8 +227,8 @@ begin
     delete from public.recipe_sends where sender_id = p_user_id or recipient_id = p_user_id
     returning sender_id, recipient_id
   loop
-    if v_row.sender_id <> p_user_id and v_row.recipient_id <> p_user_id then
-      raise exception 'delete_user_account_data: recipe_sends delete returned a row not owned by % (sender_id=%, recipient_id=%)', p_user_id, v_row.sender_id, v_row.recipient_id;
+    if not coalesce(v_row.sender_id = p_user_id or v_row.recipient_id = p_user_id, false) then
+      raise exception 'delete_user_account_data: ownership check failed (table=recipe_sends, check=sender_or_recipient_match)';
     end if;
     v_recipe_sends_deleted := v_recipe_sends_deleted + 1;
   end loop;
@@ -214,8 +238,8 @@ begin
     delete from public.connections where user_a = p_user_id or user_b = p_user_id
     returning user_a, user_b
   loop
-    if v_row.user_a <> p_user_id and v_row.user_b <> p_user_id then
-      raise exception 'delete_user_account_data: connections delete returned a row not owned by % (user_a=%, user_b=%)', p_user_id, v_row.user_a, v_row.user_b;
+    if not coalesce(v_row.user_a = p_user_id or v_row.user_b = p_user_id, false) then
+      raise exception 'delete_user_account_data: ownership check failed (table=connections, check=user_a_or_user_b_match)';
     end if;
     v_connections_deleted := v_connections_deleted + 1;
   end loop;
@@ -225,8 +249,8 @@ begin
     delete from public.grocery_list_shares where user_id = p_user_id
     returning user_id
   loop
-    if v_row.user_id <> p_user_id then
-      raise exception 'delete_user_account_data: grocery_list_shares delete returned a row not owned by % (user_id=%)', p_user_id, v_row.user_id;
+    if not coalesce(v_row.user_id = p_user_id, false) then
+      raise exception 'delete_user_account_data: ownership check failed (table=grocery_list_shares, check=user_id_match)';
     end if;
     v_grocery_list_shares_deleted := v_grocery_list_shares_deleted + 1;
   end loop;
@@ -236,8 +260,8 @@ begin
     delete from public.grocery_items where user_id = p_user_id
     returning user_id
   loop
-    if v_row.user_id <> p_user_id then
-      raise exception 'delete_user_account_data: grocery_items delete returned a row not owned by % (user_id=%)', p_user_id, v_row.user_id;
+    if not coalesce(v_row.user_id = p_user_id, false) then
+      raise exception 'delete_user_account_data: ownership check failed (table=grocery_items, check=user_id_match)';
     end if;
     v_grocery_items_deleted := v_grocery_items_deleted + 1;
   end loop;
@@ -247,8 +271,8 @@ begin
     delete from public.cook_events where user_id = p_user_id
     returning user_id
   loop
-    if v_row.user_id <> p_user_id then
-      raise exception 'delete_user_account_data: cook_events delete returned a row not owned by % (user_id=%)', p_user_id, v_row.user_id;
+    if not coalesce(v_row.user_id = p_user_id, false) then
+      raise exception 'delete_user_account_data: ownership check failed (table=cook_events, check=user_id_match)';
     end if;
     v_cook_events_deleted := v_cook_events_deleted + 1;
   end loop;
@@ -258,8 +282,8 @@ begin
     delete from public.recipe_shares where user_id = p_user_id
     returning user_id
   loop
-    if v_row.user_id <> p_user_id then
-      raise exception 'delete_user_account_data: recipe_shares delete returned a row not owned by % (user_id=%)', p_user_id, v_row.user_id;
+    if not coalesce(v_row.user_id = p_user_id, false) then
+      raise exception 'delete_user_account_data: ownership check failed (table=recipe_shares, check=user_id_match)';
     end if;
     v_recipe_shares_deleted := v_recipe_shares_deleted + 1;
   end loop;
@@ -269,8 +293,8 @@ begin
     delete from public.user_recipe_slices where user_id = p_user_id
     returning user_id
   loop
-    if v_row.user_id <> p_user_id then
-      raise exception 'delete_user_account_data: user_recipe_slices delete returned a row not owned by % (user_id=%)', p_user_id, v_row.user_id;
+    if not coalesce(v_row.user_id = p_user_id, false) then
+      raise exception 'delete_user_account_data: ownership check failed (table=user_recipe_slices, check=user_id_match)';
     end if;
     v_user_recipe_slices_deleted := v_user_recipe_slices_deleted + 1;
   end loop;
@@ -280,8 +304,8 @@ begin
     delete from public.llm_usage where user_id = p_user_id
     returning user_id
   loop
-    if v_row.user_id <> p_user_id then
-      raise exception 'delete_user_account_data: llm_usage delete returned a row not owned by % (user_id=%)', p_user_id, v_row.user_id;
+    if not coalesce(v_row.user_id = p_user_id, false) then
+      raise exception 'delete_user_account_data: ownership check failed (table=llm_usage, check=user_id_match)';
     end if;
     v_llm_usage_deleted := v_llm_usage_deleted + 1;
   end loop;
@@ -291,8 +315,8 @@ begin
     delete from public.user_events where user_id = p_user_id
     returning user_id
   loop
-    if v_row.user_id <> p_user_id then
-      raise exception 'delete_user_account_data: user_events delete returned a row not owned by % (user_id=%)', p_user_id, v_row.user_id;
+    if not coalesce(v_row.user_id = p_user_id, false) then
+      raise exception 'delete_user_account_data: ownership check failed (table=user_events, check=user_id_match)';
     end if;
     v_user_events_deleted := v_user_events_deleted + 1;
   end loop;
@@ -304,8 +328,8 @@ begin
     delete from public.profiles where id = p_user_id
     returning id
   loop
-    if v_row.id <> p_user_id then
-      raise exception 'delete_user_account_data: profiles delete returned a row not owned by % (id=%)', p_user_id, v_row.id;
+    if not coalesce(v_row.id = p_user_id, false) then
+      raise exception 'delete_user_account_data: ownership check failed (table=profiles, check=id_match)';
     end if;
     v_profiles_deleted := v_profiles_deleted + 1;
   end loop;
