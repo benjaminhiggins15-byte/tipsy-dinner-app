@@ -4001,3 +4001,151 @@ all-non-alcoholic output matching their own `alcohol_ok: false`).
   pre-existing duplication, not introduced by this feature) and each
   declaration now includes `wants_pairings`/`drink_preference`/`alcohol_ok` —
   keep them in sync by hand until/unless that duplication is ever resolved.
+
+---
+
+## Account Deletion
+
+Branch `feature/account-deletion`, merged to `main` 2026-10-22 (merge commit
+`5aaa08e`). Lets a signed-in user permanently delete their own account and all
+owned data from inside the app, with a fixed, independently-verified
+server-side sequence behind it.
+
+### Entry point
+
+Profile → "Privacy" section → **"Account & privacy"** row (`Profile.tsx`'s
+`AccountPrivacy` screen) → **"Delete account"** link at the bottom →
+`DeleteAccountConfirm` screen. `AccountPrivacy` also shows the signed-in
+method (Google vs. email/password) and email, and a "Legal" section with
+inert Privacy Policy/Terms of Service placeholder rows (no real pages exist
+yet).
+
+The confirm screen gates the delete button on a **type-DELETE field**:
+the button stays disabled until the user types the literal, case-sensitive
+word `DELETE` into a text input (`confirmText.trim() === "DELETE"`).
+
+### Server-side sequence
+
+Tapping confirm calls the `delete-account` Edge Function
+(`supabase/functions/delete-account/index.ts`), which runs four steps in
+fixed order, each independently re-run-safe so a retry after a partial
+failure (e.g. storage succeeded, auth step crashed) is safe:
+
+0. **Bucket existence check** — both `recipe-photos` and `menu-photos` must
+   exist in `storage.buckets`; a missing bucket is a loud, named failure
+   here, not a silent no-op discovered mid-sweep.
+1. **Data** — `adminClient.rpc('delete_user_account_data', { p_user_id })`,
+   the `SECURITY DEFINER` Postgres function in migration
+   `20261020000001_delete_user_account_data.sql`. Deletes in FK-safe order
+   (sever `inspired_by_id`/`inspired_by_name` on other users' recipes first,
+   then `notifications` → `recipe_sends` → `connections` → grocery/cook/share
+   tables → `llm_usage`/`user_events` → `profiles` last, relying on cascade
+   for `categories`/`recipes` (owned)/`ingredients`/`recipe_categories`/
+   `occasions`/`menus`/`menu_recipes`/`shared_recipe_discoveries`).
+2. **Storage** — sweeps `recipe-photos/` and `menu-photos/` under the
+   caller's own `{uid}/` prefix only, paginated (`list()` caps at 1000/call),
+   batch-removed (100/batch), then **re-lists to confirm zero objects
+   remain** — `storage.remove()` reports success even for paths that never
+   existed, so it's never trusted alone as proof of a clean sweep.
+3. **Auth** — `auth.admin.deleteUser(uid)`, with a before-check and an
+   after-check via the same `checkUserGone` helper (404/`user_not_found` →
+   "gone"; any other error → NOT evidence of deletion, so a transient 5xx on
+   the confirmation read can never produce a false success the caller never
+   retries). A concurrent duplicate request that wins the race and deletes
+   the user first is treated as the same already-gone success, not a
+   failure.
+
+Identity for all four steps comes **only** from the caller's verified JWT
+(`callerClient.auth.getUser()`), never the request body — the same
+authorize-with-caller, act-with-admin split established by
+`copy-received-recipe-photo` (Account-to-Account Sharing — Build 4). Every
+failure past the identity check returns a generic `{ success: false, step,
+message }` to the client — never a raw Postgres/SDK error string, which
+could otherwise leak another user's id (e.g. a tripped ownership-check
+exception from the function below).
+
+### Per-row ownership guards and zero-rows verification
+
+`delete_user_account_data` does not trust aggregate row-count comparisons —
+an exact-equality check is itself racy against the same user's own
+fire-and-forget writes (`user_events`/`llm_usage`) landing mid-request. Every
+direct `DELETE` instead uses `RETURNING` plus a per-row, NULL-safe
+(`coalesce(..., false)`) ownership assertion inside a loop, so a wrong WHERE
+clause that scoops up another user's row is caught regardless of row counts,
+and a legitimate concurrent insert for the deleting user can never trip a
+false alarm. Exception messages name only the table and the failed check,
+never a row's id, so a tripped guard can't echo another user's UUID back to
+the client. After every delete/update (including the `profiles` cascade), a
+final pass confirms **zero rows remain for this user in every inventory
+table**, direct or cascaded — the same 21-table sweep documented in
+Part 1 of `~/tipsy-backups/deletion-test-pair2.md`.
+
+### Client-side kill switch
+
+`src/lib/events.ts` exposes `beginAccountDeletion()`/`cancelAccountDeletion()`/
+`isAccountDeletionInFlight()` around a module-level flag. `DeleteAccountConfirm`
+calls `beginAccountDeletion()` immediately before invoking the edge function;
+`logEvent()` (and every `ai-chat` call site) checks the flag and no-ops for
+the rest of the session once it's set — including across a failed
+delete/retry, since deletion is destructive and idempotent-retry, and
+nothing should log while one might still be in flight. The flag is reset to
+`false` only if the user explicitly cancels out of the confirmation screen
+without the deletion ever succeeding (`handleCancel` → `cancelAccountDeletion()`);
+a successful delete never resets it — there's no session left to log
+anything in.
+
+### Stale-session sign-out
+
+A locally-persisted session can outlive the account it belongs to (closed
+the app on the post-delete screen before tapping Done, or deleted from
+another device). `App.tsx`'s `isSessionStale(session)` calls
+`supabase.auth.getUser()` (a server round-trip, not the local-only
+`getSession()`) — a confirmed gone-user error, a null user, or a missing
+`profiles` row all mean "stale"; any other error (e.g. a network blip) is
+fail-safe, not fail-stale. This check runs inside the `onAuthStateChange`
+handler as the very first thing on a real session restore (`SIGNED_IN`/
+`INITIAL_SESSION`, `!profileInitialized.current` — a tab-refocus duplicate
+never re-runs it), **before** `profileInitialized`'s own gated init logic.
+A stale session is signed out locally (`scope: 'local'`, no server call
+needed) with no UI shown; the resulting `SIGNED_OUT` event falls through to
+the normal logged-out reset.
+
+### The carve-out: recipients keep their saved copies
+
+Deleting an account does **not** delete recipes the account sent that other
+users have since saved — those rows are owned by the recipient, not the
+sender. `delete_user_account_data`'s inspired-by-clearing `UPDATE` runs
+first, before the profile row is touched, and scrubs **both**
+`inspired_by_id` (otherwise `ON DELETE SET NULL` from `profiles` only, never
+touching the sibling text column) and `inspired_by_name` on every recipe
+elsewhere in the database that credits the deleted account — closing the
+exact leak identified in the pre-build sender-identity check, where the
+`SET NULL` FK action alone would have left a deleted sender's display name
+permanently orphaned as plain text on a recipient-owned row.
+
+### Known follow-ups
+
+- **Unsaved sends' photos are orphaned when the RECIPIENT deletes their
+  account.** A `send-{token}.jpg` photo (Account-to-Account Sharing — Build
+  3's third immutable photo path case, keyed `{sender}/send-{token}.jpg`)
+  lives under the *sender's* storage prefix, not the recipient's — so the
+  storage sweep (keyed on the deleting user's own `{uid}/` prefix) has
+  nothing to remove it even when the *recipient* deletes their account
+  without ever having saved the send. Minor: these are small, individually
+  harmless orphaned objects, not a correctness or security issue.
+- **The storage sweep is one level deep** (`list(prefix)` under `{uid}/`,
+  not recursive). Every current photo path under a user's prefix is a flat
+  filename (`{recipeId}.jpg`, `share-{token}.jpg`, `send-{token}.jpg`) with
+  no subfolders, so this is a complete sweep today — revisit if any future
+  photo path ever nests a subfolder under `{uid}/`.
+
+### Load-bearing: any new user-data table must be added here
+
+`delete_user_account_data` is the **sole** data-deletion step — the Edge
+Function's storage sweep and auth delete run after it and know nothing about
+individual tables. **Any future table that stores a `user_id`/owner column
+(or any other direct reference to a user) must be added to both the deletion
+statements and the final zero-rows verification block** in
+`20261020000001_delete_user_account_data.sql`, or a deleted account's data
+in that table will silently survive forever. See the Load-Bearing Contracts
+entry in CLAUDE.md.
