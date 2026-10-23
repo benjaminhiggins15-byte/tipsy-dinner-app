@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { compressImageFile, type CropRect } from './image';
 import { mapAllergyItems, type StructuredAllergies } from './allergyMap';
+import { isAccountDeletionInFlight } from '../lib/events';
 
 export type { StructuredAllergies };
 
@@ -162,6 +163,7 @@ export async function generateTasteProfile(
   userId: string,
   answers: { palate: string; inspiration: string; constraints: string }
 ): Promise<void> {
+  if (isAccountDeletionInFlight()) return;
   try {
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
     if (!supabaseAnonKey) throw new Error("Supabase key not found");
@@ -307,6 +309,7 @@ export async function generateOnboardingReflection(
   onToken?: (partialText: string) => void,
   firstTokenTimeoutMs = 2500
 ): Promise<string | null> {
+  if (isAccountDeletionInFlight()) return null;
   const controller = new AbortController();
   let firstTokenSeen = false;
   const firstTokenTimer = setTimeout(() => {
@@ -390,6 +393,7 @@ Rules:
 USER'S ANSWER: ${answer}`;
 
 export async function parseNoGosAnswer(answer: string): Promise<string | null> {
+  if (isAccountDeletionInFlight()) return null;
   try {
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
     if (!supabaseAnonKey) throw new Error("Supabase key not found");
@@ -740,6 +744,7 @@ export async function parseDrinkPreference(
   text: string,
   timeoutMs: number = DRINK_PREFERENCE_PARSE_TIMEOUT_MS
 ): Promise<boolean | null> {
+  if (isAccountDeletionInFlight()) return null;
   const trimmed = text.trim();
   if (!trimmed) return false;
   if (matchesNoAlcoholOverride(trimmed)) return false;
@@ -3626,6 +3631,7 @@ export async function enrichGroceryItems(
   items: { id: string; display_name: string; quantity: string }[]
 ): Promise<void> {
   if (items.length === 0) return;
+  if (isAccountDeletionInFlight()) return;
 
   const userId = await getCurrentUserId();
   if (!userId) {
@@ -4027,6 +4033,7 @@ function parseStepTitleBackfillResponse(rawText: string, validIndices: Set<numbe
 async function generateStepTitlesForRecipe(
   instructions: { index: number; instruction: string }[]
 ): Promise<Map<number, string>> {
+  if (isAccountDeletionInFlight()) return new Map();
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseAnonKey) throw new Error('Supabase config missing');

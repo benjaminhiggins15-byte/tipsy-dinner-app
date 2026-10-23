@@ -27,6 +27,29 @@ export type EventType =
   | "screen_view"
   | "cook_logged";
 
+// Account-deletion kill switch (Phase 3 Step 7). Flips true the instant the
+// user taps "Delete my account" on the confirmation screen — logEvent() and
+// every ai-chat call site check this and no-op for the rest of the session,
+// including across a failed delete attempt/retry (deletion is a destructive,
+// idempotent-retry operation; nothing should be logged while one might still
+// be in flight). A successful delete never resets this — there's no session
+// left to log anything in. It is reset to false ONLY if the user explicitly
+// cancels out of the delete-confirmation screen without the deletion ever
+// succeeding, so normal logging/ai-chat resumes for the rest of their visit.
+let accountDeletionInFlight = false;
+
+export function beginAccountDeletion(): void {
+  accountDeletionInFlight = true;
+}
+
+export function cancelAccountDeletion(): void {
+  accountDeletionInFlight = false;
+}
+
+export function isAccountDeletionInFlight(): boolean {
+  return accountDeletionInFlight;
+}
+
 const ANON_ID_KEY = "tipsyDinnerAnonId";
 
 // localStorage can throw (Safari private mode, storage disabled, quota) —
@@ -53,6 +76,7 @@ function getOrCreateAnonId(): string {
 // result shape and a rejected promise (e.g. a network failure) so neither
 // path can surface as an unhandled rejection.
 export function logEvent(eventType: EventType, props: Record<string, unknown> = {}): void {
+  if (accountDeletionInFlight) return;
   try {
     const anonId = getOrCreateAnonId();
     // .rpc() returns a thenable, not a native Promise — .then().catch() isn't
