@@ -4963,6 +4963,7 @@ function RecipeCard({
               onSend={handleChatSend}
               placeholder="ask anything"
               disabled={false}
+              voiceEnabled
             />
           </div>
         </>
