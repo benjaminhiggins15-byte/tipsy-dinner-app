@@ -4348,7 +4348,13 @@ export async function postCook(cookEventId: string): Promise<{ postId: string } 
       sourcePath = `${userId}/${eventRow.recipe_id}.jpg`;
     }
 
-    let photoUrl: string | null = null;
+    // Bare storage path only ({user_id}/post-{id}.jpg) — matches
+    // cook_posts_photo_url_shape_chk's exact-match form as of
+    // 20261025000005_cook_posts_photo_url_bare_path.sql. No public URL is
+    // resolved or stored here; getCookFeed/getCookPost resolve it via
+    // getPublicUrl() at read time instead, closing the open-host hole the old
+    // suffix-only CHECK allowed (see that migration's header comment).
+    let photoPath: string | null = null;
     // Mirrors sourceBucket 1:1 — 'cook' | 'recipe' | null (no photo). Keyed
     // off sourceBucket rather than re-deriving from eventRow/recipe so it
     // can never disagree with which bucket the copy actually came from.
@@ -4365,8 +4371,7 @@ export async function postCook(cookEventId: string): Promise<{ postId: string } 
       if (uploadError) throw uploadError;
 
       photoWasCopied = true;
-      const { data: publicUrlData } = supabase.storage.from('recipe-photos').getPublicUrl(destPath);
-      photoUrl = publicUrlData.publicUrl;
+      photoPath = destPath;
       photoSource = sourceBucket === 'cook-photos-private' ? 'cook' : 'recipe';
     }
 
@@ -4376,7 +4381,7 @@ export async function postCook(cookEventId: string): Promise<{ postId: string } 
       cook_event_id: cookEventId,
       recipe_id: eventRow.recipe_id,
       recipe_snapshot: snapshot,
-      photo_url: photoUrl,
+      photo_url: photoPath,
       photo_source: photoSource,
       score: eventRow.score,
       note: eventRow.note,
@@ -4457,10 +4462,14 @@ export async function unpostCook(postId: string): Promise<boolean> {
 // ==================== COOKING FEED (read path) ====================
 // Card shape returned by get_cook_feed (security-definer, authenticated-only
 // — see supabase/migrations/20261025000003_get_cook_feed_and_get_cook_post.sql
-// / 20261025000004_cook_posts_add_photo_source.sql). photo_url (when present)
-// is already a full public URL — postCook resolves it via getPublicUrl()
-// before insert, so cook_posts.photo_url is never a bare storage path the way
-// cook_events.photo_url is. No further transformation needed here.
+// / 20261025000004_cook_posts_add_photo_source.sql). As of
+// 20261025000005_cook_posts_photo_url_bare_path.sql, the DB column
+// cook_posts.photo_url holds a BARE storage path ({user_id}/post-{id}.jpg,
+// recipe-photos bucket) — matching cook_events.photo_url's existing
+// convention — not a full public URL. getCookFeed/getCookPost below resolve
+// it to a public URL via getPublicUrl() before returning, so this exported
+// type (and every caller, e.g. CookFeed.tsx) still sees a ready-to-render URL
+// exactly as before; nothing downstream of these two functions changes.
 export type CookFeedPost = {
   post_id: string;
   created_at: string;
@@ -4516,7 +4525,15 @@ export async function getCookFeed(cursor?: CookFeedCursor): Promise<CookFeedPost
       p_before_id: cursor?.postId ?? null,
     });
     if (error) throw error;
-    return data ?? [];
+    // photo_url comes back as a bare storage path (see the comment above
+    // CookFeedPost) — resolve it here so callers keep receiving a
+    // ready-to-render URL.
+    return (data ?? []).map((row: CookFeedPost) => ({
+      ...row,
+      photo_url: row.photo_url
+        ? supabase.storage.from('recipe-photos').getPublicUrl(row.photo_url).data.publicUrl
+        : null,
+    }));
   } catch (error) {
     console.error('Error loading cook feed:', error);
     throw error;
@@ -4528,7 +4545,15 @@ export async function getCookPost(postId: string): Promise<CookPostDetail | null
   try {
     const { data, error } = await supabase.rpc('get_cook_post', { p_post_id: postId });
     if (error) throw error;
-    return data?.[0] ?? null;
+    const row = data?.[0] ?? null;
+    if (!row) return null;
+    // Same bare-path resolution as getCookFeed above.
+    return {
+      ...row,
+      photo_url: row.photo_url
+        ? supabase.storage.from('recipe-photos').getPublicUrl(row.photo_url).data.publicUrl
+        : null,
+    };
   } catch (error) {
     console.error('Error loading cook post:', error);
     return null;
