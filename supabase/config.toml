@@ -29,3 +29,8 @@ entrypoint = "./functions/compute-slice/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/delete-account/index.ts"
+
+[functions.transcribe-voice]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/transcribe-voice/index.ts"

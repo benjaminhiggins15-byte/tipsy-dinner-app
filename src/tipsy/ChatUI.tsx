@@ -1,5 +1,6 @@
 import { useRef, useEffect } from "react";
-import { IconPhoto, IconX } from "@tabler/icons-react";
+import { IconPhoto, IconX, IconMicrophone, IconPlayerStopFilled } from "@tabler/icons-react";
+import { useVoiceRecording } from "./useVoiceRecording";
 
 // Presentational chat shell shared by Build's live AI conversation (Cook, in
 // App.tsx) and the scripted conversational onboarding flow (Onboarding.tsx).
@@ -122,12 +123,44 @@ export function TypingBubble() {
   );
 }
 
-export function CookInputBar({ value, onChange, onSend, placeholder, disabled, attachedImagePreviewUrl, onAttachClick, onRemoveAttachedImage }: {
+function formatRecordingTime(totalSeconds: number): string {
+  const capped = Math.min(totalSeconds, 60);
+  const minutes = Math.floor(capped / 60);
+  const seconds = capped % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+export function CookInputBar({ value, onChange, onSend, placeholder, disabled, attachedImagePreviewUrl, onAttachClick, onRemoveAttachedImage, voiceEnabled }: {
   value: string; onChange: (v: string) => void; onSend: () => void; placeholder: string; disabled?: boolean;
   attachedImagePreviewUrl?: string | null; onAttachClick?: () => void; onRemoveAttachedImage?: () => void;
+  voiceEnabled?: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const valueRef = useRef(value);
+  valueRef.current = value;
   const hasContent = !!value.trim() || !!attachedImagePreviewUrl;
+
+  const handleTranscript = (text: string) => {
+    const current = valueRef.current;
+    const merged = current.trim() ? `${current}${/\s$/.test(current) ? "" : " "}${text}` : text;
+    onChange(merged);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      const len = el.value.length;
+      el.setSelectionRange(len, len);
+    });
+  };
+
+  const voice = useVoiceRecording(handleTranscript);
+
+  useEffect(() => {
+    if (voice.status !== "error") return;
+    const timer = setTimeout(() => voice.clearError(), 4000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice.status, voice.errorMessage]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -139,8 +172,29 @@ export function CookInputBar({ value, onChange, onSend, placeholder, disabled, a
     }
   }, [value]);
 
+  const isRecording = voice.status === "recording";
+  const isTranscribing = voice.status === "transcribing";
+
   return (
     <div style={{ padding: "8px 16px 12px", flexShrink: 0, background: "#FAF7F2", borderTop: "1px solid rgba(35,60,0,0.08)", position: "relative", zIndex: 1, margin: 0, boxShadow: "none" }}>
+      {voice.status === "error" && voice.errorMessage && (
+        <div
+          onClick={voice.clearError}
+          style={{
+            background: "#233C00",
+            color: "#FEE7C0",
+            fontFamily: "Inter, sans-serif",
+            fontSize: 12,
+            fontWeight: 500,
+            padding: "8px 16px",
+            borderRadius: 8,
+            marginBottom: 8,
+            cursor: "pointer",
+          }}
+        >
+          {voice.errorMessage}
+        </div>
+      )}
       {attachedImagePreviewUrl && (
         <div style={{ display: "flex", marginBottom: 8 }}>
           <div style={{ position: "relative", width: 48, height: 48, borderRadius: 10, overflow: "hidden", border: "1px solid rgba(35,60,0,0.15)", flexShrink: 0 }}>
@@ -177,70 +231,138 @@ export function CookInputBar({ value, onChange, onSend, placeholder, disabled, a
         padding: "10px 16px",
         gap: 10,
       }}>
-        {onAttachClick && (
-          <button
-            onClick={onAttachClick}
-            aria-label="Attach a photo"
-            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", flexShrink: 0 }}
-          >
-            <IconPhoto size={20} stroke={1.5} color="rgba(35,60,0,0.5)" />
-          </button>
+        {isRecording ? (
+          <>
+            <button
+              onClick={voice.cancel}
+              aria-label="Cancel recording"
+              style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", flexShrink: 0 }}
+            >
+              <IconX size={20} stroke={1.5} color="rgba(35,60,0,0.5)" />
+            </button>
+            <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: "#B85C5C",
+                  flexShrink: 0,
+                  animation: "tipsyRecordingPulse 1s ease-in-out infinite",
+                }}
+              />
+              <span style={{ fontFamily: "Inter, sans-serif", fontSize: 15, color: "#233C00" }}>
+                Recording… {formatRecordingTime(voice.elapsedSeconds)}
+              </span>
+            </div>
+            <style>{`@keyframes tipsyRecordingPulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }`}</style>
+            <button
+              onClick={voice.stop}
+              aria-label="Stop recording"
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: "50%",
+                background: "#B85C5C",
+                border: "none",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              <IconPlayerStopFilled size={14} color="#FEE7C0" />
+            </button>
+          </>
+        ) : (
+          <>
+            {onAttachClick && (
+              <button
+                onClick={onAttachClick}
+                aria-label="Attach a photo"
+                style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", flexShrink: 0 }}
+              >
+                <IconPhoto size={20} stroke={1.5} color="rgba(35,60,0,0.5)" />
+              </button>
+            )}
+            <textarea
+              ref={textareaRef}
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  onSend();
+                }
+              }}
+              placeholder={isTranscribing ? "Transcribing…" : placeholder}
+              disabled={isTranscribing}
+              rows={1}
+              className="tipsy-input"
+              style={{
+                flex: 1,
+                background: "transparent",
+                border: "none",
+                outline: "none",
+                fontFamily: "Inter, sans-serif",
+                fontSize: 16,
+                color: "#233C00",
+                resize: "none",
+                overflowY: "auto",
+                maxHeight: 168,
+                lineHeight: 1.4,
+                padding: 0,
+              }}
+            />
+            <style>{`
+              .tipsy-input::placeholder {
+                color: rgba(35,60,0,0.3);
+              }
+            `}</style>
+            {voiceEnabled && (
+              <button
+                onClick={voice.start}
+                disabled={isTranscribing}
+                aria-label="Record voice input"
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  padding: 0,
+                  cursor: isTranscribing ? "default" : "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  flexShrink: 0,
+                  opacity: isTranscribing ? 0.4 : 1,
+                }}
+              >
+                <IconMicrophone size={20} stroke={1.5} color="rgba(35,60,0,0.5)" />
+              </button>
+            )}
+            <button
+              onClick={onSend}
+              disabled={disabled}
+              aria-label="Send"
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: "50%",
+                background: hasContent ? "#1E3A42" : "rgba(35,60,0,0.08)",
+                border: "none",
+                cursor: disabled ? "default" : "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+                opacity: disabled ? 0.5 : 1,
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill={hasContent ? "#FEE7C0" : "rgba(35,60,0,0.3)"} stroke="none">
+                <path d="M2 12L22 2L15 22L11 13L2 12Z" />
+              </svg>
+            </button>
+          </>
         )}
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              onSend();
-            }
-          }}
-          placeholder={placeholder}
-          rows={1}
-          className="tipsy-input"
-          style={{
-            flex: 1,
-            background: "transparent",
-            border: "none",
-            outline: "none",
-            fontFamily: "Inter, sans-serif",
-            fontSize: 16,
-            color: "#233C00",
-            resize: "none",
-            overflowY: "auto",
-            maxHeight: 168,
-            lineHeight: 1.4,
-            padding: 0,
-          }}
-        />
-        <style>{`
-          .tipsy-input::placeholder {
-            color: rgba(35,60,0,0.3);
-          }
-        `}</style>
-        <button
-          onClick={onSend}
-          disabled={disabled}
-          aria-label="Send"
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: "50%",
-            background: hasContent ? "#1E3A42" : "rgba(35,60,0,0.08)",
-            border: "none",
-            cursor: disabled ? "default" : "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
-            opacity: disabled ? 0.5 : 1,
-          }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill={hasContent ? "#FEE7C0" : "rgba(35,60,0,0.3)"} stroke="none">
-            <path d="M2 12L22 2L15 22L11 13L2 12Z" />
-          </svg>
-        </button>
       </div>
     </div>
   );

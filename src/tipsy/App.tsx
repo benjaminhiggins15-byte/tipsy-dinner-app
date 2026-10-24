@@ -4963,6 +4963,7 @@ function RecipeCard({
               onSend={handleChatSend}
               placeholder="ask anything"
               disabled={false}
+              voiceEnabled
             />
           </div>
         </>
@@ -6721,6 +6722,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
           onSend={sendMessage}
           placeholder={placeholder}
           disabled={typing}
+          voiceEnabled
         />
       </div>
 
