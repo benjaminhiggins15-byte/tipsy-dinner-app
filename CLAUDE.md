@@ -172,18 +172,32 @@ loose end, not removed.
 ## AI Layer
 
 - Model: `claude-sonnet-4-5` via Supabase Edge Function `ai-chat` (`/functions/v1/ai-chat`)
-- API key server-side only (`ANTHROPIC_API_KEY` in Edge Function env). Client uses Supabase anon key. Swapping LLM = one-line change in the edge function.
+- API key server-side only (`ANTHROPIC_API_KEY` in Edge Function env). Client sends the real caller's session access token, never the anon key — see the caller-auth convention below. Swapping LLM = one-line change in the edge function.
 - Streaming implemented (SSE, word-by-word) via `parseSSEStream` in App.tsx
 - `max_tokens` = 4096 (raised from 2048 to give the grocery enrichment call headroom; Anthropic bills only generated tokens, so no cost/behavior change for normal turns)
 - Two modes: Brainstorm and Recipe. Never enter Recipe mode except on explicit user choice. Recipe card is never updated for technique/wine/tangent questions.
 
-**`ai-chat` is not a template for authenticated writes.** It's an anonymous proxy —
-`verify_jwt = false`, called with the anon key as bearer, no caller-identity
-mechanism at all. `send_recipe_to_friend` (Account-to-Account Sharing — Build 3 in
+**`ai-chat` requires a signed-in caller (locked 2026-10-24) but is still not a
+template for authenticated writes.** It now requires `verify_jwt = true` plus an
+in-code `auth.getUser()` check on a caller-scoped client (anon key + forwarded
+Authorization header) — the same convention as
+`transcribe-voice`/`copy-received-recipe-photo`/`delete-account` — run before any
+Anthropic call; a missing or invalid token gets a 401 and never reaches the model.
+Beyond confirming a real session exists, it does no per-user authorization: no
+row-level permission check, because it's a stateless AI proxy, not a writer of
+protected tables. `send_recipe_to_friend` (Account-to-Account Sharing — Build 3 in
 FEATURE_SPECS.md) is the app's FIRST `security definer` function and FIRST trusted
 server-side write to protected tables; it deliberately does NOT follow `ai-chat`'s
 pattern — it's called via `supabase.rpc(...)`, which carries the real caller's JWT,
 so `auth.uid()` inside the function is the true authenticated sender.
+
+**Convention: every call to `ai-chat` sends the real caller's session access
+token, never the anon key.** Every client call site fetches it via
+`getAccessToken()` (`src/tipsy/data.ts`) and sends it as the `Authorization:
+Bearer` header; `compute-slice`'s own server-to-server call to `ai-chat` forwards
+its caller's `Authorization` header unchanged rather than minting a new one or
+using the anon key. Any new caller that doesn't follow this gets a 401 — there is
+no anon-key fallback path.
 
 **Voice transcription is a separate vendor, not a second `ai-chat`.**
 `transcribe-voice` (Edge Function) calls OpenAI's `gpt-4o-transcribe`, not
@@ -420,7 +434,7 @@ code defects).
 - **Dual lockfile:** `package-lock.json` (Vercel's build source) and `bun.lockb` (local dev) are both committed. Reconciling to one is a known open item.
 - **Six `data.ts` delete helpers don't check affected-row count**: `deleteCustomCategory`, `deleteOccasion`, `deleteMenu`, `removeRecipeFromMenuSection`'s delete, `clearGroceryItems`, `deleteCookEvent`. Same unchecked-zero-rows-matched shape `deleteSavedRecipe` had before the fix documented in "Menus & Recipe-Delete Hardening" in FEATURE_SPECS.md (a `DELETE` whose `WHERE` clause matches 0 rows returns success with no thrown error) — none of these six return a boolean a caller can check. Found during account-deletion wrap-up (2026-10-22); not fixed yet.
 - **`finish_received_recipe_save` exists only in the live database, not in any migration file** — unlike every other `SECURITY DEFINER` function in this codebase, it predates the schema-is-dashboard-only item above having a tracked exception. Capture it into a migration so it isn't a silent single-point-of-truth risk. Found during account-deletion wrap-up (2026-10-22).
-- **`ai-chat` trusts a client-supplied `userId` for its `llm_usage` insert** instead of deriving identity from the verified JWT — `ai-chat` is an anonymous proxy by design (see AI Layer in CLAUDE.md), so this was a known tradeoff, but it means a client can attribute usage-metering rows to any user id it sends. Found during account-deletion wrap-up (2026-10-22); not fixed yet.
+- **`ai-chat` trusts a client-supplied `userId` for its `llm_usage` insert** instead of deriving identity from the verified JWT — even though `ai-chat` now requires a signed-in caller (see AI Layer in CLAUDE.md), the `llm_usage` insert still uses the request body's `user_id` field rather than the verified caller identity from `auth.getUser()`, so a client can still attribute usage-metering rows to any user id it sends. Found during account-deletion wrap-up (2026-10-22); not fixed yet.
 - **Deleting a saved recipe never removes its storage photo** — `deleteSavedRecipe` (and the six helpers above once fixed) deletes DB rows only; the corresponding `{userId}/{recipeId}.jpg` in `recipe-photos` is never swept, so every recipe delete leaves an orphaned photo object behind. Found during account-deletion wrap-up (2026-10-22); not fixed yet.
-- **`ai-chat` has `verify_jwt = false` and no caller-identity check** — anonymous access to the Anthropic proxy for anyone holding the Supabase anon key (see AI Layer above). Known tradeoff, not a new finding, but not fixed — flagged here as a standing backlog item.
+- **RESOLVED (2026-10-24) — `ai-chat` no longer has anonymous access.** It now requires `verify_jwt = true` plus an in-code `auth.getUser()` check, same convention as `transcribe-voice`/`copy-received-recipe-photo`/`delete-account`; anyone holding only the Supabase anon key gets a 401. See AI Layer above for current detail and the caller-auth convention.
 - **`handleChipClick` calls `runAllergyGatedGeneration` inside an un-awaited IIFE** (`(async () => { await runAllergyGatedGeneration(...) })()`, App.tsx) — pre-existing. The gate itself still runs to completion (its own internal try/catch is unaffected), but `handleChipClick` returns before that resolves, so any future logic added after the chip-tap call would NOT be ordered after generation. Found during Voice Input docs pass (2026-10-24); not fixed.
