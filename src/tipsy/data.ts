@@ -4454,6 +4454,87 @@ export async function unpostCook(postId: string): Promise<boolean> {
   }
 }
 
+// ==================== COOKING FEED (read path) ====================
+// Card shape returned by get_cook_feed (security-definer, authenticated-only
+// — see supabase/migrations/20261025000003_get_cook_feed_and_get_cook_post.sql
+// / 20261025000004_cook_posts_add_photo_source.sql). photo_url (when present)
+// is already a full public URL — postCook resolves it via getPublicUrl()
+// before insert, so cook_posts.photo_url is never a bare storage path the way
+// cook_events.photo_url is. No further transformation needed here.
+export type CookFeedPost = {
+  post_id: string;
+  created_at: string;
+  cooked_on: string;
+  score: number | null;
+  note: string | null;
+  photo_url: string | null;
+  photo_source: 'cook' | 'recipe' | null;
+  recipe_title: string;
+  poster_id: string;
+  poster_display_name: string;
+  poster_handle: string;
+};
+
+// Cursor is the (created_at, post_id) pair of the last row already held by
+// the caller — keyset pagination, not OFFSET, matching get_cook_feed's own
+// param shape. Passing both together (or neither) is required; see the
+// migration's comment on why created_at alone isn't a safe cursor.
+export type CookFeedCursor = {
+  createdAt: string;
+  postId: string;
+};
+
+export const COOK_FEED_PAGE_SIZE = 20;
+
+// Full single-post shape returned by get_cook_post, for tap-through from a
+// feed card into a read-only recipe view.
+export type CookPostDetail = {
+  post_id: string;
+  created_at: string;
+  cooked_on: string;
+  score: number | null;
+  note: string | null;
+  photo_url: string | null;
+  photo_source: 'cook' | 'recipe' | null;
+  recipe_snapshot: RecipeSendSnapshot;
+  poster_id: string;
+  poster_display_name: string;
+  poster_handle: string;
+};
+
+// Wraps the get_cook_feed security-definer RPC — same fail-quiet/null-on-error
+// discipline as getSuggestedRecipeDetail/searchProfiles. Returns an empty
+// array (not null) on failure so callers can treat "no more posts" and
+// "fetch failed" distinctly if they choose, by also surfacing the thrown
+// error via console.error; a null-returning sibling would collapse "empty
+// page" and "error" into the same falsy shape for list-rendering callers.
+export async function getCookFeed(cursor?: CookFeedCursor): Promise<CookFeedPost[]> {
+  try {
+    const { data, error } = await supabase.rpc('get_cook_feed', {
+      p_limit: COOK_FEED_PAGE_SIZE,
+      p_before_created_at: cursor?.createdAt ?? null,
+      p_before_id: cursor?.postId ?? null,
+    });
+    if (error) throw error;
+    return data ?? [];
+  } catch (error) {
+    console.error('Error loading cook feed:', error);
+    throw error;
+  }
+}
+
+// Wraps the get_cook_post security-definer RPC.
+export async function getCookPost(postId: string): Promise<CookPostDetail | null> {
+  try {
+    const { data, error } = await supabase.rpc('get_cook_post', { p_post_id: postId });
+    if (error) throw error;
+    return data?.[0] ?? null;
+  } catch (error) {
+    console.error('Error loading cook post:', error);
+    return null;
+  }
+}
+
 // ==================== STEP-TITLE BACKFILL (one-time, already run) ====================
 // Titled every existing recipe's plain-string steps via an isolated AI call,
 // modeled on the grocery enrichment pattern above (own small system prompt,

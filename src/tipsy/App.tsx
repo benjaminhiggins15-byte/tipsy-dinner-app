@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, uploadCookPhoto, removeCookPhoto, getCookPhotoSignedUrl, postCook, unpostCook, deriveHandleFromName, sendRecipeToFriends, searchProfiles, getMyConnections, type ProfileSearchResult, type PendingReceivedRecipe, getPendingReceivedRecipes, type SuggestedRecipeDetail, getSuggestedRecipeDetail, type StructuredAllergies, getRecipeSnapshotByToken, type RecipeShareSnapshot, PENDING_SHARE_TOKEN_KEY, type DiscoveredRecipe, getAccessToken } from "./data";
+import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, uploadCookPhoto, removeCookPhoto, getCookPhotoSignedUrl, postCook, unpostCook, getCookFeed, type CookFeedPost, COOK_FEED_PAGE_SIZE, deriveHandleFromName, sendRecipeToFriends, searchProfiles, getMyConnections, type ProfileSearchResult, type PendingReceivedRecipe, getPendingReceivedRecipes, type SuggestedRecipeDetail, getSuggestedRecipeDetail, type StructuredAllergies, getRecipeSnapshotByToken, type RecipeShareSnapshot, PENDING_SHARE_TOKEN_KEY, type DiscoveredRecipe, getAccessToken } from "./data";
 import { type CropRect, compressImageFile } from "./image";
 import { type Big9Id, BIG9_DISPLAY_NAMES, effectiveAllergensForScan, scanIngredientsForBig9, scanFreeTextForBig9, type Big9Hit } from "./allergyMap";
 import AddYourOwn from "./AddYourOwn";
@@ -15,6 +15,7 @@ import AuthFlow from "./AuthFlow";
 import SharedRecipeView from "./SharedRecipeView";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
 import Home, { ReceivedPending, ReceivedRecipeView, SuggestionDetailView, DiscoveredDetailView } from "./Home";
+import { CookFeedScreen, CookPostDetailScreen, type CookFeedState } from "./CookFeed";
 import { supabase } from "../lib/supabase";
 import { logEvent, isAccountDeletionInFlight } from "../lib/events";
 import type { Session } from "@supabase/supabase-js";
@@ -333,7 +334,9 @@ type Screen =
   | { name: "suggestionDetail"; recipe: SuggestedRecipeDetail; newCategory?: { key: string; label: string } }
   | { name: "newcategoryforsuggestion"; recipe: SuggestedRecipeDetail }
   | { name: "discoveredDetail"; recipe: DiscoveredRecipe; newCategory?: { key: string; label: string } }
-  | { name: "newcategoryfordiscovered"; recipe: DiscoveredRecipe };
+  | { name: "newcategoryfordiscovered"; recipe: DiscoveredRecipe }
+  | { name: "cookFeed" }
+  | { name: "cookPostDetail"; postId: string };
 
 type TabId = "build" | "recipes" | "grocery" | "profile" | "home";
 
@@ -389,6 +392,8 @@ function screenKey(s: Screen): string {
     case "newcategoryforsuggestion": return `newcategoryforsuggestion:${s.recipe.id}`;
     case "discoveredDetail": return `discoveredDetail:${s.recipe.shareToken}`;
     case "newcategoryfordiscovered": return `newcategoryfordiscovered:${s.recipe.shareToken}`;
+    case "cookFeed": return "cookFeed";
+    case "cookPostDetail": return `cookPostDetail:${s.postId}`;
   }
 }
 
@@ -425,6 +430,7 @@ function renderScreen(
   goToReceivedShelf?: () => void,
   switchToTab?: (tab: TabId, screen?: Screen) => void,
   finishCreateCategoryForDiscovered?: (catKey: string, catLabel: string, recipe: DiscoveredRecipe) => void,
+  cookFeedState?: CookFeedState,
 ) {
   switch (s.name) {
     case "cook": return (
@@ -606,6 +612,18 @@ function renderScreen(
         }}
       />
     );
+    case "cookFeed": return (
+      <CookFeedScreen
+        state={cookFeedState ?? {
+          posts: [], loaded: false, hasMore: false, loadingMore: false, error: false,
+          ensureLoaded: async () => {}, loadMore: async () => {}, refresh: async () => {},
+        }}
+        back={back}
+        push={push}
+        isTabRoot={isTabRoot}
+      />
+    );
+    case "cookPostDetail": return <CookPostDetailScreen postId={s.postId} back={back} />;
   }
 }
 
@@ -844,6 +862,69 @@ export default function App() {
       delete next["__all__"];
       return next;
     });
+  };
+
+  // Cook Feed cache — same App-level-state pattern as recipesByCategory
+  // above, for the same reason: ScreenStage remounts the outgoing screen
+  // during every transition, so caching here (not in CookFeedScreen's own
+  // local state) is what keeps a tab-switch from re-fetching or flashing
+  // back to an empty list.
+  const [cookFeedPosts, setCookFeedPosts] = useState<CookFeedPost[]>([]);
+  const [cookFeedLoaded, setCookFeedLoaded] = useState(false);
+  const [cookFeedHasMore, setCookFeedHasMore] = useState(true);
+  const [cookFeedLoadingMore, setCookFeedLoadingMore] = useState(false);
+  const [cookFeedError, setCookFeedError] = useState(false);
+
+  const ensureCookFeedLoaded = async () => {
+    if (cookFeedLoaded) return;
+    try {
+      const posts = await getCookFeed();
+      setCookFeedPosts(posts);
+      setCookFeedHasMore(posts.length >= COOK_FEED_PAGE_SIZE);
+      setCookFeedLoaded(true);
+      setCookFeedError(false);
+    } catch {
+      setCookFeedError(true);
+    }
+  };
+
+  const loadMoreCookFeed = async () => {
+    if (cookFeedLoadingMore || !cookFeedHasMore || cookFeedPosts.length === 0) return;
+    setCookFeedLoadingMore(true);
+    try {
+      const last = cookFeedPosts[cookFeedPosts.length - 1];
+      const more = await getCookFeed({ createdAt: last.created_at, postId: last.post_id });
+      setCookFeedPosts(prev => [...prev, ...more]);
+      setCookFeedHasMore(more.length >= COOK_FEED_PAGE_SIZE);
+    } catch {
+      // Leave hasMore/posts untouched — the "Load more" button stays visible
+      // so the user can simply retry the tap.
+    } finally {
+      setCookFeedLoadingMore(false);
+    }
+  };
+
+  const refreshCookFeed = async () => {
+    try {
+      const posts = await getCookFeed();
+      setCookFeedPosts(posts);
+      setCookFeedHasMore(posts.length >= COOK_FEED_PAGE_SIZE);
+      setCookFeedLoaded(true);
+      setCookFeedError(false);
+    } catch {
+      setCookFeedError(true);
+    }
+  };
+
+  const cookFeedState: CookFeedState = {
+    posts: cookFeedPosts,
+    loaded: cookFeedLoaded,
+    hasMore: cookFeedHasMore,
+    loadingMore: cookFeedLoadingMore,
+    error: cookFeedError,
+    ensureLoaded: ensureCookFeedLoaded,
+    loadMore: loadMoreCookFeed,
+    refresh: refreshCookFeed,
   };
 
   const migrateFromLocalStorage = async (userId: string): Promise<void> => {
@@ -1672,6 +1753,7 @@ export default function App() {
           seedBuildFromChip={seedBuildFromChip}
           goToReceivedShelf={goToReceivedShelf}
           switchToTab={switchToTab}
+          cookFeedState={cookFeedState}
         />
         <BottomTabBar activeTab={activeTab} onTabClick={switchToTab} />
       </div>
@@ -1852,6 +1934,7 @@ function ScreenStage({
   seedBuildFromChip,
   goToReceivedShelf,
   switchToTab,
+  cookFeedState,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back"; fromIsTabRoot?: boolean; toIsTabRoot?: boolean } | null;
@@ -1886,6 +1969,7 @@ function ScreenStage({
   seedBuildFromChip: (prompt: string) => void;
   goToReceivedShelf: () => void;
   switchToTab: (tab: TabId, screen?: Screen) => void;
+  cookFeedState: CookFeedState;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
@@ -1975,7 +2059,7 @@ function ScreenStage({
         pointerEvents: isTransitioning ? "none" : "auto",
         paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
       }}>
-        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered)}
+        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState)}
       </div>
 
       {/* Overlay layer - only during transitions, renders from screen */}
@@ -1988,7 +2072,7 @@ function ScreenStage({
           pointerEvents: "none",
           paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
         }}>
-          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered)}
+          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState)}
         </div>
       )}
     </div>

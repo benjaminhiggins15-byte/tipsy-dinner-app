@@ -13,6 +13,7 @@ export default function ExpandedRecipeOverlay({
   recipe,
   saveLabel = "Save",
   sharerName,
+  sharerLabel = "inspired by",
   onSignIn,
   photoUrl,
   onBack,
@@ -20,7 +21,9 @@ export default function ExpandedRecipeOverlay({
 }: {
   open: boolean;
   bottomOffset: number;
-  onSave: () => void;
+  // Optional — omitting it hides the Save button entirely (e.g. Cook Feed's
+  // read-only tap-through, which has no save step yet).
+  onSave?: () => void;
   recipe: {
     title: string;
     description: string;
@@ -31,6 +34,10 @@ export default function ExpandedRecipeOverlay({
   // default to Build's original behavior exactly when omitted.
   saveLabel?: string;
   sharerName?: string;
+  // Wording in front of sharerName — defaults to Build's original "inspired
+  // by" phrasing; Cook Feed passes "cooked by" since sharerName there is the
+  // poster, not an inspiration source.
+  sharerLabel?: string;
   onSignIn?: () => void;
   photoUrl?: string | null;
   // Optional back control for callers that mount this as a full navigated
@@ -198,7 +205,7 @@ export default function ExpandedRecipeOverlay({
               color: "rgba(35,60,0,0.5)",
               marginBottom: 12,
             }}>
-              inspired by {sharerName}
+              {sharerLabel} {sharerName}
             </div>
           )}
           <div style={{
@@ -331,27 +338,29 @@ export default function ExpandedRecipeOverlay({
           ))}
         </div>
         {/* Save button */}
-        <button
-          onClick={onSave}
-          style={{
-            display: "block",
-            width: "calc(100% - 32px)",
-            margin: "16px 16px",
-            padding: "12px 0",
-            background: "#233C00",
-            color: "#FAF7F2",
-            border: "none",
-            borderRadius: 100,
-            fontFamily: "Inter, sans-serif",
-            fontSize: 12,
-            textTransform: "uppercase",
-            letterSpacing: "0.1em",
-            cursor: "pointer",
-            fontWeight: 500,
-          }}
-        >
-          {saveLabel}
-        </button>
+        {onSave && (
+          <button
+            onClick={onSave}
+            style={{
+              display: "block",
+              width: "calc(100% - 32px)",
+              margin: "16px 16px",
+              padding: "12px 0",
+              background: "#233C00",
+              color: "#FAF7F2",
+              border: "none",
+              borderRadius: 100,
+              fontFamily: "Inter, sans-serif",
+              fontSize: 12,
+              textTransform: "uppercase",
+              letterSpacing: "0.1em",
+              cursor: "pointer",
+              fontWeight: 500,
+            }}
+          >
+            {saveLabel}
+          </button>
+        )}
         {onSignIn && (
           <button
             onClick={onSignIn}
