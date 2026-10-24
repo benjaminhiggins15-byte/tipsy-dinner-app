@@ -165,8 +165,8 @@ export async function generateTasteProfile(
 ): Promise<void> {
   if (isAccountDeletionInFlight()) return;
   try {
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    if (!supabaseAnonKey) throw new Error("Supabase key not found");
+    const accessToken = await getAccessToken();
+    if (!accessToken) throw new Error("No active session");
 
     const systemPrompt = TASTE_PROFILE_SYSTEM_PROMPT_TEMPLATE(
       answers.palate,
@@ -180,7 +180,7 @@ export async function generateTasteProfile(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${supabaseAnonKey}`,
+          "Authorization": `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
           messages: [{ role: "user", content: "Generate the taste profile now." }],
@@ -317,8 +317,8 @@ export async function generateOnboardingReflection(
   }, firstTokenTimeoutMs);
 
   try {
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    if (!supabaseAnonKey) throw new Error("Supabase key not found");
+    const accessToken = await getAccessToken();
+    if (!accessToken) throw new Error("No active session");
 
     const systemPrompt = ONBOARDING_REFLECTION_SYSTEM_PROMPTS[field](answer);
     const userId = await getCurrentUserId();
@@ -329,7 +329,7 @@ export async function generateOnboardingReflection(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${supabaseAnonKey}`,
+          "Authorization": `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
           messages: [{ role: "user", content: "Reflect it back now." }],
@@ -395,8 +395,8 @@ USER'S ANSWER: ${answer}`;
 export async function parseNoGosAnswer(answer: string): Promise<string | null> {
   if (isAccountDeletionInFlight()) return null;
   try {
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    if (!supabaseAnonKey) throw new Error("Supabase key not found");
+    const accessToken = await getAccessToken();
+    if (!accessToken) throw new Error("No active session");
 
     const userId = await getCurrentUserId();
 
@@ -406,7 +406,7 @@ export async function parseNoGosAnswer(answer: string): Promise<string | null> {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${supabaseAnonKey}`,
+          "Authorization": `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
           messages: [{ role: "user", content: "Compose the constraints record now." }],
@@ -751,8 +751,9 @@ export async function parseDrinkPreference(
 
   const callPromise = (async (): Promise<string> => {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    if (!supabaseUrl || !supabaseAnonKey) throw new Error("Supabase config missing");
+    if (!supabaseUrl) throw new Error("Supabase config missing");
+    const accessToken = await getAccessToken();
+    if (!accessToken) throw new Error("No active session");
 
     const userId = await getCurrentUserId();
 
@@ -760,7 +761,7 @@ export async function parseDrinkPreference(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${supabaseAnonKey}`,
+        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
         systemPrompt: DRINK_PREFERENCE_PARSE_SYSTEM_PROMPT(trimmed),
@@ -1200,6 +1201,15 @@ async function getCurrentUserId(): Promise<string | null> {
     console.error('Error getting user:', error);
     return null;
   }
+}
+
+// Real caller access token for an authenticated Edge Function call — same
+// supabase.auth.getSession() source computeMySlice already uses below. Never
+// falls back to the anon key; a null return means no session, and every
+// caller treats that as a hard failure through its existing error handling.
+export async function getAccessToken(): Promise<string | null> {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token ?? null;
 }
 
 // Load all saved recipes for current user
@@ -3644,8 +3654,9 @@ export async function enrichGroceryItems(
 
   try {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    if (!supabaseUrl || !supabaseAnonKey) throw new Error('Supabase config missing');
+    if (!supabaseUrl) throw new Error('Supabase config missing');
+    const accessToken = await getAccessToken();
+    if (!accessToken) throw new Error('No active session');
 
     const inputPayload = items.map((i) => ({
       id: i.id,
@@ -3657,7 +3668,7 @@ export async function enrichGroceryItems(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${supabaseAnonKey}`,
+        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
         systemPrompt: GROCERY_ENRICHMENT_SYSTEM_PROMPT,
@@ -4035,8 +4046,9 @@ async function generateStepTitlesForRecipe(
 ): Promise<Map<number, string>> {
   if (isAccountDeletionInFlight()) return new Map();
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !supabaseAnonKey) throw new Error('Supabase config missing');
+  if (!supabaseUrl) throw new Error('Supabase config missing');
+  const accessToken = await getAccessToken();
+  if (!accessToken) throw new Error('No active session');
 
   const inputPayload = instructions.map((s) => ({ index: s.index, instruction: s.instruction }));
   const userId = await getCurrentUserId();
@@ -4045,7 +4057,7 @@ async function generateStepTitlesForRecipe(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${supabaseAnonKey}`,
+      Authorization: `Bearer ${accessToken}`,
     },
     body: JSON.stringify({
       systemPrompt: STEP_TITLE_BACKFILL_SYSTEM_PROMPT,

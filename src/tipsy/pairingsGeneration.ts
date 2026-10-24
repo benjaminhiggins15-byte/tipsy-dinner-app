@@ -12,7 +12,7 @@
 // filtered, exactly-4-item set, or a "failed"/"off" status — never a
 // shrunken or unfiltered one, cached or fresh.
 import { supabase } from "../lib/supabase";
-import { type RecipeStep, normalizeStep, parseSSEStream } from "./data";
+import { type RecipeStep, normalizeStep, parseSSEStream, getAccessToken } from "./data";
 import { type Big9Id, type StructuredAllergies, BIG9_DISPLAY_NAMES } from "./allergyMap";
 import { ALCOHOL_TERMS, filterPairings, resolveAllergenSet, type PairingItem, type FilterPairingsOptions } from "./pairingsSafety";
 import { isAccountDeletionInFlight } from "../lib/events";
@@ -437,14 +437,15 @@ const fetchProfileFromDb: FetchPairingsProfile = async (userId) => {
 const callPairingsAIViaEdgeFunction: CallPairingsAI = async (systemPrompt, userId) => {
   if (isAccountDeletionInFlight()) throw new Error("Account deletion in progress");
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !supabaseAnonKey) throw new Error("Supabase config missing");
+  if (!supabaseUrl) throw new Error("Supabase config missing");
+  const accessToken = await getAccessToken();
+  if (!accessToken) throw new Error("No active session");
 
   const response = await fetch(`${supabaseUrl}/functions/v1/ai-chat`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${supabaseAnonKey}`,
+      Authorization: `Bearer ${accessToken}`,
     },
     body: JSON.stringify({
       systemPrompt,

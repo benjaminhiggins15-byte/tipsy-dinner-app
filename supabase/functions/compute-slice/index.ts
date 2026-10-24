@@ -511,13 +511,16 @@ Return STRICT JSON only. No markdown, no code fences, no prose outside the JSON.
 // generateTasteProfile / enrichGroceryItems — duplicated here for the same
 // import-boundary reason as the prompt above. userId here is the VERIFIED
 // caller id from this function's own JWT check (see callerId below), not a
-// self-reported value — ai-chat's cost meter trusts it as-is.
-async function callAIChatAndDrain(userMessage: string, userId: string): Promise<string> {
+// self-reported value — ai-chat's cost meter trusts it as-is. authHeader is
+// the same caller Authorization header this function already verified above
+// (see authHeader/callerClient.auth.getUser() in Deno.serve) — forwarded
+// as-is rather than the anon key, so ai-chat sees the real caller's JWT.
+async function callAIChatAndDrain(userMessage: string, userId: string, authHeader: string): Promise<string> {
   const response = await fetch(`${SUPABASE_URL}/functions/v1/ai-chat`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${ANON_KEY}`,
+      Authorization: authHeader,
     },
     body: JSON.stringify({
       messages: [{ role: 'user', content: userMessage }],
@@ -937,7 +940,7 @@ Deno.serve(async (req) => {
       })),
     })
 
-    const fullText = await callAIChatAndDrain(userMessage, callerId)
+    const fullText = await callAIChatAndDrain(userMessage, callerId, authHeader)
     if (!fullText.trim()) {
       return await fallbackToPriorSliceOrError('Empty response from ai-chat selection call')
     }
