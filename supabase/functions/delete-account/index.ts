@@ -12,7 +12,8 @@ import { createClient } from 'npm:@supabase/supabase-js@2.106.2'
 // Function). Three steps, each fully verified before moving to the next:
 //   0. storage buckets exist (checked up front, see review finding F6)
 //   1. data   — public.delete_user_account_data(uid) via admin RPC
-//   2. storage — sweep recipe-photos/ and menu-photos/ under ${uid}/
+//   2. storage — sweep recipe-photos/, menu-photos/, and cook-photos-private/
+//      under ${uid}/ (cook-photos-private added 2026-10-25, see below)
 //   3. auth   — auth.admin.deleteUser(uid), then confirm via getUserById
 // All three numbered steps must succeed, and each is independently
 // re-run-safe, so a retry after a partial failure (e.g. storage succeeded,
@@ -35,7 +36,13 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
-const STORAGE_BUCKETS = ['recipe-photos', 'menu-photos']
+// cook-photos-private added 2026-10-25 alongside cook_posts (migration
+// 20261025000001_cook_posts_feed_v1.sql) — a NON-public bucket for live,
+// unposted cook photos. Same one-level-deep {uid}/ sweep as the other two;
+// its DB rows (cook_events.photo_url) are already removed by
+// delete_user_account_data, this just removes the corresponding objects so
+// a deleted account's private cook photos don't survive in storage.
+const STORAGE_BUCKETS = ['recipe-photos', 'menu-photos', 'cook-photos-private']
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const LIST_PAGE_SIZE = 1000
 const REMOVE_BATCH_SIZE = 100

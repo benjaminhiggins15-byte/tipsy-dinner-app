@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, deriveHandleFromName, sendRecipeToFriends, searchProfiles, getMyConnections, type ProfileSearchResult, type PendingReceivedRecipe, getPendingReceivedRecipes, type SuggestedRecipeDetail, getSuggestedRecipeDetail, type StructuredAllergies, getRecipeSnapshotByToken, type RecipeShareSnapshot, PENDING_SHARE_TOKEN_KEY, type DiscoveredRecipe, getAccessToken } from "./data";
-import { type CropRect } from "./image";
+import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, uploadCookPhoto, removeCookPhoto, getCookPhotoSignedUrl, postCook, unpostCook, deriveHandleFromName, sendRecipeToFriends, searchProfiles, getMyConnections, type ProfileSearchResult, type PendingReceivedRecipe, getPendingReceivedRecipes, type SuggestedRecipeDetail, getSuggestedRecipeDetail, type StructuredAllergies, getRecipeSnapshotByToken, type RecipeShareSnapshot, PENDING_SHARE_TOKEN_KEY, type DiscoveredRecipe, getAccessToken } from "./data";
+import { type CropRect, compressImageFile } from "./image";
 import { type Big9Id, BIG9_DISPLAY_NAMES, effectiveAllergensForScan, scanIngredientsForBig9, scanFreeTextForBig9, type Big9Hit } from "./allergyMap";
 import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
@@ -3024,6 +3024,31 @@ function RecipeCard({
   const [logNote, setLogNote] = useState("");
   const [savingLog, setSavingLog] = useState(false);
   const [confirmDeleteEvent, setConfirmDeleteEvent] = useState(false);
+  const [deleteLogError, setDeleteLogError] = useState(false);
+  // "Post publicly" toggle + its own photo UI — fully separate from the
+  // recipe hero photo state above (photoMenuOpen/cropFile/etc.): different
+  // bucket (cook-photos-private, never getPublicUrl()), different storage
+  // path shape, different lifecycle (tied to the log sheet, not the card).
+  const [logPostPublicly, setLogPostPublicly] = useState(false);
+  const [postingLog, setPostingLog] = useState(false);
+  const [postError, setPostError] = useState(false);
+  const [cookPhotoMenuOpen, setCookPhotoMenuOpen] = useState(false);
+  const [confirmRemoveCookPhoto, setConfirmRemoveCookPhoto] = useState(false);
+  const [cookCropFile, setCookCropFile] = useState<File | null>(null);
+  const cookPhotoInputRef = useRef<HTMLInputElement>(null);
+  const [cookPhotoUploading, setCookPhotoUploading] = useState(false);
+  const [cookPhotoRemoving, setCookPhotoRemoving] = useState(false);
+  const [cookPhotoError, setCookPhotoError] = useState<string | null>(null);
+  const [cookPhotoSignedUrl, setCookPhotoSignedUrl] = useState<string | null>(null);
+  const cookPhotoRequestIdRef = useRef(0);
+  // A new cook has no event id yet, so its photo can't be uploaded at crop
+  // time like the edit-mode case above — the cropped/compressed Blob is held
+  // here instead and uploaded in handleSaveLog once the event id exists.
+  const [pendingCookPhotoBlob, setPendingCookPhotoBlob] = useState<Blob | null>(null);
+  const [pendingCookPhotoPreviewUrl, setPendingCookPhotoPreviewUrl] = useState<string | null>(null);
+  const [confirmRemovePost, setConfirmRemovePost] = useState<string | null>(null);
+  const [removePostError, setRemovePostError] = useState(false);
+  const [removingPost, setRemovingPost] = useState(false);
   const [showSendSheet, setShowSendSheet] = useState(false);
   const [sendQuery, setSendQuery] = useState("");
   const [sendResults, setSendResults] = useState<ProfileSearchResult[]>([]);
@@ -3054,6 +3079,17 @@ function RecipeCard({
   const steps = recipe.steps ?? [];
   const headlineRating = headlineRatingFromEvents(cookEvents);
   const editable = recipe.savedId != null;
+  // The cook event currently open in the log sheet (edit mode only) — reused
+  // by the cook-photo UI and the "Post publicly" section below to read its
+  // current photoPath/postId without a second state copy.
+  const editingEvent = editingEventId ? cookEvents.find((e) => e.id === editingEventId) ?? null : null;
+  // Which photo (if any) the log sheet's Photo section should show. Priority
+  // is on pendingCookPhotoBlob (not on logMode) because logMode flips to
+  // "edit" right after a brand-new cook's insert succeeds — so a photo picked
+  // before that insert, or one still unsaved after a failed upload retry,
+  // must keep showing even though editingEventId is now set.
+  const cookPhotoHasPhoto = !!pendingCookPhotoBlob || !!editingEvent?.photoPath;
+  const cookPhotoPreviewUrl = pendingCookPhotoBlob ? pendingCookPhotoPreviewUrl : cookPhotoSignedUrl;
 
   // recipe_opened — RecipeCard mounted for a saved recipe
   useEffect(() => {
@@ -3266,12 +3302,25 @@ function RecipeCard({
     });
   };
 
+  // Drops the held-but-not-yet-uploaded create-mode photo, revoking its
+  // preview object URL so it doesn't leak.
+  const clearPendingCookPhoto = () => {
+    if (pendingCookPhotoPreviewUrl) URL.revokeObjectURL(pendingCookPhotoPreviewUrl);
+    setPendingCookPhotoBlob(null);
+    setPendingCookPhotoPreviewUrl(null);
+  };
+
   const openLogSheetForCreate = () => {
     setLogMode("create");
     setEditingEventId(null);
     setLogDate(todayLocalDateString());
     setLogScoreDigits("");
     setLogNote("");
+    setLogPostPublicly(false);
+    setPostError(false);
+    setCookPhotoError(null);
+    setCookPhotoSignedUrl(null);
+    clearPendingCookPhoto();
     setShowLogSheet(true);
   };
 
@@ -3281,6 +3330,17 @@ function RecipeCard({
     setLogDate(event.cookedOn);
     setLogScoreDigits(event.score != null ? event.score.toFixed(1) : "");
     setLogNote(event.note ?? "");
+    setLogPostPublicly(false);
+    setPostError(false);
+    setCookPhotoError(null);
+    setCookPhotoSignedUrl(null);
+    clearPendingCookPhoto();
+    if (event.photoPath) {
+      const requestId = ++cookPhotoRequestIdRef.current;
+      getCookPhotoSignedUrl(event.photoPath).then((url) => {
+        if (cookPhotoRequestIdRef.current === requestId) setCookPhotoSignedUrl(url);
+      });
+    }
     setShowLogSheet(true);
   };
 
@@ -3323,20 +3383,35 @@ function RecipeCard({
   const closeLogSheet = () => {
     setShowLogSheet(false);
     setEditingEventId(null);
+    setLogPostPublicly(false);
+    setPostError(false);
+    setCookPhotoError(null);
+    setCookPhotoSignedUrl(null);
+    clearPendingCookPhoto();
   };
 
   const handleSaveLog = async () => {
-    if (!recipe.savedId || savingLog) return;
+    if (!recipe.savedId || savingLog || postingLog) return;
     setSavingLog(true);
+    setPostError(false);
+    setCookPhotoError(null);
     try {
       const score = parseLogScore();
       const note = logNote.trim() || null;
       const cookedOn = logDate || todayLocalDateString();
+      let savedEventId: string | null = null;
 
       if (logMode === "create") {
         const created = await addCookEvent(recipe.savedId.toString(), { cookedOn, score, note });
         if (created) {
           setCookEvents((prev) => sortCookEventsDesc([...prev, created]));
+          savedEventId = created.id;
+          // The event now exists in the DB — flip to edit mode immediately so
+          // that if a downstream step (photo upload or posting) below fails
+          // and the sheet stays open, a retried Save updates this same row
+          // instead of re-inserting a second cook event.
+          setLogMode("edit");
+          setEditingEventId(created.id);
           // cook_logged — a cook event was logged for this recipe
           logEvent("cook_logged", { recipe_id: recipe.savedId });
         }
@@ -3347,19 +3422,79 @@ function RecipeCard({
             prev.map((e) => (e.id === editingEventId ? { ...e, cookedOn, score, note } : e))
           )
         );
+        savedEventId = editingEventId;
       }
       clearRecipeCache?.(categoryKey);
+
+      // Step 2: a photo picked for a brand-new cook was held in state (no
+      // event id existed yet to upload against) — upload it now that one
+      // does. Gated on pendingCookPhotoBlob itself, not logMode — logMode was
+      // already flipped to "edit" above, and this same block must also run on
+      // a retried Save after this step previously failed (the blob survives
+      // that failure; it's only cleared on success or by closeLogSheet). The
+      // cook event above is already durably saved regardless of what happens
+      // here. A failure must never post: the user picked their own photo, so
+      // silently posting without it (or falling back to the recipe's photo)
+      // would show something other than what they chose.
+      if (pendingCookPhotoBlob && savedEventId) {
+        try {
+          const { path, version } = await uploadCookPhoto(savedEventId, pendingCookPhotoBlob);
+          const uploadedEventId = savedEventId;
+          setCookEvents((prev) =>
+            prev.map((e) => (e.id === uploadedEventId ? { ...e, photoPath: path, photoVersion: version } : e))
+          );
+          clearPendingCookPhoto();
+        } catch (err) {
+          setCookPhotoError(
+            err instanceof Error
+              ? `Cook saved, but the photo didn't upload (${err.message}). It wasn't posted.`
+              : "Cook saved, but the photo didn't upload. It wasn't posted."
+          );
+          setSavingLog(false);
+          return;
+        }
+      }
+
+      // Step 3: posting is a separate, best-effort step that must never undo
+      // the save above — a posting failure here keeps the sheet open with an
+      // inline message rather than rolling back or silently dropping the save.
+      if (logPostPublicly && savedEventId) {
+        setSavingLog(false);
+        setPostingLog(true);
+        const result = await postCook(savedEventId);
+        setPostingLog(false);
+        if (!result) {
+          setPostError(true);
+          return;
+        }
+        const postedId = savedEventId;
+        setCookEvents((prev) =>
+          prev.map((e) => (e.id === postedId ? { ...e, postId: result.postId } : e))
+        );
+      }
+
       closeLogSheet();
     } catch (err) {
       console.error("Failed to save cook event:", err);
     } finally {
       setSavingLog(false);
+      setPostingLog(false);
     }
   };
 
   const handleDeleteLog = async () => {
     if (!editingEventId) return;
-    await deleteCookEvent(editingEventId);
+    setDeleteLogError(false);
+    const ok = await deleteCookEvent(editingEventId);
+    if (!ok) {
+      // Matches deleteSavedRecipe's boolean-check convention (AddYourOwn.tsx):
+      // false means nothing was removed (storage-sweep failure or a 0-row
+      // delete), so don't touch local state or close anything — let the user
+      // see the confirm modal's error and retry instead of silently
+      // pretending the cook event is gone.
+      setDeleteLogError(true);
+      return;
+    }
     setCookEvents((prev) => prev.filter((e) => e.id !== editingEventId));
     clearRecipeCache?.(categoryKey);
     setConfirmDeleteEvent(false);
@@ -3551,6 +3686,142 @@ function RecipeCard({
     } finally {
       setPhotoRemoving(false);
     }
+  }
+
+  // ---- Cook photo (log sheet) ----
+  // Entirely separate state/handlers from the recipe hero photo above: a
+  // different bucket (cook-photos-private, private), a different path shape,
+  // and display is always via a just-in-time signed URL, never getPublicUrl().
+  // Edit mode uploads immediately (a real cook_event id already exists).
+  // Create mode has no id yet, so the cropped photo is held in
+  // pendingCookPhotoBlob and uploaded by handleSaveLog once the event is saved.
+  function handleCookCameraIconClick() {
+    if (cookPhotoHasPhoto) {
+      setCookPhotoMenuOpen(true);
+    } else {
+      cookPhotoInputRef.current?.click();
+    }
+  }
+
+  function handleCookReplacePhoto() {
+    setCookPhotoMenuOpen(false);
+    cookPhotoInputRef.current?.click();
+  }
+
+  function handleCookPhotoFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) setCookCropFile(file);
+  }
+
+  function handleCookCropCancel() {
+    setCookCropFile(null);
+  }
+
+  function handleCookCropConfirm(cropRect: CropRect) {
+    const file = cookCropFile;
+    setCookCropFile(null);
+    if (!file) return;
+    if (logMode === "edit" && editingEventId) {
+      handleCookPhotoSelected(file, cropRect);
+    } else {
+      handleCookPhotoPicked(file, cropRect);
+    }
+  }
+
+  async function handleCookPhotoSelected(file: File, cropRect?: CropRect) {
+    if (!editingEventId) return;
+    setCookPhotoError(null);
+    setCookPhotoUploading(true);
+    try {
+      const { path, version } = await uploadCookPhoto(editingEventId, file, cropRect);
+      setCookEvents((prev) =>
+        prev.map((e) => (e.id === editingEventId ? { ...e, photoPath: path, photoVersion: version } : e))
+      );
+      // Supersede any stale unsaved pending Blob from an earlier failed
+      // create-mode photo upload (logMode may have since flipped to "edit") —
+      // this freshly-uploaded photo should win, not a retry of the old one.
+      clearPendingCookPhoto();
+      const requestId = ++cookPhotoRequestIdRef.current;
+      const url = await getCookPhotoSignedUrl(path);
+      if (cookPhotoRequestIdRef.current === requestId) setCookPhotoSignedUrl(url);
+    } catch (err) {
+      setCookPhotoError(err instanceof Error ? err.message : "Couldn't upload photo. Please try again.");
+    } finally {
+      setCookPhotoUploading(false);
+    }
+  }
+
+  // Create mode: no cook_event id exists yet, so nothing can be uploaded.
+  // Crop/compress now (so the preview matches exactly what gets uploaded
+  // later) and hold the result in state; handleSaveLog uploads it after the
+  // event is saved.
+  async function handleCookPhotoPicked(file: File, cropRect?: CropRect) {
+    setCookPhotoError(null);
+    setCookPhotoUploading(true);
+    try {
+      const compressed = await compressImageFile(file, cropRect);
+      if (pendingCookPhotoPreviewUrl) URL.revokeObjectURL(pendingCookPhotoPreviewUrl);
+      setPendingCookPhotoBlob(compressed);
+      setPendingCookPhotoPreviewUrl(URL.createObjectURL(compressed));
+    } catch (err) {
+      setCookPhotoError(err instanceof Error ? err.message : "Couldn't process this photo. Please try again.");
+    } finally {
+      setCookPhotoUploading(false);
+    }
+  }
+
+  function handleCookRemovePhotoRequest() {
+    setCookPhotoMenuOpen(false);
+    // Gated on pendingCookPhotoBlob itself, not logMode — logMode may already
+    // be "edit" here (flipped right after a brand-new cook's insert) while
+    // this photo is still only a local, not-yet-uploaded Blob. In that case
+    // there's nothing in storage yet, so no confirmation is needed.
+    if (pendingCookPhotoBlob) {
+      clearPendingCookPhoto();
+    } else {
+      setConfirmRemoveCookPhoto(true);
+    }
+  }
+
+  async function handleConfirmRemoveCookPhoto() {
+    if (!editingEventId) return;
+    setConfirmRemoveCookPhoto(false);
+    setCookPhotoError(null);
+    setCookPhotoRemoving(true);
+    try {
+      const version = await removeCookPhoto(editingEventId);
+      setCookEvents((prev) =>
+        prev.map((e) => (e.id === editingEventId ? { ...e, photoPath: null, photoVersion: version } : e))
+      );
+      setCookPhotoSignedUrl(null);
+    } catch (err) {
+      setCookPhotoError(err instanceof Error ? err.message : "Couldn't remove photo. Please try again.");
+    } finally {
+      setCookPhotoRemoving(false);
+    }
+  }
+
+  // ---- Remove post (History tab) ----
+  function openRemovePostConfirm(postId: string) {
+    setRemovePostError(false);
+    setConfirmRemovePost(postId);
+  }
+
+  async function handleRemovePost() {
+    if (!confirmRemovePost) return;
+    setRemovePostError(false);
+    setRemovingPost(true);
+    const postId = confirmRemovePost;
+    const ok = await unpostCook(postId);
+    setRemovingPost(false);
+    if (!ok) {
+      setRemovePostError(true);
+      return;
+    }
+    setCookEvents((prev) => prev.map((e) => (e.postId === postId ? { ...e, postId: null } : e)));
+    clearRecipeCache?.(categoryKey);
+    setConfirmRemovePost(null);
   }
 
   const handleChatIconClick = () => {
@@ -3887,6 +4158,40 @@ function RecipeCard({
             </div>
           )}
 
+          {/* Log cook — moved here from the History tab (same style/label,
+              unchanged) so it sits under the rating row, or directly under
+              the description when there's no rating yet (this block simply
+              renders nothing in that case, so the button lands right after
+              the description above). */}
+          {editable && (
+            <button
+              onClick={openLogSheetForCreate}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "10px 16px",
+                marginBottom: 18,
+                background: "#233C00",
+                border: "none",
+                borderRadius: 10,
+                color: "#FEE7C0",
+                fontFamily: "Inter, sans-serif",
+                fontSize: 12,
+                fontWeight: 500,
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                cursor: "pointer",
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FEE7C0" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              Log cook
+            </button>
+          )}
+
           {/* Meta row */}
           {recipe.yield && (
             <div style={{ display: "flex", gap: 24 }}>
@@ -4199,34 +4504,6 @@ function RecipeCard({
             )}
           </div>
           <div style={{ display: tab === "history" ? "block" : "none", padding: "20px 24px" }}>
-            {editable && (
-              <button
-                onClick={openLogSheetForCreate}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "10px 16px",
-                  marginBottom: 20,
-                  background: "#233C00",
-                  border: "none",
-                  borderRadius: 10,
-                  color: "#FEE7C0",
-                  fontFamily: "Inter, sans-serif",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  letterSpacing: "0.06em",
-                  textTransform: "uppercase",
-                  cursor: "pointer",
-                }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FEE7C0" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="12" y1="5" x2="12" y2="19" />
-                  <line x1="5" y1="12" x2="19" y2="12" />
-                </svg>
-                Log cook
-              </button>
-            )}
             {cookEvents.map((event, idx) => {
               const hasNote = !!(event.note && event.note.trim().length > 0);
               const isExpanded = expandedCookEvents.has(event.id);
@@ -4240,12 +4517,27 @@ function RecipeCard({
                     padding: "12px 0",
                     borderBottom: idx === cookEvents.length - 1 ? "none" : "1px dotted rgba(35,60,0,0.1)",
                   }}>
-                    <span style={{
-                      fontFamily: "Inter, sans-serif",
-                      fontSize: 14,
-                      fontWeight: 400,
-                      color: "#233C00",
-                    }}>{formatCookedOn(event.cookedOn)}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{
+                        fontFamily: "Inter, sans-serif",
+                        fontSize: 14,
+                        fontWeight: 400,
+                        color: "#233C00",
+                      }}>{formatCookedOn(event.cookedOn)}</span>
+                      {event.postId && (
+                        <span style={{
+                          fontFamily: "Inter, sans-serif",
+                          fontSize: 9,
+                          fontWeight: 600,
+                          letterSpacing: "0.08em",
+                          textTransform: "uppercase",
+                          color: "#233C00",
+                          background: "rgba(35,60,0,0.08)",
+                          padding: "3px 6px",
+                          borderRadius: 6,
+                        }}>Posted</span>
+                      )}
+                    </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       {event.score != null && (
                         <span style={{
@@ -4289,12 +4581,27 @@ function RecipeCard({
                       cursor: "pointer",
                     }}
                   >
-                    <span style={{
-                      fontFamily: "Inter, sans-serif",
-                      fontSize: 14,
-                      fontWeight: 400,
-                      color: "#233C00",
-                    }}>{formatCookedOn(event.cookedOn)}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{
+                        fontFamily: "Inter, sans-serif",
+                        fontSize: 14,
+                        fontWeight: 400,
+                        color: "#233C00",
+                      }}>{formatCookedOn(event.cookedOn)}</span>
+                      {event.postId && (
+                        <span style={{
+                          fontFamily: "Inter, sans-serif",
+                          fontSize: 9,
+                          fontWeight: 600,
+                          letterSpacing: "0.08em",
+                          textTransform: "uppercase",
+                          color: "#233C00",
+                          background: "rgba(35,60,0,0.08)",
+                          padding: "3px 6px",
+                          borderRadius: 6,
+                        }}>Posted</span>
+                      )}
+                    </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       {event.score != null && (
                         <span style={{
@@ -4624,6 +4931,256 @@ function RecipeCard({
                 {logMode === "create" ? "Log a cook" : "Edit this cook"}
               </div>
 
+              {/* Post publicly — hidden once this cook already has a post:
+                  there is no UPDATE policy on cook_posts, so re-toggling
+                  could only ever create a second, duplicate post (blocked by
+                  the DB's one-post-per-cook_event UNIQUE constraint anyway),
+                  never edit the existing one. Instead, a posted cook shows
+                  its posted state plus a "Remove post" button that reuses
+                  the existing confirm-modal/unpostCook flow; a successful
+                  removal nulls out editingEvent.postId, so this block falls
+                  back to the normal toggle automatically. */}
+              {editingEvent?.postId ? (
+                <div style={{
+                  marginBottom: 20,
+                  padding: "12px 14px",
+                  background: "rgba(35,60,0,0.05)",
+                  borderRadius: 10,
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: 12,
+                  color: "rgba(35,60,0,0.6)",
+                  lineHeight: 1.5,
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                    <span>This cook is posted publicly. Editing the score or note here won't update the public post.</span>
+                    <button
+                      onClick={() => openRemovePostConfirm(editingEvent.postId!)}
+                      style={{
+                        flexShrink: 0,
+                        background: "transparent",
+                        border: "none",
+                        padding: 0,
+                        fontFamily: "Inter, sans-serif",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "#B85C5C",
+                        cursor: "pointer",
+                        textDecoration: "underline",
+                      }}
+                    >
+                      Remove post
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ marginBottom: 20 }}>
+                  <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                    <span style={{
+                      fontFamily: "Inter, sans-serif",
+                      fontSize: 14,
+                      fontWeight: 500,
+                      color: "#233C00",
+                    }}>
+                      Post publicly
+                    </span>
+                    <span
+                      role="switch"
+                      aria-checked={logPostPublicly}
+                      onClick={() => setLogPostPublicly((v) => !v)}
+                      style={{
+                        position: "relative",
+                        width: 42,
+                        height: 24,
+                        borderRadius: 12,
+                        background: logPostPublicly ? "#233C00" : "rgba(35,60,0,0.15)",
+                        transition: "background 150ms ease",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <span style={{
+                        position: "absolute",
+                        top: 3,
+                        left: logPostPublicly ? 21 : 3,
+                        width: 18,
+                        height: 18,
+                        borderRadius: "50%",
+                        background: "#FAF7F2",
+                        transition: "left 150ms ease",
+                      }} />
+                    </span>
+                  </label>
+                  <div style={{
+                    marginTop: 6,
+                    fontFamily: "Inter, sans-serif",
+                    fontSize: 12,
+                    color: "rgba(35,60,0,0.4)",
+                  }}>
+                    Anyone using the app can see this.
+                  </div>
+                </div>
+              )}
+
+              {/* Cook photo (optional) — a brand-new cook holds its cropped
+                  photo in pendingCookPhotoBlob (no event id exists yet to
+                  upload against) and uploads it in handleSaveLog; an existing
+                  cook (edit mode) uploads immediately against its real id.
+                  Fully separate from the recipe hero photo's state/UI above. */}
+              <>
+                  <div style={{
+                    fontFamily: "Inter, sans-serif",
+                    fontSize: 10,
+                    fontWeight: 500,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.1em",
+                    color: "rgba(35,60,0,0.35)",
+                    marginBottom: 8,
+                  }}>
+                    Photo (optional)
+                  </div>
+                  <input
+                    ref={cookPhotoInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleCookPhotoFileInputChange}
+                    style={{ display: "none" }}
+                  />
+                  <div style={{ marginBottom: 20 }}>
+                    {cookPhotoHasPhoto ? (
+                      <div style={{ position: "relative", display: "inline-block" }}>
+                        <div style={{
+                          position: "relative",
+                          width: 96,
+                          height: 96,
+                          borderRadius: 14,
+                          overflow: "hidden",
+                          background: "rgba(35,60,0,0.06)",
+                        }}>
+                          {cookPhotoPreviewUrl && (
+                            <img
+                              src={cookPhotoPreviewUrl}
+                              alt=""
+                              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                            />
+                          )}
+                          {(cookPhotoUploading || cookPhotoRemoving) && (
+                            <div style={{
+                              position: "absolute",
+                              inset: 0,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              background: "rgba(35,60,0,0.35)",
+                            }}>
+                              <div style={{
+                                width: 14, height: 14,
+                                border: "1.5px solid rgba(254,231,192,0.4)",
+                                borderTopColor: "#FEE7C0",
+                                borderRadius: "50%",
+                                animation: "photoUploadSpin 0.8s linear infinite",
+                              }} />
+                            </div>
+                          )}
+                          <button
+                            onClick={handleCookCameraIconClick}
+                            aria-label="Cook photo options"
+                            style={{
+                              position: "absolute",
+                              top: 4,
+                              right: 4,
+                              width: 22,
+                              height: 22,
+                              borderRadius: "50%",
+                              background: "rgba(35,60,0,0.6)",
+                              border: "none",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              cursor: "pointer",
+                              padding: 0,
+                            }}
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FEE7C0" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
+                              <circle cx="12" cy="13" r="4" />
+                            </svg>
+                          </button>
+                        </div>
+                        {cookPhotoMenuOpen && (
+                          <>
+                            <div onClick={() => setCookPhotoMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 95 }} />
+                            <div style={{
+                              position: "absolute",
+                              top: "calc(100% + 6px)",
+                              left: 0,
+                              background: "#FAF7F2",
+                              borderRadius: 12,
+                              border: "0.5px solid rgba(35,60,0,0.1)",
+                              boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
+                              overflow: "hidden",
+                              zIndex: 96,
+                              minWidth: 150,
+                            }}>
+                              <button
+                                onClick={handleCookReplacePhoto}
+                                style={{
+                                  display: "block", width: "100%", textAlign: "left", padding: "12px 16px",
+                                  background: "transparent", border: "none",
+                                  fontFamily: "'Inter', sans-serif", fontSize: 14, fontWeight: 500,
+                                  color: "#233C00", cursor: "pointer",
+                                }}
+                              >
+                                Replace photo
+                              </button>
+                              <button
+                                onClick={handleCookRemovePhotoRequest}
+                                style={{
+                                  display: "block", width: "100%", textAlign: "left", padding: "12px 16px",
+                                  background: "transparent", border: "none", borderTop: "0.5px solid rgba(35,60,0,0.08)",
+                                  fontFamily: "'Inter', sans-serif", fontSize: 14, fontWeight: 500,
+                                  color: "#B85C5C", cursor: "pointer",
+                                }}
+                              >
+                                Remove photo
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        onClick={handleCookCameraIconClick}
+                        disabled={cookPhotoUploading}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "10px 14px",
+                          background: "rgba(35,60,0,0.05)",
+                          border: "1px solid rgba(35,60,0,0.12)",
+                          borderRadius: 10,
+                          fontFamily: "Inter, sans-serif",
+                          fontSize: 13,
+                          fontWeight: 500,
+                          color: "#233C00",
+                          cursor: cookPhotoUploading ? "not-allowed" : "pointer",
+                          opacity: cookPhotoUploading ? 0.6 : 1,
+                        }}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#233C00" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
+                          <circle cx="12" cy="13" r="4" />
+                        </svg>
+                        {cookPhotoUploading ? "Uploading…" : "Add photo"}
+                      </button>
+                    )}
+                    {cookPhotoError && (
+                      <div style={{ marginTop: 8, fontFamily: "Inter, sans-serif", fontSize: 12, color: "#B85C5C" }}>
+                        {cookPhotoError}
+                      </div>
+                    )}
+                  </div>
+                </>
+
               {/* Date */}
               <div style={{
                 fontFamily: "Inter, sans-serif",
@@ -4753,6 +5310,17 @@ function RecipeCard({
 
               {/* Pinned footer: Save always stays reachable, never scrolls out of view */}
               <div style={{ flexShrink: 0, padding: "16px 20px 24px" }}>
+                {postError && (
+                  <div style={{
+                    marginBottom: 12,
+                    fontFamily: "Inter, sans-serif",
+                    fontSize: 12,
+                    color: "#B85C5C",
+                    textAlign: "center",
+                  }}>
+                    Saved, but this cook wasn't posted. Try again.
+                  </div>
+                )}
                 <button
                   onClick={handleSaveLog}
                   disabled={savingLog}
@@ -4779,7 +5347,10 @@ function RecipeCard({
                 {/* Delete (edit mode only) */}
                 {logMode === "edit" && (
                   <button
-                    onClick={() => setConfirmDeleteEvent(true)}
+                    onClick={() => {
+                      setDeleteLogError(false);
+                      setConfirmDeleteEvent(true);
+                    }}
                     style={{
                       width: "100%",
                       padding: "12px",
@@ -4848,10 +5419,26 @@ function RecipeCard({
               textAlign: "center",
               marginBottom: 12,
             }}>
-              This can't be undone.
+              {editingEvent?.postId
+                ? "This also removes the public post for this cook. This can't be undone."
+                : "This can't be undone."}
             </div>
+            {deleteLogError && (
+              <div style={{
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 12,
+                color: "#B85C5C",
+                textAlign: "center",
+                marginBottom: 4,
+              }}>
+                Couldn't delete this cook. Try again.
+              </div>
+            )}
             <button
-              onClick={() => setConfirmDeleteEvent(false)}
+              onClick={() => {
+                setConfirmDeleteEvent(false);
+                setDeleteLogError(false);
+              }}
               style={{
                 width: "100%",
                 padding: "12px",
@@ -4883,6 +5470,106 @@ function RecipeCard({
               }}
             >
               Delete
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Remove-post confirmation modal */}
+      {confirmRemovePost && (
+        <div
+          onClick={() => { setConfirmRemovePost(null); setRemovePostError(false); }}
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "rgba(35,60,0,0.25)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 90,
+            padding: 24,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 16,
+              padding: "24px 20px",
+              width: "100%",
+              maxWidth: 280,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              border: "0.5px solid rgba(35,60,0,0.1)",
+            }}
+          >
+            <div style={{
+              fontFamily: "'Inter', sans-serif",
+              fontSize: 16,
+              fontWeight: 700,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+              color: "#233C00",
+              textAlign: "center",
+            }}>
+              Remove this post?
+            </div>
+            <div style={{
+              fontFamily: "'Inter', sans-serif",
+              fontSize: 13,
+              color: "#233C00",
+              textAlign: "center",
+              marginBottom: 12,
+            }}>
+              It will no longer be visible to anyone. This can't be undone.
+            </div>
+            {removePostError && (
+              <div style={{
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 12,
+                color: "#B85C5C",
+                textAlign: "center",
+                marginBottom: 4,
+              }}>
+                Couldn't remove this post. Try again.
+              </div>
+            )}
+            <button
+              onClick={() => { setConfirmRemovePost(null); setRemovePostError(false); }}
+              style={{
+                width: "100%",
+                padding: "12px",
+                borderRadius: 10,
+                background: "transparent",
+                border: "0.5px solid rgba(35,60,0,0.1)",
+                color: "#233C00",
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleRemovePost}
+              disabled={removingPost}
+              style={{
+                width: "100%",
+                padding: "12px",
+                borderRadius: 10,
+                background: "#B85C5C",
+                border: "none",
+                color: "#FAF7F2",
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: removingPost ? "default" : "pointer",
+                opacity: removingPost ? 0.6 : 1,
+              }}
+            >
+              {removingPost ? "Removing..." : "Remove"}
             </button>
           </div>
         </div>
@@ -5374,6 +6061,7 @@ function RecipeCard({
       )}
 
       <PhotoCropOverlay file={cropFile} onCancel={handleCropCancel} onConfirm={handleCropConfirm} />
+      <PhotoCropOverlay file={cookCropFile} onCancel={handleCookCropCancel} onConfirm={handleCookCropConfirm} />
     </div>
   );
 }
