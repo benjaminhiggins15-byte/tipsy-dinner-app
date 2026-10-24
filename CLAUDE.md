@@ -78,6 +78,8 @@ pointer named — do not duplicate it here.
 - **`log_event()` (`SECURITY DEFINER`) is the ONLY write path into deny-all `user_events`** — `logEvent` (`src/lib/events.ts`) is fire-and-forget (never await/chain/gate control flow on it), props are IDs/small enums only, never free text or recipe content. Full detail: Behavior & Funnel Instrumentation (user_events) in FEATURE_SPECS.md.
 - **Pairings non-negotiables: `alcohol_ok` NULL reads as no-alcohol everywhere; pairings/drink prefs never enter a share or send snapshot; the drink-carrier list stays separate from `ALLERGEN_SYNONYM_MAP`; `filterPairings` runs on every generated AND every cached set, never skipped.** Full detail: Pairings in FEATURE_SPECS.md.
 - **`delete_user_account_data()` is the sole data-deletion step for account deletion — any new table holding a user reference must be added to both its deletion statements and its zero-rows verification block**, or that table's data silently survives account deletion forever. Full detail: Account Deletion in FEATURE_SPECS.md.
+- **`runAllergyGatedGeneration` (inside `Cook`, App.tsx) is the ONLY path into Build recipe generation — never inline a new parse → scan → `setCurrentRecipe` sequence; a new input path gets its own `source` label.** The gate runs pre-preview only — there is no save-time re-check — so any future path that saves a recipe without first showing the gated preview must add its own scan. Full detail: Allergy Gate Consolidation in FEATURE_SPECS.md.
+- **Voice input only ever calls `setInput` (`onChange`) — never `sendMessage`, never auto-send.** `CookInputBar`'s `voiceEnabled` prop (wired on Build's main input and the saved-recipe chat box) shares one `useVoiceRecording` hook; a transcript always lands in the box for the user to edit and send manually. Full detail: Voice Input (Build) in FEATURE_SPECS.md.
 
 ---
 
@@ -88,6 +90,7 @@ pointer named — do not duplicate it here.
 - Supabase — auth, database, storage, edge functions. Client at `src/lib/supabase.ts`
 - Nitro — Vercel deployment adapter
 - Anthropic API — server-side via Supabase Edge Function `ai-chat` (key never in browser)
+- OpenAI API — server-side via Supabase Edge Function `transcribe-voice` (voice-to-text only; key never in browser)
 - Tabler Icons
 - Fonts: Lazydog (display), Fraunces italic, Inter, Playwrite US Modern (logo assets only)
 
@@ -181,6 +184,14 @@ FEATURE_SPECS.md) is the app's FIRST `security definer` function and FIRST trust
 server-side write to protected tables; it deliberately does NOT follow `ai-chat`'s
 pattern — it's called via `supabase.rpc(...)`, which carries the real caller's JWT,
 so `auth.uid()` inside the function is the true authenticated sender.
+
+**Voice transcription is a separate vendor, not a second `ai-chat`.**
+`transcribe-voice` (Edge Function) calls OpenAI's `gpt-4o-transcribe`, not
+Anthropic — `verify_jwt = true`, caller authenticated via `auth.getUser()` on
+a caller-scoped client, same pattern as `copy-received-recipe-photo`. Key
+lives only in the Supabase secret `OPENAI_API_KEY`, never in `ai-chat`'s env
+or the client. Audio and transcripts are never stored or logged. Full
+detail: Voice Input (Build) in FEATURE_SPECS.md.
 
 **Grocery enrichment is a SEPARATE AI island.** `enrichGroceryItems` (data.ts) is a
 structured JSON-in/JSON-out utility with its own prompt
@@ -411,3 +422,5 @@ code defects).
 - **`finish_received_recipe_save` exists only in the live database, not in any migration file** — unlike every other `SECURITY DEFINER` function in this codebase, it predates the schema-is-dashboard-only item above having a tracked exception. Capture it into a migration so it isn't a silent single-point-of-truth risk. Found during account-deletion wrap-up (2026-10-22).
 - **`ai-chat` trusts a client-supplied `userId` for its `llm_usage` insert** instead of deriving identity from the verified JWT — `ai-chat` is an anonymous proxy by design (see AI Layer in CLAUDE.md), so this was a known tradeoff, but it means a client can attribute usage-metering rows to any user id it sends. Found during account-deletion wrap-up (2026-10-22); not fixed yet.
 - **Deleting a saved recipe never removes its storage photo** — `deleteSavedRecipe` (and the six helpers above once fixed) deletes DB rows only; the corresponding `{userId}/{recipeId}.jpg` in `recipe-photos` is never swept, so every recipe delete leaves an orphaned photo object behind. Found during account-deletion wrap-up (2026-10-22); not fixed yet.
+- **`ai-chat` has `verify_jwt = false` and no caller-identity check** — anonymous access to the Anthropic proxy for anyone holding the Supabase anon key (see AI Layer above). Known tradeoff, not a new finding, but not fixed — flagged here as a standing backlog item.
+- **`handleChipClick` calls `runAllergyGatedGeneration` inside an un-awaited IIFE** (`(async () => { await runAllergyGatedGeneration(...) })()`, App.tsx) — pre-existing. The gate itself still runs to completion (its own internal try/catch is unaffected), but `handleChipClick` returns before that resolves, so any future logic added after the chip-tap call would NOT be ordered after generation. Found during Voice Input docs pass (2026-10-24); not fixed.

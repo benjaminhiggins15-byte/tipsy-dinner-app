@@ -4149,3 +4149,107 @@ statements and the final zero-rows verification block** in
 `20261020000001_delete_user_account_data.sql`, or a deleted account's data
 in that table will silently survive forever. See the Load-Bearing Contracts
 entry in CLAUDE.md.
+
+## Allergy Gate Consolidation (`runAllergyGatedGeneration`)
+
+(Session, 2026-10-23 — `refactor/allergy-gate-helper`, merged `63d02aa`)
+
+`fireAICall` (auto-fire), `sendMessage` (typed send), and `handleChipClick`
+(suggestion chip tap) each inlined the identical sequence: build system
+prompt → call `ai-chat` → stream → parse → `scanRecipeDraftForBig9` →
+regenerate up to `MAX_ALLERGEN_SAFE_ATTEMPTS` times on a hit →
+`setCurrentRecipe`. See "Build/Cook-Chat Allergy Hardening" above for the
+scanning mechanics themselves — this section covers only the refactor and
+the contract it establishes, not a restatement of Layer 1/Layer 2.
+
+Consolidated into one function, `runAllergyGatedGeneration(history, source)`
+inside the `Cook` component (App.tsx), with `source: "auto-fire" | "send" |
+"chip"` used only for console-log wording and an error-message string —
+never for gating logic. Zero behavior change from the three previous inline
+copies: identical retry count, regen behavior, user-facing copy, and state
+updates. Verified on a real device before merge: a typed message, a chip
+tap, and auto-fire (chat-from-recipe hand-off) all correctly blocked a
+peanut-containing recipe for a peanut-allergy profile.
+
+**Contract going forward (see Load-Bearing Contracts in CLAUDE.md):** any
+new way of generating a recipe inside Build must call
+`runAllergyGatedGeneration` with its own new `source` label — never inline a
+second parse → scan → `setCurrentRecipe` sequence. This is the only way the
+Big-9 backstop stays universal across every input path instead of silently
+missing one. Voice Input (below) is the first new input path added since
+this refactor, and it deliberately adds no new generation path at all — it
+only fills the same input box the gate-covered `sendMessage` already reads
+from.
+
+**Known boundary, not a bug.** The gate runs once, before the recipe reaches
+the preview (`ExpandedRecipeOverlay`) — there is no save-time re-check.
+Every current save path (`saveRecipe`, `updateSavedRecipe`,
+`saveReceivedRecipe`, share-to-save) is reached only after a user has seen
+and accepted a gated preview, so this has never been a live gap. If a future
+feature ever saves a recipe without showing that preview first, it must add
+its own `scanRecipeDraftForBig9` call — do not assume the gate is enforced
+anywhere it isn't explicitly called.
+
+## Voice Input (Build)
+
+(Session, 2026-10-24 — `feature/voice-input`, merged to `main`)
+
+Lets a user dictate instead of type on Build's two text-entry surfaces:
+Build's main chat input, and the inline "ask anything" box that appears from
+the chat icon on a saved Recipe Card (see "Chat from Recipe Card" above).
+Both are the same shared `CookInputBar` component (`ChatUI.tsx`); voice is
+opt-in per instance via a new `voiceEnabled` prop, so Onboarding's own
+`CookInputBar` instance is untouched.
+
+**Client.** `useVoiceRecording` (`src/tipsy/useVoiceRecording.ts`) is the one
+hook both `CookInputBar` instances share — no duplicated recording code.
+It owns the full `MediaRecorder` lifecycle: mic-permission request, start/
+stop/cancel, a 60-second hard cap (auto-stops and transcribes at the cap),
+and always releases the mic track on every exit path (stop, cancel, error,
+unmount). Mime type is feature-detected per browser (`audio/webm` where
+supported, `audio/mp4` as the iOS Safari fallback) via
+`MediaRecorder.isTypeSupported`. On a successful transcript, the hook's only
+effect is to call the caller's `onChange` — `CookInputBar` appends the
+transcript to any existing text with a separating space, or sets it outright
+if the box was empty, then refocuses the textarea with the cursor at the
+end. **It never calls `onSend`.** Sending is always the existing manual
+action — tapping the send button (or Enter) — so a dictated message goes
+through the exact same `sendMessage` → `runAllergyGatedGeneration("send")`
+path, and the Recipe Card box's dictated question goes through the exact
+same `handleChatSend` → `transferToRecipeChat` → auto-fire →
+`runAllergyGatedGeneration("auto-fire")` path, as if it had been typed.
+Mic-permission-denied, no-microphone, transcription-failed, and
+empty-transcript all surface a short friendly inline message (auto-dismissed
+after 4s) — no silent failures.
+
+**Server — `transcribe-voice` (Edge Function).** `verify_jwt = true`; the
+caller is authenticated via `auth.getUser()` on a caller-scoped client, the
+same pattern as `copy-received-recipe-photo` — no anonymous access, no
+service-role client. Accepts exactly one audio clip, `audio/mp4` or
+`audio/webm` only (checked against the request's `Content-Type`, codec
+parameters stripped before comparing); anything else, or anything over a
+10MB hard cap, is rejected with a clear error. The 10MB cap is deliberately
+well under both OpenAI's own 25MB `/audio/transcriptions` file limit and the
+platform's current edge-function request-body limit — 60 seconds of
+compressed speech is a few hundred KB at most, so this only ever rejects
+malformed/oversized input, never a legitimate clip. The audio is forwarded
+as-is to OpenAI's `gpt-4o-transcribe` model and the plain transcript text is
+returned. **No audio is ever stored** — no bucket upload, no DB row — and
+nothing logged anywhere in the function contains audio bytes or transcript
+text; the only things logged on a vendor-error path are OpenAI's own error
+message and HTTP status, which describe the request, not its content.
+
+**New vendor.** OpenAI, transcription only — a second, independent AI vendor
+alongside Anthropic (see AI Layer in CLAUDE.md). The key lives only in the
+Supabase secret `OPENAI_API_KEY`, set directly in the dashboard; it is never
+in client code, never in `ai-chat`'s environment, and was never pasted into
+this repo or a chat session.
+
+**Testing note.** `getUserMedia` requires a secure context — HTTPS, or
+`localhost` specifically. A phone over LAN Wi-Fi to a `bun dev` host by IP
+address does **not** qualify, so mic testing on a real phone must go through
+an HTTPS endpoint — in practice, the Vercel branch preview for the feature
+branch, not local dev. Verified on iPhone Safari on both input surfaces:
+dictate/edit/send, mic-permission-denied messaging, 60-second auto-stop, and
+the allergy gate still catching a dictated allergen-containing request
+exactly as it does a typed one.
