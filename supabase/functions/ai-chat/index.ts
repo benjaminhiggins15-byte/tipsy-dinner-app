@@ -14,6 +14,7 @@ declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!
 
 // Session 1 cost meter. This is the ONLY place in the app that calls
 // Anthropic directly (compute-slice's Stage 2 selection routes back through
@@ -139,6 +140,36 @@ Deno.serve(async (req) => {
       JSON.stringify({ error: 'Method not allowed' }),
       {
         status: 405,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      }
+    )
+  }
+
+  // CALLER client — RLS-scoped to the real caller via the forwarded JWT.
+  // Same gate convention as transcribe-voice/copy-received-recipe-photo/
+  // delete-account: missing header -> 401 before any other work; present but
+  // invalid/expired -> 401 after the getUser() round-trip. Runs before the
+  // Anthropic call so an unauthenticated caller never reaches it.
+  const authHeader = req.headers.get('Authorization')
+  if (!authHeader) {
+    return new Response(
+      JSON.stringify({ error: 'missing authorization header' }),
+      {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      }
+    )
+  }
+
+  const callerClient = createClient(SUPABASE_URL, ANON_KEY, {
+    global: { headers: { Authorization: authHeader } },
+  })
+  const { data: callerData, error: callerError } = await callerClient.auth.getUser()
+  if (callerError || !callerData?.user) {
+    return new Response(
+      JSON.stringify({ error: 'not authenticated' }),
+      {
+        status: 401,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       }
     )
