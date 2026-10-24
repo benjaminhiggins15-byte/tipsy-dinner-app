@@ -4349,6 +4349,10 @@ export async function postCook(cookEventId: string): Promise<{ postId: string } 
     }
 
     let photoUrl: string | null = null;
+    // Mirrors sourceBucket 1:1 — 'cook' | 'recipe' | null (no photo). Keyed
+    // off sourceBucket rather than re-deriving from eventRow/recipe so it
+    // can never disagree with which bucket the copy actually came from.
+    let photoSource: 'cook' | 'recipe' | null = null;
     if (sourceBucket && sourcePath) {
       const { data: photoBlob, error: downloadError } = await supabase.storage
         .from(sourceBucket)
@@ -4363,6 +4367,7 @@ export async function postCook(cookEventId: string): Promise<{ postId: string } 
       photoWasCopied = true;
       const { data: publicUrlData } = supabase.storage.from('recipe-photos').getPublicUrl(destPath);
       photoUrl = publicUrlData.publicUrl;
+      photoSource = sourceBucket === 'cook-photos-private' ? 'cook' : 'recipe';
     }
 
     const { error: insertError } = await supabase.from('cook_posts').insert({
@@ -4372,6 +4377,7 @@ export async function postCook(cookEventId: string): Promise<{ postId: string } 
       recipe_id: eventRow.recipe_id,
       recipe_snapshot: snapshot,
       photo_url: photoUrl,
+      photo_source: photoSource,
       score: eventRow.score,
       note: eventRow.note,
       cooked_on: eventRow.cooked_on,
