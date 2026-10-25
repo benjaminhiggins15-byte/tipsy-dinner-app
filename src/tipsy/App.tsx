@@ -336,7 +336,8 @@ type Screen =
   | { name: "discoveredDetail"; recipe: DiscoveredRecipe; newCategory?: { key: string; label: string } }
   | { name: "newcategoryfordiscovered"; recipe: DiscoveredRecipe }
   | { name: "cookFeed" }
-  | { name: "cookPostDetail"; postId: string };
+  | { name: "cookPostDetail"; postId: string; newCategory?: { key: string; label: string } }
+  | { name: "newcategoryforcookpost"; postId: string };
 
 type TabId = "build" | "recipes" | "grocery" | "profile" | "home";
 
@@ -394,6 +395,7 @@ function screenKey(s: Screen): string {
     case "newcategoryfordiscovered": return `newcategoryfordiscovered:${s.recipe.shareToken}`;
     case "cookFeed": return "cookFeed";
     case "cookPostDetail": return `cookPostDetail:${s.postId}`;
+    case "newcategoryforcookpost": return `newcategoryforcookpost:${s.postId}`;
   }
 }
 
@@ -431,6 +433,8 @@ function renderScreen(
   switchToTab?: (tab: TabId, screen?: Screen) => void,
   finishCreateCategoryForDiscovered?: (catKey: string, catLabel: string, recipe: DiscoveredRecipe) => void,
   cookFeedState?: CookFeedState,
+  finishCreateCategoryForCookPost?: (catKey: string, catLabel: string, postId: string) => void,
+  currentUserId?: string | null,
 ) {
   switch (s.name) {
     case "cook": return (
@@ -623,7 +627,25 @@ function renderScreen(
         isTabRoot={isTabRoot}
       />
     );
-    case "cookPostDetail": return <CookPostDetailScreen postId={s.postId} back={back} />;
+    case "cookPostDetail": return (
+      <CookPostDetailScreen
+        postId={s.postId}
+        newCategory={s.newCategory}
+        currentUserId={currentUserId ?? null}
+        back={back}
+        push={push}
+        finishSaveRecipe={(r, k, l) => finishSaveRecipe?.(r, k, l)}
+        clearRecipeCache={clearRecipeCache || (() => {})}
+      />
+    );
+    case "newcategoryforcookpost": return (
+      <NewCategory
+        back={back}
+        onSaved={(cat) => {
+          if (cat) finishCreateCategoryForCookPost?.(cat.key, cat.label, s.postId);
+        }}
+      />
+    );
   }
 }
 
@@ -1459,6 +1481,16 @@ export default function App() {
     });
   };
 
+  // Mirrors finishCreateCategoryForDiscovered — cook post detail's own
+  // create-category return target.
+  const finishCreateCategoryForCookPost = (catKey: string, catLabel: string, postId: string) => {
+    if (transition) return;
+    updateCurrentTabStack((prev) => {
+      const newStack = prev.slice(0, -1); // Remove newcategoryforcookpost screen
+      return [...newStack, { name: "cookPostDetail", postId, newCategory: { key: catKey, label: catLabel } }];
+    });
+  };
+
   // Transfer to Build with a recipe and question
   const transferToRecipeChat = (recipe: SavedRecipe, question: string, onCollisionCancel: () => void) => {
     if (transition) return;
@@ -1754,6 +1786,8 @@ export default function App() {
           goToReceivedShelf={goToReceivedShelf}
           switchToTab={switchToTab}
           cookFeedState={cookFeedState}
+          finishCreateCategoryForCookPost={finishCreateCategoryForCookPost}
+          currentUserId={session?.user?.id ?? null}
         />
         <BottomTabBar activeTab={activeTab} onTabClick={switchToTab} />
       </div>
@@ -1935,6 +1969,8 @@ function ScreenStage({
   goToReceivedShelf,
   switchToTab,
   cookFeedState,
+  finishCreateCategoryForCookPost,
+  currentUserId,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back"; fromIsTabRoot?: boolean; toIsTabRoot?: boolean } | null;
@@ -1970,6 +2006,8 @@ function ScreenStage({
   goToReceivedShelf: () => void;
   switchToTab: (tab: TabId, screen?: Screen) => void;
   cookFeedState: CookFeedState;
+  finishCreateCategoryForCookPost: (catKey: string, catLabel: string, postId: string) => void;
+  currentUserId: string | null;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
@@ -2059,7 +2097,7 @@ function ScreenStage({
         pointerEvents: isTransitioning ? "none" : "auto",
         paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
       }}>
-        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState)}
+        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState, finishCreateCategoryForCookPost, currentUserId)}
       </div>
 
       {/* Overlay layer - only during transitions, renders from screen */}
@@ -2072,7 +2110,7 @@ function ScreenStage({
           pointerEvents: "none",
           paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
         }}>
-          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState)}
+          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState, finishCreateCategoryForCookPost, currentUserId)}
         </div>
       )}
     </div>

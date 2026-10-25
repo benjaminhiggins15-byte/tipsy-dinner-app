@@ -3,11 +3,17 @@ import { IconRefresh } from "@tabler/icons-react";
 import {
   getCookFeed,
   getCookPost,
+  saveFeedRecipe,
+  addRecipeToMenuSection,
   COOK_FEED_PAGE_SIZE,
   type CookFeedPost,
   type CookPostDetail,
+  type Recipe,
+  type MenuSection,
 } from "./data";
+import { logEvent } from "../lib/events";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
+import SaveRecipeFlow from "./SaveRecipeFlow";
 
 // Cook Feed — Step 2b (the screen itself). Reads ONLY through get_cook_feed/
 // get_cook_post (see CLAUDE.md's Cooking Feed — Step 2a entry); this file
@@ -46,10 +52,12 @@ export type CookFeedState = {
   refresh: () => Promise<void>;
 };
 
-// Only screen this file ever pushes — kept narrow and structurally
+// Only screens this file ever pushes — kept narrow and structurally
 // compatible with the real App-level Screen union, same convention as
 // MenuInterior's own local Screen type.
-type Screen = { name: "cookPostDetail"; postId: string };
+type Screen =
+  | { name: "cookPostDetail"; postId: string; newCategory?: { key: string; label: string } }
+  | { name: "newcategoryforcookpost"; postId: string };
 
 function formatRelativeTime(isoString: string): string {
   const diffMs = Math.max(0, Date.now() - new Date(isoString).getTime());
@@ -315,12 +323,35 @@ export function CookFeedScreen({
 
 export function CookPostDetailScreen({
   postId,
+  newCategory,
+  currentUserId,
   back,
+  push,
+  finishSaveRecipe,
+  clearRecipeCache,
 }: {
   postId: string;
+  newCategory?: { key: string; label: string };
+  // Null is a valid, expected state (not yet resolved) — treated the same as
+  // "not the poster" so the Save button never shows before identity is known.
+  currentUserId: string | null;
   back: () => void;
+  push: (s: Screen) => void;
+  finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
+  clearRecipeCache: (categoryKey: string) => void;
 }) {
   const [detail, setDetail] = useState<CookPostDetail | null | undefined>(undefined);
+  // Mirrors DiscoveredDetailView's pattern exactly (Home.tsx) — trayOpen
+  // starts true when re-entering with a freshly created category.
+  const [trayOpen, setTrayOpen] = useState(!!newCategory);
+  const [saving, setSaving] = useState(false);
+  // Local-only, per-mount — a disabled "Saved" state is enough to block a
+  // double-tap/repeat-tap from creating duplicate recipe copies (see
+  // saveFeedRecipe's duplicate-save note in data.ts: nothing server-side
+  // blocks a repeat save, so this is the only guard). Deliberately NOT
+  // persisted — re-entering this screen (e.g. back then forward again) always
+  // starts fresh, matching finish_feed_recipe_save's own no-dedup design.
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     let ignore = false;
@@ -372,6 +403,50 @@ export function CookPostDetailScreen({
     steps: snapshot.steps,
   };
 
+  // Founder decision: saving your own post is hidden entirely, not just
+  // disabled. currentUserId === null (identity not yet resolved) also hides
+  // it — fail toward not-shown rather than briefly flashing a Save button a
+  // poster could tap on their own post.
+  const isOwnPost = currentUserId === null || currentUserId === detail.poster_id;
+
+  const handlePickCategory = async (
+    catKey: string,
+    catLabel: string,
+    menuInfo?: { menuId: string; section: MenuSection }
+  ) => {
+    setTrayOpen(false);
+    setSaving(true);
+
+    const result = await saveFeedRecipe(postId, snapshot, detail.photo_url, catKey);
+
+    if (menuInfo) {
+      await addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, result.recipeId);
+    }
+
+    setSaved(true);
+
+    const savedRecipe: Recipe = {
+      title: snapshot.title,
+      description: snapshot.description,
+      color: "linear-gradient(135deg, #C5DCF4 0%, #85B7EB 100%)",
+      category: catLabel.toLowerCase(),
+      ingredients: recipe.ingredients,
+      steps: snapshot.steps,
+      savedId: result.recipeId,
+      categoryKey: catKey,
+      // Only set when the photo copy succeeded — a photoless post or a
+      // failed copy both leave this undefined, same convention as the
+      // received/discovered save flows.
+      photo_url: result.photoCopied ? result.photoUrl : undefined,
+      photo_version: result.photoCopied ? result.photoVersion : undefined,
+    };
+
+    clearRecipeCache(catKey);
+    // recipe_saved — cook feed post saved to the library
+    logEvent("recipe_saved", { recipe_id: result.recipeId, source: "cook_feed" });
+    finishSaveRecipe(savedRecipe, catKey, catLabel);
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg, position: "relative" }}>
       <ExpandedRecipeOverlay
@@ -382,7 +457,22 @@ export function CookPostDetailScreen({
         sharerLabel="cooked by"
         photoUrl={detail.photo_url ?? undefined}
         onBack={back}
+        onSave={isOwnPost ? undefined : saved ? () => {} : saving ? undefined : () => setTrayOpen(true)}
+        saveLabel={saved ? "Saved" : "Save"}
+        saveDisabled={saved}
       />
+
+      {trayOpen && (
+        <SaveRecipeFlow
+          onClose={() => setTrayOpen(false)}
+          onPick={handlePickCategory}
+          onNew={() => {
+            setTrayOpen(false);
+            push({ name: "newcategoryforcookpost", postId });
+          }}
+          initialSelectedCategory={newCategory || null}
+        />
+      )}
     </div>
   );
 }

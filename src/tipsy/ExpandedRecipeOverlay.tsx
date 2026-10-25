@@ -12,6 +12,7 @@ export default function ExpandedRecipeOverlay({
   onSave,
   recipe,
   saveLabel = "Save",
+  saveDisabled = false,
   sharerName,
   sharerLabel = "inspired by",
   onSignIn,
@@ -33,6 +34,10 @@ export default function ExpandedRecipeOverlay({
   // Optional, additive props for the logged-out share-view caller — all
   // default to Build's original behavior exactly when omitted.
   saveLabel?: string;
+  // Renders the Save button visibly but non-interactive (e.g. Cook Feed's
+  // post-success "Saved" state) — distinct from omitting onSave, which hides
+  // the button entirely. Defaults to false for every existing caller.
+  saveDisabled?: boolean;
   sharerName?: string;
   // Wording in front of sharerName — defaults to Build's original "inspired
   // by" phrasing; Cook Feed passes "cooked by" since sharerName there is the
@@ -340,7 +345,8 @@ export default function ExpandedRecipeOverlay({
         {/* Save button */}
         {onSave && (
           <button
-            onClick={onSave}
+            onClick={saveDisabled ? undefined : onSave}
+            disabled={saveDisabled}
             style={{
               display: "block",
               width: "calc(100% - 32px)",
@@ -354,8 +360,9 @@ export default function ExpandedRecipeOverlay({
               fontSize: 12,
               textTransform: "uppercase",
               letterSpacing: "0.1em",
-              cursor: "pointer",
+              cursor: saveDisabled ? "default" : "pointer",
               fontWeight: 500,
+              opacity: saveDisabled ? 0.5 : 1,
             }}
           >
             {saveLabel}

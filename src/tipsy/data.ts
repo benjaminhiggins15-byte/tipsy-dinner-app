@@ -4565,6 +4565,110 @@ export async function getCookPost(postId: string): Promise<CookPostDetail | null
   }
 }
 
+// ==================== SAVE FROM COOKING FEED ====================
+export type SaveFeedRecipeResult = {
+  recipeId: string;
+  photoCopied: boolean;
+  photoUrl?: string;
+  photoVersion?: number;
+};
+
+// Connection-free save of a posted cook's recipe into the viewer's own
+// library, with "inspired by [poster]" credit — mirrors saveSharedRecipe's
+// shape (plain saveRecipe, no recipe_sends/connection), NOT
+// saveReceivedRecipe's two-party retry-with-existingRecipeId design: there is
+// no recipe_sends-style row here that can get stuck in a partial 'pending'
+// state, so there is nothing to resume from — a failed finish_feed_recipe_save
+// call (step 2) leaves a complete, saved, merely-uncredited recipe, logged
+// and swallowed, same as saveSharedRecipe's own finishError handling.
+//
+// photoUrl is the ALREADY-RESOLVED public URL from CookPostDetail (as
+// returned by getCookPost above) — not re-derived here. recipe-photos is a
+// public bucket (see CLAUDE.md's "Public bucket ≠ SDK access permitted"
+// note): a plain fetch() against that URL is the same read access anyone
+// already has by holding the link (identical to what the feed's own <img>
+// tag already does), so no service-role Edge Function is needed for this
+// cross-user copy — only the destination write (into the saver's own
+// {userId}/{recipeId}.jpg) needs the normal authenticated SDK call, same
+// permission uploadRecipePhoto already uses for a same-user upload.
+// Deliberately skips compressImageFile's decode/recompress step (unlike
+// uploadRecipePhoto) — the source is already a finished JPEG; re-encoding it
+// would only cost time and quality for no benefit, same reasoning as
+// copy-received-recipe-photo's raw bucket-to-bucket copy.
+export async function saveFeedRecipe(
+  postId: string,
+  snapshot: RecipeSendSnapshot,
+  photoUrl: string | null,
+  categoryId?: string,
+): Promise<SaveFeedRecipeResult> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    throw new Error('No user session');
+  }
+
+  const recipeId = await saveRecipe(
+    {
+      id: Date.now(), // unused by saveRecipe — matches the dummy-id convention at other call sites
+      title: snapshot.title,
+      description: snapshot.description,
+      category: '',
+      ingredients: snapshot.ingredients.map((ing) => ({ name: ing.name, qty: ing.quantity })),
+      steps: snapshot.steps, // already normalized {title, instruction} from post time — no normalizeStep()
+      createdAt: new Date().toISOString(),
+    },
+    'manual',
+    categoryId,
+  );
+
+  const { error: finishError } = await supabase.rpc('finish_feed_recipe_save', {
+    p_post_id: postId,
+    p_recipe_id: recipeId,
+  });
+  if (finishError) {
+    console.error('Error finishing feed recipe save (recipe saved; uncredited):', finishError);
+  }
+
+  let photoCopied = false;
+  let photoUrlOut: string | undefined;
+  let photoVersionOut: number | undefined;
+
+  if (photoUrl) {
+    try {
+      const response = await fetch(photoUrl);
+      if (!response.ok) throw new Error(`Couldn't fetch post photo (status ${response.status})`);
+      const blob = await response.blob();
+
+      const destPath = `${userId}/${recipeId}.jpg`;
+      const { error: uploadError } = await supabase.storage
+        .from('recipe-photos')
+        .upload(destPath, blob, { contentType: 'image/jpeg', upsert: true });
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } = supabase.storage.from('recipe-photos').getPublicUrl(destPath);
+
+      const { data: currentRow, error: versionFetchError } = await supabase
+        .from('recipes')
+        .select('photo_version')
+        .eq('id', recipeId)
+        .eq('user_id', userId)
+        .single();
+      if (versionFetchError) throw versionFetchError;
+
+      const nextVersion = (currentRow?.photo_version ?? 0) + 1;
+      const updated = await updateSavedRecipe(recipeId, { photo_url: publicUrlData.publicUrl, photo_version: nextVersion });
+      if (updated) {
+        photoCopied = true;
+        photoUrlOut = publicUrlData.publicUrl;
+        photoVersionOut = updated.photo_version ?? nextVersion;
+      }
+    } catch (error) {
+      console.error('Feed-recipe photo copy failed (recipe saved; photo pending):', error);
+    }
+  }
+
+  return { recipeId, photoCopied, photoUrl: photoUrlOut, photoVersion: photoVersionOut };
+}
+
 // ==================== STEP-TITLE BACKFILL (one-time, already run) ====================
 // Titled every existing recipe's plain-string steps via an isolated AI call,
 // modeled on the grocery enrichment pattern above (own small system prompt,
