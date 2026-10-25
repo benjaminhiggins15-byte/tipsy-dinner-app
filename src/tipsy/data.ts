@@ -4479,6 +4479,11 @@ export type CookFeedPost = {
   photo_url: string | null;
   photo_source: 'cook' | 'recipe' | null;
   recipe_title: string;
+  // Added by 20261025000006_get_cook_feed_add_recipe_description.sql,
+  // extracted from the frozen recipe_snapshot the same way recipe_title is.
+  // No inspired-by/credit field exists in that snapshot shape (see that
+  // migration's header), so there is none to add alongside it here.
+  recipe_description: string;
   poster_id: string;
   poster_display_name: string;
   poster_handle: string;

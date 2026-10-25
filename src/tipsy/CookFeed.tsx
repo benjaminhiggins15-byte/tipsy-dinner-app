@@ -81,16 +81,36 @@ function Headline({ post }: { post: CookFeedPost }) {
   );
 }
 
+// Quoted so it reads unambiguously as the poster's own words, never
+// confusable with the recipe's own (frozen, AI/author-written) description
+// rendered right above it in CookFeedCard — the two are otherwise the same
+// italic Fraunces "personal voice" styling used for notes everywhere else in
+// the app (e.g. Cook History's own note render in App.tsx). Spacing/divider
+// that separates it from the description is the card's job, not this
+// component's — kept margin-free so callers control that.
 function NoteLine({ text }: { text: string }) {
   return (
-    <div style={{ fontFamily: fontSerif, fontStyle: "italic", fontWeight: 300, fontSize: 14, color: "rgba(35,60,0,0.6)", lineHeight: 1.5, marginTop: 10 }}>
-      {text}
+    <div style={{ fontFamily: fontSerif, fontStyle: "italic", fontWeight: 300, fontSize: 14, color: "rgba(35,60,0,0.6)", lineHeight: 1.5 }}>
+      “{text}”
     </div>
   );
 }
 
+// Single layout for every post (compact/thumbnail layout dropped per founder
+// direction — image-forward, Strava-like, resembling the top half of
+// RecipeCard/ExpandedRecipeOverlay's own header: title line, optional large
+// photo, italic description, optional inspired-by credit). photo_source no
+// longer branches the layout — a cook-sourced and a recipe-sourced photo now
+// render identically, large; only "no photo at all" renders no photo block.
+//
+// No inspired-by credit is rendered: CookFeedPost has no such field, because
+// the frozen recipe_snapshot it's extracted from (RecipeSendSnapshot) never
+// carried one — see 20261025000006_get_cook_feed_add_recipe_description.sql's
+// header for the full audit. Add it here only if that snapshot shape is
+// deliberately extended later.
 function CookFeedCard({ post, onTap }: { post: CookFeedPost; onTap: () => void }) {
   const hasNote = !!(post.note && post.note.trim().length > 0);
+  const hasDescription = !!(post.recipe_description && post.recipe_description.trim().length > 0);
 
   return (
     <button
@@ -106,33 +126,40 @@ function CookFeedCard({ post, onTap }: { post: CookFeedPost; onTap: () => void }
         cursor: "pointer",
       }}
     >
-      {post.photo_source === "cook" && post.photo_url ? (
-        <>
-          <Headline post={post} />
-          <div style={{
-            width: "100%",
-            aspectRatio: "4 / 3",
-            borderRadius: 10,
-            overflow: "hidden",
-            background: "rgba(35,60,0,0.06)",
-            marginTop: 12,
-          }}>
-            <img src={post.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-          </div>
-        </>
-      ) : post.photo_source === "recipe" && post.photo_url ? (
-        <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-          <div style={{ width: 52, height: 52, borderRadius: 8, overflow: "hidden", flexShrink: 0, background: "rgba(35,60,0,0.06)" }}>
-            <img src={post.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <Headline post={post} />
-          </div>
+      <Headline post={post} />
+
+      {post.photo_url && (
+        <div style={{
+          width: "100%",
+          aspectRatio: "4 / 3",
+          borderRadius: 20,
+          overflow: "hidden",
+          background: "rgba(35,60,0,0.06)",
+          marginTop: 12,
+        }}>
+          <img src={post.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
         </div>
-      ) : (
-        <Headline post={post} />
       )}
-      {hasNote && <NoteLine text={post.note as string} />}
+
+      {hasDescription && (
+        <div style={{
+          fontFamily: fontSerif,
+          fontStyle: "italic",
+          fontWeight: 300,
+          fontSize: 15,
+          color: "rgba(35,60,0,0.55)",
+          lineHeight: 1.5,
+          marginTop: 12,
+        }}>
+          {post.recipe_description}
+        </div>
+      )}
+
+      {hasNote && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px dotted ${C.border}` }}>
+          <NoteLine text={post.note as string} />
+        </div>
+      )}
     </button>
   );
 }
