@@ -345,6 +345,11 @@ export function CookPostDetailScreen({
   // starts true when re-entering with a freshly created category.
   const [trayOpen, setTrayOpen] = useState(!!newCategory);
   const [saving, setSaving] = useState(false);
+  // Set when saveFeedRecipe's call chain throws — surfaces a retryable error
+  // instead of leaving the Save button silently stuck (saveRecipe has no
+  // try/catch anywhere upstream of here, so this is the only place it can be
+  // caught). Cleared on every new save attempt.
+  const [saveError, setSaveError] = useState(false);
   // Local-only, per-mount — a disabled "Saved" state is enough to block a
   // double-tap/repeat-tap from creating duplicate recipe copies (see
   // saveFeedRecipe's duplicate-save note in data.ts: nothing server-side
@@ -416,35 +421,42 @@ export function CookPostDetailScreen({
   ) => {
     setTrayOpen(false);
     setSaving(true);
+    setSaveError(false);
 
-    const result = await saveFeedRecipe(postId, snapshot, detail.photo_url, catKey);
+    try {
+      const result = await saveFeedRecipe(postId, snapshot, detail.photo_url, catKey);
 
-    if (menuInfo) {
-      await addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, result.recipeId);
+      if (menuInfo) {
+        await addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, result.recipeId);
+      }
+
+      setSaved(true);
+
+      const savedRecipe: Recipe = {
+        title: snapshot.title,
+        description: snapshot.description,
+        color: "linear-gradient(135deg, #C5DCF4 0%, #85B7EB 100%)",
+        category: catLabel.toLowerCase(),
+        ingredients: recipe.ingredients,
+        steps: snapshot.steps,
+        savedId: result.recipeId,
+        categoryKey: catKey,
+        // Only set when the photo copy succeeded — a photoless post or a
+        // failed copy both leave this undefined, same convention as the
+        // received/discovered save flows.
+        photo_url: result.photoCopied ? result.photoUrl : undefined,
+        photo_version: result.photoCopied ? result.photoVersion : undefined,
+      };
+
+      clearRecipeCache(catKey);
+      // recipe_saved — cook feed post saved to the library
+      logEvent("recipe_saved", { recipe_id: result.recipeId, source: "cook_feed" });
+      finishSaveRecipe(savedRecipe, catKey, catLabel);
+    } catch (error) {
+      console.error("Couldn't save this cook feed recipe:", error);
+      setSaving(false);
+      setSaveError(true);
     }
-
-    setSaved(true);
-
-    const savedRecipe: Recipe = {
-      title: snapshot.title,
-      description: snapshot.description,
-      color: "linear-gradient(135deg, #C5DCF4 0%, #85B7EB 100%)",
-      category: catLabel.toLowerCase(),
-      ingredients: recipe.ingredients,
-      steps: snapshot.steps,
-      savedId: result.recipeId,
-      categoryKey: catKey,
-      // Only set when the photo copy succeeded — a photoless post or a
-      // failed copy both leave this undefined, same convention as the
-      // received/discovered save flows.
-      photo_url: result.photoCopied ? result.photoUrl : undefined,
-      photo_version: result.photoCopied ? result.photoVersion : undefined,
-    };
-
-    clearRecipeCache(catKey);
-    // recipe_saved — cook feed post saved to the library
-    logEvent("recipe_saved", { recipe_id: result.recipeId, source: "cook_feed" });
-    finishSaveRecipe(savedRecipe, catKey, catLabel);
   };
 
   return (
@@ -472,6 +484,27 @@ export function CookPostDetailScreen({
           }}
           initialSelectedCategory={newCategory || null}
         />
+      )}
+
+      {saveError && (
+        <div
+          style={{
+            position: "fixed",
+            left: 16,
+            right: 16,
+            bottom: 24,
+            zIndex: 60,
+            background: "#c0392b",
+            color: "#fff",
+            borderRadius: 10,
+            padding: "10px 14px",
+            fontFamily: fontSans,
+            fontSize: 13,
+            textAlign: "center",
+          }}
+        >
+          Couldn't save this recipe — please try again.
+        </div>
       )}
     </div>
   );
