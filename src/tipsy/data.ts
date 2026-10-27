@@ -1466,6 +1466,26 @@ export async function updateSavedRecipe(
 // clause (id + user_id, further narrowed by RLS) matches zero rows is NOT
 // a Postgres error - it's a normal empty response - so callers must check
 // this return value rather than assume success just because nothing threw.
+//
+// Before the DB delete, sweeps every cook_events row for this recipe's own
+// potential storage objects — each event's live cook photo
+// (cook-photos-private, {userId}/cook-{eventId}.jpg) and, if that cook was
+// ever posted, its post's frozen photo (recipe-photos, {userId}/post-{postId}.jpg).
+// cook_events and cook_posts both cascade away in the DB once the recipe row
+// is deleted (ON DELETE CASCADE, both tables), but Postgres cascades never
+// touch object storage — left unswept, this would leave a private cook photo
+// orphaned forever, or worse, a now-ownerless but still world-readable object
+// in the PUBLIC recipe-photos bucket. ABORTS (throws, returns false) before
+// the recipe delete if any removal fails — same "change nothing you can't
+// still call unchanged" bias as uploadRecipePhoto/removeRecipePhoto above,
+// NOT the soft-fail pattern used for the received-recipe photo copy (that
+// one leaves a complete, merely photoless recipe behind on failure; a failed
+// sweep here would leave exactly the public-bucket orphan this feature's
+// privacy design exists to prevent).
+// Does NOT fix the separate, pre-existing gap that a recipe's own hero photo
+// ({userId}/{recipeId}.jpg in recipe-photos) is never swept on delete
+// (flagged in CLAUDE.md Standing Cleanup) — out of scope here; this only
+// covers the new cook-photo/cook-post paths.
 export async function deleteSavedRecipe(id: number | string): Promise<boolean> {
   const userId = await getCurrentUserId();
   if (!userId) {
@@ -1474,6 +1494,52 @@ export async function deleteSavedRecipe(id: number | string): Promise<boolean> {
   }
 
   try {
+    const { data: events, error: eventsFetchError } = await supabase
+      .from('cook_events')
+      .select('id, photo_url')
+      .eq('recipe_id', id)
+      .eq('user_id', userId);
+
+    if (eventsFetchError) throw eventsFetchError;
+
+    const eventIds = (events ?? []).map((e) => e.id);
+    const cookPhotoPaths = (events ?? [])
+      .filter((e) => e.photo_url)
+      .map((e) => `${userId}/cook-${e.id}.jpg`);
+
+    let postPhotoPaths: string[] = [];
+    if (eventIds.length > 0) {
+      const { data: posts, error: postsFetchError } = await supabase
+        .from('cook_posts')
+        .select('id, photo_url')
+        .in('cook_event_id', eventIds)
+        .eq('user_id', userId);
+
+      if (postsFetchError) throw postsFetchError;
+
+      postPhotoPaths = (posts ?? [])
+        .filter((p) => p.photo_url)
+        .map((p) => `${userId}/post-${p.id}.jpg`);
+    }
+
+    if (cookPhotoPaths.length > 0) {
+      const { error: removeCookPhotosError } = await supabase.storage
+        .from('cook-photos-private')
+        .remove(cookPhotoPaths);
+      if (removeCookPhotosError) {
+        throw new Error(`Couldn't remove cook photos: ${removeCookPhotosError.message}`);
+      }
+    }
+
+    if (postPhotoPaths.length > 0) {
+      const { error: removePostPhotosError } = await supabase.storage
+        .from('recipe-photos')
+        .remove(postPhotoPaths);
+      if (removePostPhotosError) {
+        throw new Error(`Couldn't remove post photos: ${removePostPhotosError.message}`);
+      }
+    }
+
     const { data, error } = await supabase
       .from('recipes')
       .delete()
@@ -1528,7 +1594,12 @@ export async function getSavedRecipesForCategory(categoryId: string, label: stri
             cooked_on,
             score,
             note,
-            created_at
+            created_at,
+            photo_url,
+            photo_version,
+            cook_posts (
+              id
+            )
           )
         )
       `)
@@ -1609,7 +1680,12 @@ export async function getSavedRecipesAll(): Promise<Recipe[]> {
             cooked_on,
             score,
             note,
-            created_at
+            created_at,
+            photo_url,
+            photo_version,
+            cook_posts (
+              id
+            )
           )
         )
       `)
@@ -1877,6 +1953,134 @@ export async function removeRecipePhoto(recipeId: string | number): Promise<numb
   }
 
   return updated.photo_version ?? nextVersion;
+}
+
+// ==================== COOK PHOTOS (live, private — see "post a cook") ====================
+// Mirrors uploadRecipePhoto/removeRecipePhoto's compress/upsert/version-bump
+// pattern exactly, with two deliberate differences: the destination is the
+// PRIVATE cook-photos-private bucket at {userId}/cook-{eventId}.jpg, and the
+// stored cook_events.photo_url value is a bare storage PATH, never a public
+// URL — this bucket has public=false, so getPublicUrl() would silently
+// return a URL that 403s. Display must always go through
+// getCookPhotoSignedUrl() (or an authenticated .download()), just-in-time.
+
+// `input` accepts either a raw File (compressed here, same as
+// uploadRecipePhoto) or an already-compressed Blob — the latter lets a
+// brand-new cook's photo be cropped/compressed once at pick-time (before a
+// cook_event id even exists) and uploaded as-is here once the event is saved,
+// instead of re-compressing a second time.
+export async function uploadCookPhoto(
+  eventId: string,
+  input: File | Blob,
+  cropRect?: CropRect
+): Promise<{ path: string; version: number }> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    throw new Error('No user session');
+  }
+
+  const compressed = input instanceof File ? await compressImageFile(input, cropRect) : input;
+
+  const path = `${userId}/cook-${eventId}.jpg`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('cook-photos-private')
+    .upload(path, compressed, { contentType: 'image/jpeg', upsert: true });
+
+  if (uploadError) {
+    throw new Error(`Couldn't upload photo: ${uploadError.message}`);
+  }
+
+  const { data: currentRow, error: versionFetchError } = await supabase
+    .from('cook_events')
+    .select('photo_version')
+    .eq('id', eventId)
+    .eq('user_id', userId)
+    .single();
+
+  if (versionFetchError) {
+    throw new Error(`Couldn't upload photo: ${versionFetchError.message}`);
+  }
+
+  const nextVersion = (currentRow?.photo_version ?? 0) + 1;
+
+  const { error: updateError } = await supabase
+    .from('cook_events')
+    .update({ photo_url: path, photo_version: nextVersion })
+    .eq('id', eventId)
+    .eq('user_id', userId);
+
+  if (updateError) {
+    // Best-effort cleanup so a failed DB write doesn't leave an orphaned object;
+    // secondary failure here is swallowed — the original error below still surfaces.
+    try {
+      await supabase.storage.from('cook-photos-private').remove([path]);
+    } catch {
+      // ignore
+    }
+    throw new Error("Photo uploaded but couldn't be saved to the cook. Please try again.");
+  }
+
+  return { path, version: nextVersion };
+}
+
+// Same delete-storage-first-then-clear-the-field ordering as removeRecipePhoto,
+// for the same reason: a failure at either step leaves photo_url untouched
+// rather than pointing at a now-missing file.
+export async function removeCookPhoto(eventId: string): Promise<number> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    throw new Error('No user session');
+  }
+
+  const path = `${userId}/cook-${eventId}.jpg`;
+
+  const { error: removeError } = await supabase.storage.from('cook-photos-private').remove([path]);
+  if (removeError) {
+    throw new Error(`Couldn't remove photo: ${removeError.message}`);
+  }
+
+  const { data: currentRow, error: versionFetchError } = await supabase
+    .from('cook_events')
+    .select('photo_version')
+    .eq('id', eventId)
+    .eq('user_id', userId)
+    .single();
+
+  if (versionFetchError) {
+    throw new Error(`Couldn't remove photo: ${versionFetchError.message}`);
+  }
+
+  const nextVersion = (currentRow?.photo_version ?? 0) + 1;
+
+  const { error: updateError } = await supabase
+    .from('cook_events')
+    .update({ photo_url: null, photo_version: nextVersion })
+    .eq('id', eventId)
+    .eq('user_id', userId);
+
+  if (updateError) {
+    throw new Error("Photo was removed but couldn't be cleared from the cook. Please try again.");
+  }
+
+  return nextVersion;
+}
+
+// Short-lived signed URL for a private cook photo — the ONLY sanctioned way
+// to display one (never getPublicUrl(), which 403s against this bucket
+// anyway since public=false). 1 hour is generous for a single sheet view;
+// never persisted, always fetched just-in-time.
+export async function getCookPhotoSignedUrl(path: string): Promise<string | null> {
+  try {
+    const { data, error } = await supabase.storage
+      .from('cook-photos-private')
+      .createSignedUrl(path, 60 * 60);
+    if (error) throw error;
+    return data?.signedUrl ?? null;
+  } catch (error) {
+    console.error('Error creating signed URL for cook photo:', error);
+    return null;
+  }
 }
 
 // ==================== RECIPE SHARING (frozen-copy snapshot) ====================
@@ -3841,9 +4045,20 @@ export type CookEvent = {
   score: number | null; // 1.0-10.0, one decimal place; null if scoring was skipped
   note: string | null;
   createdAt: string;
+  // Live, optional, mutable cook photo. A bare storage path in the PRIVATE
+  // cook-photos-private bucket ({userId}/cook-{id}.jpg) — deliberately NEVER
+  // a public URL (unlike Recipe.photo_url). Resolve via getCookPhotoSignedUrl
+  // just-in-time; never supabase.storage...getPublicUrl() on this bucket.
+  photoPath: string | null;
+  photoVersion: number;
+  // Id of this cook's cook_posts row, or null if never posted. One post per
+  // cook_event (DB UNIQUE constraint) — presence alone means "posted."
+  postId: string | null;
 };
 
 function mapCookEventRow(row: any): CookEvent {
+  const postRaw = row.cook_posts;
+  const postId = Array.isArray(postRaw) ? (postRaw[0]?.id ?? null) : (postRaw?.id ?? null);
   return {
     id: row.id,
     recipeId: row.recipe_id,
@@ -3851,6 +4066,9 @@ function mapCookEventRow(row: any): CookEvent {
     score: row.score,
     note: row.note,
     createdAt: row.created_at,
+    photoPath: row.photo_url ?? null,
+    photoVersion: row.photo_version ?? 0,
+    postId,
   };
 }
 
@@ -3887,7 +4105,7 @@ export async function loadCookEventsForRecipe(recipeId: string): Promise<CookEve
   try {
     const { data, error } = await supabase
       .from('cook_events')
-      .select('id, recipe_id, cooked_on, score, note, created_at')
+      .select('id, recipe_id, cooked_on, score, note, created_at, photo_url, photo_version, cook_posts(id)')
       .eq('user_id', userId)
       .eq('recipe_id', recipeId)
       .order('cooked_on', { ascending: false });
@@ -3961,24 +4179,494 @@ export async function updateCookEvent(
   }
 }
 
-export async function deleteCookEvent(eventId: string): Promise<void> {
+// Deletes one cook event. Before the DB delete, sweeps this event's own
+// potential storage objects — its live cook photo (cook-photos-private,
+// {userId}/cook-{eventId}.jpg) and, if this cook was ever posted, that
+// post's frozen photo (recipe-photos, {userId}/post-{postId}.jpg) — same
+// reasoning as deleteSavedRecipe's sweep above (cook_posts.cook_event_id is
+// ON DELETE CASCADE, but storage never cascades). ABORTS before the DB
+// delete if any removal fails, same bias as deleteSavedRecipe's sweep — see
+// its comment for why this is NOT the soft-fail pattern used elsewhere.
+// Returns true only if a cook_events row was actually removed — same
+// boolean contract as deleteSavedRecipe, fixing this function's place on
+// the Standing Cleanup "six unchecked deletes" list.
+export async function deleteCookEvent(eventId: string): Promise<boolean> {
   const userId = await getCurrentUserId();
   if (!userId) {
     console.error('Cannot delete cook event: no user session');
-    return;
+    return false;
   }
 
   try {
-    const { error } = await supabase
+    const { data: eventRow, error: eventFetchError } = await supabase
+      .from('cook_events')
+      .select('id, photo_url')
+      .eq('id', eventId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (eventFetchError) throw eventFetchError;
+
+    if (!eventRow) {
+      console.error('Delete cook event matched 0 rows (id/user_id mismatch or already deleted):', eventId);
+      return false;
+    }
+
+    const { data: postRow, error: postFetchError } = await supabase
+      .from('cook_posts')
+      .select('id, photo_url')
+      .eq('cook_event_id', eventId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (postFetchError) throw postFetchError;
+
+    if (eventRow.photo_url) {
+      const { error: removeCookPhotoError } = await supabase.storage
+        .from('cook-photos-private')
+        .remove([`${userId}/cook-${eventId}.jpg`]);
+      if (removeCookPhotoError) {
+        throw new Error(`Couldn't remove cook photo: ${removeCookPhotoError.message}`);
+      }
+    }
+
+    if (postRow?.photo_url) {
+      const { error: removePostPhotoError } = await supabase.storage
+        .from('recipe-photos')
+        .remove([`${userId}/post-${postRow.id}.jpg`]);
+      if (removePostPhotoError) {
+        throw new Error(`Couldn't remove post photo: ${removePostPhotoError.message}`);
+      }
+    }
+
+    const { data, error } = await supabase
       .from('cook_events')
       .delete()
       .eq('id', eventId)
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .select('id');
 
     if (error) throw error;
+
+    if (!data || data.length === 0) {
+      console.error('Delete cook event matched 0 rows on the delete itself (concurrent delete?):', eventId);
+      return false;
+    }
+
+    return true;
   } catch (error) {
     console.error('Error deleting cook event:', error);
+    return false;
   }
+}
+
+// ==================== POST A COOK (public cooking feed) ====================
+// Builds and inserts the ONE cook_posts row for a cook_event. Sequencing is
+// fixed and matters: mint the post id client-side FIRST (the DB CHECK
+// constraint pins cook_posts.photo_url to {user_id}/post-{id}.jpg, and
+// there's no UPDATE policy to patch it in after an insert — same "mint
+// before the copy" precedent as shareRecipeSnapshot/sendRecipeToFriends),
+// THEN copy the display photo (if any) into place, THEN insert the row.
+//
+// Failure handling is deliberately NOT the abort-and-leave-nothing-touched
+// pattern used by deleteCookEvent/deleteSavedRecipe's storage sweeps above.
+// The cook event itself is saved by the caller BEFORE this function is ever
+// called, and must survive regardless of what happens here: any failure
+// (fetch, photo copy, or the insert itself) returns null without touching
+// the cook event. The only cleanup this function does is removing a photo
+// it JUST copied, if the insert that was supposed to reference it then
+// failed — never anything for a photo-copy failure to roll back, since
+// nothing durable existed yet at that point.
+export async function postCook(cookEventId: string): Promise<{ postId: string } | null> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot post cook: no user session');
+    return null;
+  }
+
+  let photoWasCopied = false;
+  let destPath: string | null = null;
+
+  try {
+    const { data: eventRow, error: eventError } = await supabase
+      .from('cook_events')
+      .select('id, recipe_id, cooked_on, score, note, photo_url')
+      .eq('id', cookEventId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (eventError) throw eventError;
+    if (!eventRow) throw new Error('Cook event not found');
+
+    const { data: recipe, error: recipeError } = await supabase
+      .from('recipes')
+      .select(`
+        title,
+        description,
+        steps,
+        cook_time,
+        serves,
+        photo_url,
+        ingredients (
+          name,
+          quantity,
+          sort_order
+        )
+      `)
+      .eq('id', eventRow.recipe_id)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (recipeError) throw recipeError;
+    if (!recipe) throw new Error('Recipe not found');
+
+    const postId = crypto.randomUUID();
+    destPath = `${userId}/post-${postId}.jpg`;
+
+    // Same reconstitution shape as send_recipe_to_friend's p_snapshot — a
+    // future "save this from the feed" step will need it, not just display.
+    const snapshot: RecipeSendSnapshot = {
+      title: recipe.title,
+      description: recipe.description,
+      ingredients: (recipe.ingredients || [])
+        .sort((a: any, b: any) => a.sort_order - b.sort_order)
+        .map((ing: any) => ({ name: ing.name, quantity: ing.quantity, sort_order: ing.sort_order })),
+      steps: (recipe.steps || []).map((step: RecipeStep) => normalizeStep(step)),
+      cook_time: recipe.cook_time ?? null,
+      serves: recipe.serves ?? null,
+    };
+
+    // Display photo priority: this cook's own photo, else the recipe's live
+    // photo, else none. Always copied INTO recipe-photos (public) — this is
+    // the one moment privacy is deliberately traded for publicness, matching
+    // the user's explicit "post publicly" action.
+    let sourceBucket: string | null = null;
+    let sourcePath: string | null = null;
+    if (eventRow.photo_url) {
+      sourceBucket = 'cook-photos-private';
+      sourcePath = `${userId}/cook-${cookEventId}.jpg`;
+    } else if (recipe.photo_url) {
+      sourceBucket = 'recipe-photos';
+      sourcePath = `${userId}/${eventRow.recipe_id}.jpg`;
+    }
+
+    // Bare storage path only ({user_id}/post-{id}.jpg) — matches
+    // cook_posts_photo_url_shape_chk's exact-match form as of
+    // 20261025000005_cook_posts_photo_url_bare_path.sql. No public URL is
+    // resolved or stored here; getCookFeed/getCookPost resolve it via
+    // getPublicUrl() at read time instead, closing the open-host hole the old
+    // suffix-only CHECK allowed (see that migration's header comment).
+    let photoPath: string | null = null;
+    // Mirrors sourceBucket 1:1 — 'cook' | 'recipe' | null (no photo). Keyed
+    // off sourceBucket rather than re-deriving from eventRow/recipe so it
+    // can never disagree with which bucket the copy actually came from.
+    let photoSource: 'cook' | 'recipe' | null = null;
+    if (sourceBucket && sourcePath) {
+      const { data: photoBlob, error: downloadError } = await supabase.storage
+        .from(sourceBucket)
+        .download(sourcePath);
+      if (downloadError) throw downloadError;
+
+      const { error: uploadError } = await supabase.storage
+        .from('recipe-photos')
+        .upload(destPath, photoBlob, { contentType: 'image/jpeg', upsert: true });
+      if (uploadError) throw uploadError;
+
+      photoWasCopied = true;
+      photoPath = destPath;
+      photoSource = sourceBucket === 'cook-photos-private' ? 'cook' : 'recipe';
+    }
+
+    const { error: insertError } = await supabase.from('cook_posts').insert({
+      id: postId,
+      user_id: userId,
+      cook_event_id: cookEventId,
+      recipe_id: eventRow.recipe_id,
+      recipe_snapshot: snapshot,
+      photo_url: photoPath,
+      photo_source: photoSource,
+      score: eventRow.score,
+      note: eventRow.note,
+      cooked_on: eventRow.cooked_on,
+    });
+    if (insertError) throw insertError;
+
+    return { postId };
+  } catch (error) {
+    console.error('Error posting cook (the cook event itself remains saved):', error);
+    if (photoWasCopied && destPath) {
+      try {
+        await supabase.storage.from('recipe-photos').remove([destPath]);
+      } catch {
+        // Best-effort cleanup only — a dangling object here is a lesser
+        // problem than masking the posting failure from the caller.
+      }
+    }
+    return null;
+  }
+}
+
+// Removes a post: storage first, then the row, aborting (leaving the row
+// intact) if the storage removal fails — same bias as deleteCookEvent/
+// deleteSavedRecipe's sweeps, for the same reason (an orphaned PUBLIC photo
+// here is exactly the leak this feature's privacy design exists to avoid).
+// Returns true only if a cook_posts row was actually removed.
+export async function unpostCook(postId: string): Promise<boolean> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot remove post: no user session');
+    return false;
+  }
+
+  try {
+    const { data: postRow, error: fetchError } = await supabase
+      .from('cook_posts')
+      .select('id, photo_url')
+      .eq('id', postId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (fetchError) throw fetchError;
+
+    if (!postRow) {
+      console.error('Remove post matched 0 rows (id/user_id mismatch or already removed):', postId);
+      return false;
+    }
+
+    if (postRow.photo_url) {
+      const { error: removeError } = await supabase.storage
+        .from('recipe-photos')
+        .remove([`${userId}/post-${postId}.jpg`]);
+      if (removeError) {
+        throw new Error(`Couldn't remove post photo: ${removeError.message}`);
+      }
+    }
+
+    const { data, error } = await supabase
+      .from('cook_posts')
+      .delete()
+      .eq('id', postId)
+      .eq('user_id', userId)
+      .select('id');
+    if (error) throw error;
+
+    if (!data || data.length === 0) {
+      console.error('Remove post matched 0 rows on the delete itself (concurrent delete?):', postId);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error removing post:', error);
+    return false;
+  }
+}
+
+// ==================== COOKING FEED (read path) ====================
+// Card shape returned by get_cook_feed (security-definer, authenticated-only
+// — see supabase/migrations/20261025000003_get_cook_feed_and_get_cook_post.sql
+// / 20261025000004_cook_posts_add_photo_source.sql). As of
+// 20261025000005_cook_posts_photo_url_bare_path.sql, the DB column
+// cook_posts.photo_url holds a BARE storage path ({user_id}/post-{id}.jpg,
+// recipe-photos bucket) — matching cook_events.photo_url's existing
+// convention — not a full public URL. getCookFeed/getCookPost below resolve
+// it to a public URL via getPublicUrl() before returning, so this exported
+// type (and every caller, e.g. CookFeed.tsx) still sees a ready-to-render URL
+// exactly as before; nothing downstream of these two functions changes.
+export type CookFeedPost = {
+  post_id: string;
+  created_at: string;
+  cooked_on: string;
+  score: number | null;
+  note: string | null;
+  photo_url: string | null;
+  photo_source: 'cook' | 'recipe' | null;
+  recipe_title: string;
+  // Added by 20261025000006_get_cook_feed_add_recipe_description.sql,
+  // extracted from the frozen recipe_snapshot the same way recipe_title is.
+  // No inspired-by/credit field exists in that snapshot shape (see that
+  // migration's header), so there is none to add alongside it here.
+  recipe_description: string;
+  poster_id: string;
+  poster_display_name: string;
+  poster_handle: string;
+};
+
+// Cursor is the (created_at, post_id) pair of the last row already held by
+// the caller — keyset pagination, not OFFSET, matching get_cook_feed's own
+// param shape. Passing both together (or neither) is required; see the
+// migration's comment on why created_at alone isn't a safe cursor.
+export type CookFeedCursor = {
+  createdAt: string;
+  postId: string;
+};
+
+export const COOK_FEED_PAGE_SIZE = 20;
+
+// Full single-post shape returned by get_cook_post, for tap-through from a
+// feed card into a read-only recipe view.
+export type CookPostDetail = {
+  post_id: string;
+  created_at: string;
+  cooked_on: string;
+  score: number | null;
+  note: string | null;
+  photo_url: string | null;
+  photo_source: 'cook' | 'recipe' | null;
+  recipe_snapshot: RecipeSendSnapshot;
+  poster_id: string;
+  poster_display_name: string;
+  poster_handle: string;
+};
+
+// Wraps the get_cook_feed security-definer RPC — same fail-quiet/null-on-error
+// discipline as getSuggestedRecipeDetail/searchProfiles. Returns an empty
+// array (not null) on failure so callers can treat "no more posts" and
+// "fetch failed" distinctly if they choose, by also surfacing the thrown
+// error via console.error; a null-returning sibling would collapse "empty
+// page" and "error" into the same falsy shape for list-rendering callers.
+export async function getCookFeed(cursor?: CookFeedCursor): Promise<CookFeedPost[]> {
+  try {
+    const { data, error } = await supabase.rpc('get_cook_feed', {
+      p_limit: COOK_FEED_PAGE_SIZE,
+      p_before_created_at: cursor?.createdAt ?? null,
+      p_before_id: cursor?.postId ?? null,
+    });
+    if (error) throw error;
+    // photo_url comes back as a bare storage path (see the comment above
+    // CookFeedPost) — resolve it here so callers keep receiving a
+    // ready-to-render URL.
+    return (data ?? []).map((row: CookFeedPost) => ({
+      ...row,
+      photo_url: row.photo_url
+        ? supabase.storage.from('recipe-photos').getPublicUrl(row.photo_url).data.publicUrl
+        : null,
+    }));
+  } catch (error) {
+    console.error('Error loading cook feed:', error);
+    throw error;
+  }
+}
+
+// Wraps the get_cook_post security-definer RPC.
+export async function getCookPost(postId: string): Promise<CookPostDetail | null> {
+  try {
+    const { data, error } = await supabase.rpc('get_cook_post', { p_post_id: postId });
+    if (error) throw error;
+    const row = data?.[0] ?? null;
+    if (!row) return null;
+    // Same bare-path resolution as getCookFeed above.
+    return {
+      ...row,
+      photo_url: row.photo_url
+        ? supabase.storage.from('recipe-photos').getPublicUrl(row.photo_url).data.publicUrl
+        : null,
+    };
+  } catch (error) {
+    console.error('Error loading cook post:', error);
+    return null;
+  }
+}
+
+// ==================== SAVE FROM COOKING FEED ====================
+export type SaveFeedRecipeResult = {
+  recipeId: string;
+  photoCopied: boolean;
+  photoUrl?: string;
+  photoVersion?: number;
+};
+
+// Connection-free save of a posted cook's recipe into the viewer's own
+// library, with "inspired by [poster]" credit — mirrors saveSharedRecipe's
+// shape (plain saveRecipe, no recipe_sends/connection), NOT
+// saveReceivedRecipe's two-party retry-with-existingRecipeId design: there is
+// no recipe_sends-style row here that can get stuck in a partial 'pending'
+// state, so there is nothing to resume from — a failed finish_feed_recipe_save
+// call (step 2) leaves a complete, saved, merely-uncredited recipe, logged
+// and swallowed, same as saveSharedRecipe's own finishError handling.
+//
+// photoUrl is the ALREADY-RESOLVED public URL from CookPostDetail (as
+// returned by getCookPost above) — not re-derived here. recipe-photos is a
+// public bucket (see CLAUDE.md's "Public bucket ≠ SDK access permitted"
+// note): a plain fetch() against that URL is the same read access anyone
+// already has by holding the link (identical to what the feed's own <img>
+// tag already does), so no service-role Edge Function is needed for this
+// cross-user copy — only the destination write (into the saver's own
+// {userId}/{recipeId}.jpg) needs the normal authenticated SDK call, same
+// permission uploadRecipePhoto already uses for a same-user upload.
+// Deliberately skips compressImageFile's decode/recompress step (unlike
+// uploadRecipePhoto) — the source is already a finished JPEG; re-encoding it
+// would only cost time and quality for no benefit, same reasoning as
+// copy-received-recipe-photo's raw bucket-to-bucket copy.
+export async function saveFeedRecipe(
+  postId: string,
+  snapshot: RecipeSendSnapshot,
+  photoUrl: string | null,
+  categoryId?: string,
+): Promise<SaveFeedRecipeResult> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    throw new Error('No user session');
+  }
+
+  const recipeId = await saveRecipe(
+    {
+      id: Date.now(), // unused by saveRecipe — matches the dummy-id convention at other call sites
+      title: snapshot.title,
+      description: snapshot.description,
+      category: '',
+      ingredients: snapshot.ingredients.map((ing) => ({ name: ing.name, qty: ing.quantity })),
+      steps: snapshot.steps, // already normalized {title, instruction} from post time — no normalizeStep()
+      createdAt: new Date().toISOString(),
+    },
+    'manual',
+    categoryId,
+  );
+
+  const { error: finishError } = await supabase.rpc('finish_feed_recipe_save', {
+    p_post_id: postId,
+    p_recipe_id: recipeId,
+  });
+  if (finishError) {
+    console.error('Error finishing feed recipe save (recipe saved; uncredited):', finishError);
+  }
+
+  let photoCopied = false;
+  let photoUrlOut: string | undefined;
+  let photoVersionOut: number | undefined;
+
+  if (photoUrl) {
+    try {
+      const response = await fetch(photoUrl);
+      if (!response.ok) throw new Error(`Couldn't fetch post photo (status ${response.status})`);
+      const blob = await response.blob();
+
+      const destPath = `${userId}/${recipeId}.jpg`;
+      const { error: uploadError } = await supabase.storage
+        .from('recipe-photos')
+        .upload(destPath, blob, { contentType: 'image/jpeg', upsert: true });
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } = supabase.storage.from('recipe-photos').getPublicUrl(destPath);
+
+      const { data: currentRow, error: versionFetchError } = await supabase
+        .from('recipes')
+        .select('photo_version')
+        .eq('id', recipeId)
+        .eq('user_id', userId)
+        .single();
+      if (versionFetchError) throw versionFetchError;
+
+      const nextVersion = (currentRow?.photo_version ?? 0) + 1;
+      const updated = await updateSavedRecipe(recipeId, { photo_url: publicUrlData.publicUrl, photo_version: nextVersion });
+      if (updated) {
+        photoCopied = true;
+        photoUrlOut = publicUrlData.publicUrl;
+        photoVersionOut = updated.photo_version ?? nextVersion;
+      }
+    } catch (error) {
+      console.error('Feed-recipe photo copy failed (recipe saved; photo pending):', error);
+    }
+  }
+
+  return { recipeId, photoCopied, photoUrl: photoUrlOut, photoVersion: photoVersionOut };
 }
 
 // ==================== STEP-TITLE BACKFILL (one-time, already run) ====================

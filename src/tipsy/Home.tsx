@@ -46,6 +46,7 @@ type HomePush = (
     | { name: "newcategoryforsuggestion"; recipe: SuggestedRecipeDetail }
     | { name: "discoveredDetail"; recipe: DiscoveredRecipe; newCategory?: { key: string; label: string } }
     | { name: "newcategoryfordiscovered"; recipe: DiscoveredRecipe }
+    | { name: "cookFeed" }
 ) => void;
 
 type ProfileType = {
@@ -521,6 +522,26 @@ export default function Home({
               </svg>
             </div>
           ))}
+          {/* Temporary link for founder review only — Cooking Feed Step 2b.
+              Will be removed once the feed becomes the Home tab's root. */}
+          <div
+            onClick={() => push({ name: "cookFeed" })}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "15px 0",
+              borderBottom: "0.5px solid rgba(35,60,0,0.08)",
+              cursor: "pointer",
+            }}
+          >
+            <div style={{ fontFamily: fontSans, fontSize: 14, color: C.textLight }}>
+              Cook feed (preview)
+            </div>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.25)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </div>
         </div>
       </div>
     </div>
