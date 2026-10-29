@@ -353,7 +353,8 @@ export function CookPostDetailScreen({
   // saveFeedRecipe's duplicate-save note in data.ts: nothing server-side
   // blocks a repeat save, so this is the only guard). Deliberately NOT
   // persisted — re-entering this screen (e.g. back then forward again) always
-  // starts fresh, matching finish_feed_recipe_save's own no-dedup design.
+  // starts fresh, independent of save_grouping_from_post's own save history
+  // for this post.
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
