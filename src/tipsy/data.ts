@@ -4591,10 +4591,10 @@ export async function unpostCook(postId: string): Promise<boolean> {
 // grouping_title covers every kind: for kind='recipe' it's server-side
 // coalesced from grouping_snapshot's own top-level title, falling back to
 // parts[0].recipe.title only for snapshots written before the 2a title-parity
-// fix (see post_groupings_v1_5_cutover.md section 2a). No description field
-// exists on this row — get_cook_feed's new return shape doesn't carry one
-// (the old recipe_description column is gone); CookFeedCard stops rendering
-// a description until a later step re-derives one from grouping_snapshot.
+// fix (see post_groupings_v1_5_cutover.md section 2a). grouping_description
+// is recipe-kind only — server-side extracted from parts[0].recipe.description
+// — and null for dish/menu (founder decision, parity restore: the v1 feed
+// card's description line was dropped by mistake in an earlier cutover draft).
 export type CookFeedPost = {
   post_id: string;
   created_at: string;
@@ -4605,6 +4605,7 @@ export type CookFeedPost = {
   photo_source: 'cook' | 'recipe' | null;
   grouping_kind: 'recipe' | 'dish' | 'menu';
   grouping_title: string;
+  grouping_description: string | null;
   poster_id: string;
   poster_display_name: string;
   poster_handle: string;

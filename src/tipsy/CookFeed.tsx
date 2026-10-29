@@ -113,13 +113,10 @@ function NoteLine({ text }: { text: string }) {
 //
 // No inspired-by credit is rendered: CookFeedPost has no such field, because
 // the frozen grouping_snapshot it's extracted from never carried one for the
-// recipe-kind case either. Description rendering is DROPPED for this
-// cutover step (data-layer-only, see CLAUDE.md's Cooking Feed v1.5 entry) —
-// get_cook_feed's new return shape has no description-equivalent column;
-// re-deriving one from grouping_snapshot is out of scope here and flagged
-// for the follow-up UI step.
+// recipe-kind case either.
 function CookFeedCard({ post, onTap }: { post: CookFeedPost; onTap: () => void }) {
   const hasNote = !!(post.note && post.note.trim().length > 0);
+  const hasDescription = !!(post.grouping_description && post.grouping_description.trim().length > 0);
 
   return (
     <button
@@ -147,6 +144,20 @@ function CookFeedCard({ post, onTap }: { post: CookFeedPost; onTap: () => void }
           marginTop: 12,
         }}>
           <img src={post.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+        </div>
+      )}
+
+      {hasDescription && (
+        <div style={{
+          fontFamily: fontSerif,
+          fontStyle: "italic",
+          fontWeight: 300,
+          fontSize: 15,
+          color: "rgba(35,60,0,0.55)",
+          lineHeight: 1.5,
+          marginTop: 12,
+        }}>
+          {post.grouping_description}
         </div>
       )}
 
