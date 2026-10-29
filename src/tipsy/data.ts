@@ -1598,7 +1598,8 @@ export async function getSavedRecipesForCategory(categoryId: string, label: stri
             photo_url,
             photo_version,
             cook_posts (
-              id
+              id,
+              is_posted
             )
           )
         )
@@ -1684,7 +1685,8 @@ export async function getSavedRecipesAll(): Promise<Recipe[]> {
             photo_url,
             photo_version,
             cook_posts (
-              id
+              id,
+              is_posted
             )
           )
         )
@@ -2439,6 +2441,27 @@ export type RecipeSendSnapshot = {
   steps: { title: string; instruction: string }[];
   cook_time: string | null;
   serves: string | null;
+};
+
+// Frozen shape of cook_posts.grouping_snapshot (post_groupings_v1_5.sql) — one
+// part per recipe/freeform item in the grouping. `recipe` and `freeform_text`
+// are mutually exclusive, mirroring grouping_parts' own XOR constraint.
+export type GroupingPartSnapshot = {
+  section: string | null;
+  position: number;
+  recipe: RecipeSendSnapshot | null;
+  freeform_text: string | null;
+};
+
+// `title` MUST be set at write time even for kind='recipe' — groupings.title
+// itself is null for that kind in the DB (falls back to the one part's
+// recipe title), but the frozen snapshot's own top-level title is never
+// allowed to rely on that DB-side fallback. See
+// post_groupings_v1_5_cutover.md section 2a.
+export type GroupingSnapshot = {
+  kind: 'recipe' | 'dish' | 'menu';
+  title: string;
+  parts: GroupingPartSnapshot[];
 };
 
 export type ProfileSearchResult = {
@@ -4051,14 +4074,22 @@ export type CookEvent = {
   // just-in-time; never supabase.storage...getPublicUrl() on this bucket.
   photoPath: string | null;
   photoVersion: number;
-  // Id of this cook's cook_posts row, or null if never posted. One post per
-  // cook_event (DB UNIQUE constraint) — presence alone means "posted."
+  // Id of this cook's LIVE (is_posted=true) cook_posts row, or null if never
+  // posted or currently unposted. One cook_posts row per cook_event (DB
+  // UNIQUE constraint on cook_event_id, not partial on is_posted), so a
+  // never-removed row can sit here with is_posted=false after an unpost —
+  // mapCookEventRow checks is_posted, not just row presence.
   postId: string | null;
 };
 
 function mapCookEventRow(row: any): CookEvent {
+  // A cook_posts row surviving an unpost (is_posted=false) is NOT "posted" —
+  // unpostCook flips a flag rather than deleting the row (post_groupings_v1_5
+  // cutover), so presence alone no longer implies posted; is_posted is the
+  // only reliable signal.
   const postRaw = row.cook_posts;
-  const postId = Array.isArray(postRaw) ? (postRaw[0]?.id ?? null) : (postRaw?.id ?? null);
+  const post = Array.isArray(postRaw) ? postRaw[0] : postRaw;
+  const postId = post?.is_posted ? post.id : null;
   return {
     id: row.id,
     recipeId: row.recipe_id,
@@ -4105,7 +4136,7 @@ export async function loadCookEventsForRecipe(recipeId: string): Promise<CookEve
   try {
     const { data, error } = await supabase
       .from('cook_events')
-      .select('id, recipe_id, cooked_on, score, note, created_at, photo_url, photo_version, cook_posts(id)')
+      .select('id, recipe_id, cooked_on, score, note, created_at, photo_url, photo_version, cook_posts(id, is_posted)')
       .eq('user_id', userId)
       .eq('recipe_id', recipeId)
       .order('cooked_on', { ascending: false });
@@ -4261,22 +4292,34 @@ export async function deleteCookEvent(eventId: string): Promise<boolean> {
 }
 
 // ==================== POST A COOK (public cooking feed) ====================
-// Builds and inserts the ONE cook_posts row for a cook_event. Sequencing is
-// fixed and matters: mint the post id client-side FIRST (the DB CHECK
-// constraint pins cook_posts.photo_url to {user_id}/post-{id}.jpg, and
-// there's no UPDATE policy to patch it in after an insert — same "mint
-// before the copy" precedent as shareRecipeSnapshot/sendRecipeToFriends),
-// THEN copy the display photo (if any) into place, THEN insert the row.
+// Posts a cook_event under its recipe-kind grouping (post_groupings_v1_5.sql
+// — cutover step 1, recipe-kind/n=1 scope only; dish/menu composition has no
+// UI yet). Sequencing is fixed and matters: find-or-create the grouping,
+// mint/reuse the post id FIRST (the DB CHECK constraint pins
+// cook_posts.photo_url to {user_id}/post-{id}.jpg), THEN copy the display
+// photo (if any) into place, THEN write the row.
+//
+// Re-posting: unpostCook (below) flips is_posted to false rather than
+// deleting the row, and cook_posts_cook_event_id_uidx is a plain (non-
+// partial) UNIQUE on cook_event_id — so a row surviving from an earlier
+// post/unpost cycle must be UPDATEd, never re-INSERTed, or this would throw
+// a unique-violation on every re-post. Checked for up front via a lookup on
+// cook_event_id; existingPost's id (not a fresh randomUUID) becomes the
+// photo destination so the still-CHECK-constrained path stays correct.
+// grouping_snapshot/cook_event_id/cooked_on/user_id are locked by
+// cook_posts_column_lock on UPDATE — a re-post only flips the posting-
+// lifecycle columns (is_posted/posted_at/photo_url/photo_source/score/note),
+// never rebuilds the snapshot.
 //
 // Failure handling is deliberately NOT the abort-and-leave-nothing-touched
 // pattern used by deleteCookEvent/deleteSavedRecipe's storage sweeps above.
 // The cook event itself is saved by the caller BEFORE this function is ever
 // called, and must survive regardless of what happens here: any failure
-// (fetch, photo copy, or the insert itself) returns null without touching
-// the cook event. The only cleanup this function does is removing a photo
-// it JUST copied, if the insert that was supposed to reference it then
-// failed — never anything for a photo-copy failure to roll back, since
-// nothing durable existed yet at that point.
+// (fetch, photo copy, or the write itself) returns null without touching the
+// cook event. The only cleanup this function does is removing a photo it
+// JUST copied, if the write that was supposed to reference it then failed —
+// never anything for a photo-copy failure to roll back, since nothing
+// durable existed yet at that point.
 export async function postCook(cookEventId: string): Promise<{ postId: string } | null> {
   const userId = await getCurrentUserId();
   if (!userId) {
@@ -4318,20 +4361,72 @@ export async function postCook(cookEventId: string): Promise<{ postId: string } 
     if (recipeError) throw recipeError;
     if (!recipe) throw new Error('Recipe not found');
 
-    const postId = crypto.randomUUID();
+    // cook_posts_cook_event_id_uidx is UNIQUE (not partial on is_posted) —
+    // a prior post/unpost cycle leaves a row behind that a re-post must
+    // reuse via UPDATE.
+    const { data: existingPost, error: existingPostError } = await supabase
+      .from('cook_posts')
+      .select('id')
+      .eq('cook_event_id', cookEventId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (existingPostError) throw existingPostError;
+
+    const postId = existingPost?.id ?? crypto.randomUUID();
     destPath = `${userId}/post-${postId}.jpg`;
 
-    // Same reconstitution shape as send_recipe_to_friend's p_snapshot — a
-    // future "save this from the feed" step will need it, not just display.
-    const snapshot: RecipeSendSnapshot = {
+    // Find-or-create the user's recipe-kind grouping for this recipe. A
+    // rare duplicate (concurrent posts racing this find) is accepted as
+    // harmless per post_groupings_v1_5_cutover.md — not worth a transaction.
+    let groupingId: string;
+    const { data: existingParts, error: findPartsError } = await supabase
+      .from('grouping_parts')
+      .select('grouping_id, groupings!inner(kind)')
+      .eq('user_id', userId)
+      .eq('recipe_id', eventRow.recipe_id)
+      .eq('groupings.kind', 'recipe')
+      .limit(1);
+    if (findPartsError) throw findPartsError;
+
+    if (existingParts && existingParts.length > 0) {
+      groupingId = (existingParts[0] as any).grouping_id;
+    } else {
+      const { data: newGrouping, error: groupingInsertError } = await supabase
+        .from('groupings')
+        .insert({ user_id: userId, kind: 'recipe' })
+        .select('id')
+        .single();
+      if (groupingInsertError) throw groupingInsertError;
+      groupingId = newGrouping.id;
+
+      // section stays null for recipe-kind parts (grouping_parts_before_write
+      // enforces this); user_id is trigger-stamped from the parent grouping.
+      const { error: partInsertError } = await supabase
+        .from('grouping_parts')
+        .insert({ grouping_id: groupingId, recipe_id: eventRow.recipe_id, section: null, position: 0 });
+      if (partInsertError) throw partInsertError;
+    }
+
+    // Same reconstitution shape as send_recipe_to_friend's p_snapshot, now
+    // nested one level under the grouping's single part.
+    const snapshot: GroupingSnapshot = {
+      kind: 'recipe',
       title: recipe.title,
-      description: recipe.description,
-      ingredients: (recipe.ingredients || [])
-        .sort((a: any, b: any) => a.sort_order - b.sort_order)
-        .map((ing: any) => ({ name: ing.name, quantity: ing.quantity, sort_order: ing.sort_order })),
-      steps: (recipe.steps || []).map((step: RecipeStep) => normalizeStep(step)),
-      cook_time: recipe.cook_time ?? null,
-      serves: recipe.serves ?? null,
+      parts: [{
+        section: null,
+        position: 0,
+        freeform_text: null,
+        recipe: {
+          title: recipe.title,
+          description: recipe.description,
+          ingredients: (recipe.ingredients || [])
+            .sort((a: any, b: any) => a.sort_order - b.sort_order)
+            .map((ing: any) => ({ name: ing.name, quantity: ing.quantity, sort_order: ing.sort_order })),
+          steps: (recipe.steps || []).map((step: RecipeStep) => normalizeStep(step)),
+          cook_time: recipe.cook_time ?? null,
+          serves: recipe.serves ?? null,
+        },
+      }],
     };
 
     // Display photo priority: this cook's own photo, else the recipe's live
@@ -4375,19 +4470,37 @@ export async function postCook(cookEventId: string): Promise<{ postId: string } 
       photoSource = sourceBucket === 'cook-photos-private' ? 'cook' : 'recipe';
     }
 
-    const { error: insertError } = await supabase.from('cook_posts').insert({
-      id: postId,
-      user_id: userId,
-      cook_event_id: cookEventId,
-      recipe_id: eventRow.recipe_id,
-      recipe_snapshot: snapshot,
-      photo_url: photoPath,
-      photo_source: photoSource,
-      score: eventRow.score,
-      note: eventRow.note,
-      cooked_on: eventRow.cooked_on,
-    });
-    if (insertError) throw insertError;
+    if (existingPost?.id) {
+      const { error: updateError } = await supabase
+        .from('cook_posts')
+        .update({
+          is_posted: true,
+          posted_at: new Date().toISOString(),
+          photo_url: photoPath,
+          photo_source: photoSource,
+          score: eventRow.score,
+          note: eventRow.note,
+        })
+        .eq('id', existingPost.id)
+        .eq('user_id', userId);
+      if (updateError) throw updateError;
+    } else {
+      const { error: insertError } = await supabase.from('cook_posts').insert({
+        id: postId,
+        user_id: userId,
+        grouping_id: groupingId,
+        cook_event_id: cookEventId,
+        grouping_snapshot: snapshot,
+        photo_url: photoPath,
+        photo_source: photoSource,
+        is_posted: true,
+        posted_at: new Date().toISOString(),
+        score: eventRow.score,
+        note: eventRow.note,
+        cooked_on: eventRow.cooked_on,
+      });
+      if (insertError) throw insertError;
+    }
 
     return { postId };
   } catch (error) {
@@ -4404,11 +4517,16 @@ export async function postCook(cookEventId: string): Promise<{ postId: string } 
   }
 }
 
-// Removes a post: storage first, then the row, aborting (leaving the row
-// intact) if the storage removal fails — same bias as deleteCookEvent/
-// deleteSavedRecipe's sweeps, for the same reason (an orphaned PUBLIC photo
-// here is exactly the leak this feature's privacy design exists to avoid).
-// Returns true only if a cook_posts row was actually removed.
+// Unposts (does NOT delete) a cook_posts row: removes the public photo
+// FIRST, aborting (leaving is_posted untouched) if that removal fails — same
+// bias as deleteCookEvent/deleteSavedRecipe's sweeps, for the same reason
+// (an orphaned PUBLIC photo here is exactly the leak this feature's privacy
+// design exists to avoid). Only then flips is_posted to false and clears
+// photo_url/photo_source/posted_at — grouping_snapshot/cook_event_id/
+// cooked_on/user_id are locked by cook_posts_column_lock regardless. The row
+// itself survives (post_groupings_v1_5.sql's unique index on cook_event_id
+// is not partial on is_posted) so postCook can find and re-post it later.
+// Returns true only if a cook_posts row was actually updated.
 export async function unpostCook(postId: string): Promise<boolean> {
   const userId = await getCurrentUserId();
   if (!userId) {
@@ -4441,14 +4559,14 @@ export async function unpostCook(postId: string): Promise<boolean> {
 
     const { data, error } = await supabase
       .from('cook_posts')
-      .delete()
+      .update({ is_posted: false, photo_url: null, photo_source: null, posted_at: null })
       .eq('id', postId)
       .eq('user_id', userId)
       .select('id');
     if (error) throw error;
 
     if (!data || data.length === 0) {
-      console.error('Remove post matched 0 rows on the delete itself (concurrent delete?):', postId);
+      console.error('Remove post matched 0 rows on the update itself (concurrent delete?):', postId);
       return false;
     }
 
@@ -4470,6 +4588,13 @@ export async function unpostCook(postId: string): Promise<boolean> {
 // it to a public URL via getPublicUrl() before returning, so this exported
 // type (and every caller, e.g. CookFeed.tsx) still sees a ready-to-render URL
 // exactly as before; nothing downstream of these two functions changes.
+// grouping_title covers every kind: for kind='recipe' it's server-side
+// coalesced from grouping_snapshot's own top-level title, falling back to
+// parts[0].recipe.title only for snapshots written before the 2a title-parity
+// fix (see post_groupings_v1_5_cutover.md section 2a). No description field
+// exists on this row — get_cook_feed's new return shape doesn't carry one
+// (the old recipe_description column is gone); CookFeedCard stops rendering
+// a description until a later step re-derives one from grouping_snapshot.
 export type CookFeedPost = {
   post_id: string;
   created_at: string;
@@ -4478,12 +4603,8 @@ export type CookFeedPost = {
   note: string | null;
   photo_url: string | null;
   photo_source: 'cook' | 'recipe' | null;
-  recipe_title: string;
-  // Added by 20261025000006_get_cook_feed_add_recipe_description.sql,
-  // extracted from the frozen recipe_snapshot the same way recipe_title is.
-  // No inspired-by/credit field exists in that snapshot shape (see that
-  // migration's header), so there is none to add alongside it here.
-  recipe_description: string;
+  grouping_kind: 'recipe' | 'dish' | 'menu';
+  grouping_title: string;
   poster_id: string;
   poster_display_name: string;
   poster_handle: string;
@@ -4510,7 +4631,7 @@ export type CookPostDetail = {
   note: string | null;
   photo_url: string | null;
   photo_source: 'cook' | 'recipe' | null;
-  recipe_snapshot: RecipeSendSnapshot;
+  grouping_snapshot: GroupingSnapshot;
   poster_id: string;
   poster_display_name: string;
   poster_handle: string;
@@ -4575,12 +4696,15 @@ export type SaveFeedRecipeResult = {
 
 // Connection-free save of a posted cook's recipe into the viewer's own
 // library, with "inspired by [poster]" credit — mirrors saveSharedRecipe's
-// shape (plain saveRecipe, no recipe_sends/connection), NOT
-// saveReceivedRecipe's two-party retry-with-existingRecipeId design: there is
-// no recipe_sends-style row here that can get stuck in a partial 'pending'
-// state, so there is nothing to resume from — a failed finish_feed_recipe_save
-// call (step 2) leaves a complete, saved, merely-uncredited recipe, logged
-// and swallowed, same as saveSharedRecipe's own finishError handling.
+// shape (no recipe_sends/connection). The recipe insert, ingredient insert,
+// category assignment, and inspired-by stamping all now happen server-side,
+// atomically, inside save_grouping_from_post (security definer) — this
+// function's own job shrinks to calling that RPC, then resolving the new
+// recipe id (the RPC returns only the grouping id — see
+// post_groupings_v1_5_cutover.md section 5) and copying the photo onto it.
+// The RPC is idempotent (re-saving the same post returns the same grouping
+// id rather than duplicating), matching saveFeedRecipe's own prior no-dedup
+// behavior at the recipe layer.
 //
 // photoUrl is the ALREADY-RESOLVED public URL from CookPostDetail (as
 // returned by getCookPost above) — not re-derived here. recipe-photos is a
@@ -4595,37 +4719,42 @@ export type SaveFeedRecipeResult = {
 // uploadRecipePhoto) — the source is already a finished JPEG; re-encoding it
 // would only cost time and quality for no benefit, same reasoning as
 // copy-received-recipe-photo's raw bucket-to-bucket copy.
+//
+// Photo copy is the ONLY allowed soft-fail here: the RPC call and the
+// recipe-id lookup both throw on failure (nothing durable to leave half-done
+// before the RPC commits), but a photo-copy failure leaves a complete,
+// saved, merely photoless recipe — same convention as the prior version.
 export async function saveFeedRecipe(
   postId: string,
-  snapshot: RecipeSendSnapshot,
   photoUrl: string | null,
-  categoryId?: string,
+  categoryId: string,
 ): Promise<SaveFeedRecipeResult> {
   const userId = await getCurrentUserId();
   if (!userId) {
     throw new Error('No user session');
   }
 
-  const recipeId = await saveRecipe(
-    {
-      id: Date.now(), // unused by saveRecipe — matches the dummy-id convention at other call sites
-      title: snapshot.title,
-      description: snapshot.description,
-      category: '',
-      ingredients: snapshot.ingredients.map((ing) => ({ name: ing.name, qty: ing.quantity })),
-      steps: snapshot.steps, // already normalized {title, instruction} from post time — no normalizeStep()
-      createdAt: new Date().toISOString(),
-    },
-    'manual',
-    categoryId,
-  );
-
-  const { error: finishError } = await supabase.rpc('finish_feed_recipe_save', {
+  const { data: groupingId, error: rpcError } = await supabase.rpc('save_grouping_from_post', {
     p_post_id: postId,
-    p_recipe_id: recipeId,
+    p_category_id: categoryId,
   });
-  if (finishError) {
-    console.error('Error finishing feed recipe save (recipe saved; uncredited):', finishError);
+  if (rpcError) throw rpcError;
+
+  // save_grouping_from_post returns only the grouping id, not the recipe
+  // id(s) it inserted — look them up via grouping_parts. Recipe-kind (n=1)
+  // scope only: exactly one row, ordered by position.
+  const { data: parts, error: partsError } = await supabase
+    .from('grouping_parts')
+    .select('recipe_id')
+    .eq('grouping_id', groupingId)
+    .not('recipe_id', 'is', null)
+    .order('position')
+    .limit(1);
+  if (partsError) throw partsError;
+
+  const recipeId = parts?.[0]?.recipe_id;
+  if (!recipeId) {
+    throw new Error('save_grouping_from_post produced no recipe to copy a photo onto');
   }
 
   let photoCopied = false;

@@ -80,7 +80,7 @@ function Headline({ post }: { post: CookFeedPost }) {
     <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
       <span style={{ fontFamily: fontSans, fontSize: 14, fontWeight: 400, color: C.text, lineHeight: 1.35 }}>
         <span style={{ fontWeight: 600 }}>{post.poster_display_name}</span> cooked{" "}
-        <span style={{ fontWeight: 600 }}>{post.recipe_title}</span>
+        <span style={{ fontWeight: 600 }}>{post.grouping_title}</span>
       </span>
       <span style={{ fontFamily: fontSans, fontSize: 11, fontWeight: 500, color: C.textFaint, flexShrink: 0, whiteSpace: "nowrap" }}>
         {formatRelativeTime(post.created_at)}
@@ -112,13 +112,14 @@ function NoteLine({ text }: { text: string }) {
 // render identically, large; only "no photo at all" renders no photo block.
 //
 // No inspired-by credit is rendered: CookFeedPost has no such field, because
-// the frozen recipe_snapshot it's extracted from (RecipeSendSnapshot) never
-// carried one — see 20261025000006_get_cook_feed_add_recipe_description.sql's
-// header for the full audit. Add it here only if that snapshot shape is
-// deliberately extended later.
+// the frozen grouping_snapshot it's extracted from never carried one for the
+// recipe-kind case either. Description rendering is DROPPED for this
+// cutover step (data-layer-only, see CLAUDE.md's Cooking Feed v1.5 entry) —
+// get_cook_feed's new return shape has no description-equivalent column;
+// re-deriving one from grouping_snapshot is out of scope here and flagged
+// for the follow-up UI step.
 function CookFeedCard({ post, onTap }: { post: CookFeedPost; onTap: () => void }) {
   const hasNote = !!(post.note && post.note.trim().length > 0);
-  const hasDescription = !!(post.recipe_description && post.recipe_description.trim().length > 0);
 
   return (
     <button
@@ -146,20 +147,6 @@ function CookFeedCard({ post, onTap }: { post: CookFeedPost; onTap: () => void }
           marginTop: 12,
         }}>
           <img src={post.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-        </div>
-      )}
-
-      {hasDescription && (
-        <div style={{
-          fontFamily: fontSerif,
-          fontStyle: "italic",
-          fontWeight: 300,
-          fontSize: 15,
-          color: "rgba(35,60,0,0.55)",
-          lineHeight: 1.5,
-          marginTop: 12,
-        }}>
-          {post.recipe_description}
         </div>
       )}
 
@@ -400,7 +387,20 @@ export function CookPostDetailScreen({
     );
   }
 
-  const snapshot = detail.recipe_snapshot;
+  // Recipe-kind (n=1) scope only for this cutover step — grouping_snapshot's
+  // parts can in principle hold a dish/menu shape with no single recipe, but
+  // there's no UI for that yet (see CLAUDE.md's Cooking Feed v1.5 entry), so
+  // this screen still only ever expects parts[0].recipe to be set.
+  const snapshot = detail.grouping_snapshot.parts[0]?.recipe;
+  if (!snapshot) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", background: C.bg, alignItems: "center", justifyContent: "center" }}>
+        <div style={{ fontFamily: fontSerif, fontStyle: "italic", fontSize: 14, color: C.textMuted, textAlign: "center", padding: 24 }}>
+          This post isn't available yet.
+        </div>
+      </div>
+    );
+  }
   const recipe = {
     title: snapshot.title,
     description: snapshot.description,
@@ -424,7 +424,7 @@ export function CookPostDetailScreen({
     setSaveError(false);
 
     try {
-      const result = await saveFeedRecipe(postId, snapshot, detail.photo_url, catKey);
+      const result = await saveFeedRecipe(postId, detail.photo_url, catKey);
 
       if (menuInfo) {
         await addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, result.recipeId);
