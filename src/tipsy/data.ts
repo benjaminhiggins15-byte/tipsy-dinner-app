@@ -4314,12 +4314,17 @@ export async function deleteCookEvent(eventId: string): Promise<boolean> {
 // Failure handling is deliberately NOT the abort-and-leave-nothing-touched
 // pattern used by deleteCookEvent/deleteSavedRecipe's storage sweeps above.
 // The cook event itself is saved by the caller BEFORE this function is ever
-// called, and must survive regardless of what happens here: any failure
-// (fetch, photo copy, or the write itself) returns null without touching the
-// cook event. The only cleanup this function does is removing a photo it
-// JUST copied, if the write that was supposed to reference it then failed —
-// never anything for a photo-copy failure to roll back, since nothing
-// durable existed yet at that point.
+// called, and must survive regardless of what happens here: a fetch or write
+// failure returns null without touching the cook event. Photo copy is the
+// ONLY allowed soft-fail (matching saveFeedRecipe's convention below): its
+// own try/catch means a download/upload failure never aborts the post — the
+// post is still written, just photoless. If an upload errors, the destination
+// is checked once for a file that landed anyway (uploads sometimes succeed
+// server-side despite a client-visible error) before giving up, so a real
+// file isn't orphaned. The only cleanup this function does is removing a
+// photo it JUST copied, if the write that was supposed to reference it then
+// failed — never anything for a photo-copy failure to roll back, since
+// nothing durable existed yet at that point.
 export async function postCook(cookEventId: string): Promise<{ postId: string } | null> {
   const userId = await getCurrentUserId();
   if (!userId) {
@@ -4454,20 +4459,35 @@ export async function postCook(cookEventId: string): Promise<{ postId: string } 
     // off sourceBucket rather than re-deriving from eventRow/recipe so it
     // can never disagree with which bucket the copy actually came from.
     let photoSource: 'cook' | 'recipe' | null = null;
+    // Photo copy is the ONLY allowed soft-fail (see header comment) — isolated
+    // in its own try/catch so a download/upload failure never aborts the post
+    // itself; the post is still written below, just photoless.
     if (sourceBucket && sourcePath) {
-      const { data: photoBlob, error: downloadError } = await supabase.storage
-        .from(sourceBucket)
-        .download(sourcePath);
-      if (downloadError) throw downloadError;
+      try {
+        const { data: photoBlob, error: downloadError } = await supabase.storage
+          .from(sourceBucket)
+          .download(sourcePath);
+        if (downloadError) throw downloadError;
 
-      const { error: uploadError } = await supabase.storage
-        .from('recipe-photos')
-        .upload(destPath, photoBlob, { contentType: 'image/jpeg', upsert: true });
-      if (uploadError) throw uploadError;
+        const { error: uploadError } = await supabase.storage
+          .from('recipe-photos')
+          .upload(destPath, photoBlob, { contentType: 'image/jpeg', upsert: true });
+        if (uploadError) {
+          // Uploads sometimes land server-side even when the client sees an
+          // error (e.g. a 504) — check once before giving up, so a real file
+          // isn't silently orphaned and the post isn't needlessly photoless.
+          const destFile = `post-${postId}.jpg`;
+          const { data: listing } = await supabase.storage.from('recipe-photos').list(userId, { search: destFile });
+          const landedAnyway = listing?.some((f) => f.name === destFile) ?? false;
+          if (!landedAnyway) throw uploadError;
+        }
 
-      photoWasCopied = true;
-      photoPath = destPath;
-      photoSource = sourceBucket === 'cook-photos-private' ? 'cook' : 'recipe';
+        photoWasCopied = true;
+        photoPath = destPath;
+        photoSource = sourceBucket === 'cook-photos-private' ? 'cook' : 'recipe';
+      } catch (photoError) {
+        console.error('Cook-post photo copy failed (post will be saved photoless):', photoError);
+      }
     }
 
     if (existingPost?.id) {
@@ -4772,7 +4792,15 @@ export async function saveFeedRecipe(
       const { error: uploadError } = await supabase.storage
         .from('recipe-photos')
         .upload(destPath, blob, { contentType: 'image/jpeg', upsert: true });
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        // Uploads sometimes land server-side even when the client sees an
+        // error (e.g. a 504) — check once before giving up, so a real file
+        // isn't silently orphaned and the recipe isn't needlessly photoless.
+        const destFile = `${recipeId}.jpg`;
+        const { data: listing } = await supabase.storage.from('recipe-photos').list(userId, { search: destFile });
+        const landedAnyway = listing?.some((f) => f.name === destFile) ?? false;
+        if (!landedAnyway) throw uploadError;
+      }
 
       const { data: publicUrlData } = supabase.storage.from('recipe-photos').getPublicUrl(destPath);
 
