@@ -64,6 +64,10 @@ begin
 
   new.user_id := v_owner;
 
+  -- A recipe_id part must reference a recipe owned by the grouping's own
+  -- owner -- without this, grouping_parts_all_own's RLS check (which only
+  -- validates user_id, trigger-stamped above) would let a caller attach
+  -- someone else's recipe_id into their own grouping.
   if new.recipe_id is not null and not exists (
     select 1 from public.recipes r where r.id = new.recipe_id and r.user_id = v_owner
   ) then
@@ -173,6 +177,8 @@ begin
     raise exception 'post not found or not public';
   end if;
 
+  -- p_category_id ownership was unchecked in an earlier draft -- a caller
+  -- could stamp any user's category id onto their own new recipes.
   if not exists (
     select 1 from public.categories c where c.id = p_category_id and c.user_id = v_caller_id
   ) then
@@ -195,6 +201,23 @@ begin
   for v_part in select * from jsonb_array_elements(v_snapshot->'parts') loop
     if (v_part->'recipe') is not null and v_part->'recipe' <> 'null'::jsonb then
 
+      -- Field-by-field match against today's saveRecipe/saveFeedRecipe
+      -- (src/tipsy/data.ts): user_id, title, description, steps,
+      -- created_at, source('manual') all match exactly.
+      --
+      -- cook_time/serves: today's saveRecipe silently drops both even
+      -- though recipes has the columns and RecipeSendSnapshot carries
+      -- them -- founder decision: persist them here (free, since the
+      -- snapshot already has them); backporting the fix to today's
+      -- saveFeedRecipe/saveReceivedRecipe is separate, later work.
+      --
+      -- Column type note: recipes.cook_time/recipes.serves are
+      -- dashboard-only (no migration declares them), inferred as `text`
+      -- from RecipeSendSnapshot's `string | null` TS type and 3 of 4
+      -- call sites in data.ts. One call site (~data.ts:966-967) types
+      -- them `number | null` instead -- a pre-existing inconsistency in
+      -- app code, not introduced here. Recommend a one-time read-only
+      -- type confirmation before applying (see cutover doc, testing).
       insert into public.recipes (
         user_id, title, description, steps, created_at, source,
         cook_time, serves, inspired_by_id, inspired_by_name
@@ -208,6 +231,11 @@ begin
       )
       returning id into v_new_recipe_id;
 
+      -- sort_order RE-DERIVED from array position (0-based), matching
+      -- saveRecipe's `.map((ing, index) => ({ ..., sort_order: index }))`
+      -- exactly -- any sort_order embedded in the snapshot is discarded,
+      -- same as today. Column types confirmed: ingredients.name/quantity
+      -- are text (free-text, per CLAUDE.md), sort_order is integer.
       insert into public.ingredients (recipe_id, user_id, name, quantity, sort_order)
       select v_new_recipe_id, v_caller_id, ing->>'name', ing->>'quantity', (ord - 1)::int
       from jsonb_array_elements(v_part->'recipe'->'ingredients') with ordinality as t(ing, ord);
@@ -231,6 +259,10 @@ begin
       for v_dish_part in select * from jsonb_array_elements(v_part->'dish'->'parts') loop
         if (v_dish_part->'recipe') is not null and v_dish_part->'recipe' <> 'null'::jsonb then
 
+          -- Same field-by-field mapping, cook_time/serves persistence, and
+          -- column-type caveats as the top-level recipe branch above --
+          -- see its comment for detail; not restated here to avoid two
+          -- copies of the same explanation drifting apart.
           insert into public.recipes (
             user_id, title, description, steps, created_at, source,
             cook_time, serves, inspired_by_id, inspired_by_name
@@ -244,6 +276,8 @@ begin
           )
           returning id into v_new_recipe_id;
 
+          -- sort_order re-derivation: same as the top-level recipe branch
+          -- above -- see its comment for detail.
           insert into public.ingredients (recipe_id, user_id, name, quantity, sort_order)
           select v_new_recipe_id, v_caller_id, ing->>'name', ing->>'quantity', (ord - 1)::int
           from jsonb_array_elements(v_dish_part->'recipe'->'ingredients') with ordinality as t(ing, ord);
