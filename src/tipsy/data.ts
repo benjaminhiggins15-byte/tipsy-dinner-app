@@ -4393,7 +4393,7 @@ export async function postCook(cookEventId: string): Promise<{ postId: string } 
     let groupingId: string;
     const { data: existingParts, error: findPartsError } = await supabase
       .from('grouping_parts')
-      .select('grouping_id, groupings!inner(kind)')
+      .select('grouping_id, groupings!grouping_parts_grouping_id_fkey!inner(kind)')
       .eq('user_id', userId)
       .eq('recipe_id', eventRow.recipe_id)
       .eq('groupings.kind', 'recipe')
