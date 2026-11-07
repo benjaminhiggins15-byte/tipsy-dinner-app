@@ -2444,13 +2444,20 @@ export type RecipeSendSnapshot = {
 };
 
 // Frozen shape of cook_posts.grouping_snapshot (post_groupings_v1_5.sql) — one
-// part per recipe/freeform item in the grouping. `recipe` and `freeform_text`
-// are mutually exclusive, mirroring grouping_parts' own XOR constraint.
+// part per recipe/freeform/dish item in the grouping. `recipe`, `freeform_text`,
+// and `dish` are mutually exclusive, mirroring grouping_parts' own
+// exactly-one-target constraint (20261104000001_menu_contains_dish.sql).
+// `dish` is menu-parts-only, one level deep (its own `parts` never contain a
+// further `dish` key — enforced at write time by grouping_parts_before_write,
+// so no recursive case is needed when reading it back). Optional (not
+// `| null`-required) so existing recipe-kind snapshot literals that predate
+// this field (e.g. postCook's) don't need to be touched.
 export type GroupingPartSnapshot = {
   section: string | null;
   position: number;
   recipe: RecipeSendSnapshot | null;
   freeform_text: string | null;
+  dish?: { kind: 'dish'; title: string; parts: GroupingPartSnapshot[] } | null;
 };
 
 // `title` MUST be set at write time even for kind='recipe' — groupings.title
@@ -4825,6 +4832,681 @@ export async function saveFeedRecipe(
   }
 
   return { recipeId, photoCopied, photoUrl: photoUrlOut, photoVersion: photoVersionOut };
+}
+
+// ==================== DISHES & MENUS ("Plans" — groupings CRUD, reads, cook logging) ====================
+// Dishes/menus have NO category (the save-category picker applies to recipes
+// only — founder decision). "Post publicly" defaults OFF for a logged cook.
+
+export type GroupingKind = 'dish' | 'menu';
+
+// Caller-facing shape for one part when creating/replacing a grouping's
+// contents. Exactly one of recipeId/freeformText/childGroupingId should be
+// set per grouping_parts_exactly_one_target — not re-validated here (the DB
+// trigger is the real guard, same "DB-level guarantee, not app-enforced"
+// posture as handle uniqueness elsewhere in this file).
+export type GroupingPartInput = {
+  section: string | null;
+  recipeId?: string | null;
+  freeformText?: string | null;
+  childGroupingId?: string | null;
+};
+
+// Founder-decided minimum-contents rules: a dish needs a name + at least one
+// recipe (a component); a menu needs a name + at least one dish or recipe (a
+// freeform-only menu doesn't qualify). Checked client-side so the save sheet
+// can reject before ever hitting the DB trigger layer.
+function validateGroupingContents(kind: GroupingKind, title: string, parts: GroupingPartInput[]): string | null {
+  if (!title || !title.trim()) {
+    return `A ${kind} needs a name`;
+  }
+  if (kind === 'dish') {
+    if (!parts.some((p) => !!p.recipeId)) {
+      return 'A dish needs at least one recipe';
+    }
+  } else {
+    if (!parts.some((p) => !!p.recipeId || !!p.childGroupingId)) {
+      return 'A menu needs at least one dish or recipe';
+    }
+  }
+  return null;
+}
+
+// Creates a dish/menu grouping plus its parts, position derived from array
+// order. Throws on validation failure or any DB error (no silent success) —
+// callers (save sheet) are expected to catch and surface the message.
+export async function createGrouping(
+  kind: GroupingKind,
+  title: string,
+  parts: GroupingPartInput[],
+): Promise<string> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    throw new Error('No user session');
+  }
+
+  const validationError = validateGroupingContents(kind, title, parts);
+  if (validationError) {
+    throw new Error(validationError);
+  }
+
+  const { data: grouping, error: groupingError } = await supabase
+    .from('groupings')
+    .insert({ user_id: userId, kind, title: title.trim() })
+    .select('id')
+    .single();
+  if (groupingError) throw groupingError;
+
+  const groupingId = grouping.id as string;
+
+  if (parts.length > 0) {
+    const rows = parts.map((part, index) => ({
+      grouping_id: groupingId,
+      section: part.section,
+      recipe_id: part.recipeId ?? null,
+      freeform_text: part.freeformText ?? null,
+      child_grouping_id: part.childGroupingId ?? null,
+      position: index,
+    }));
+    const { error: partsInsertError } = await supabase.from('grouping_parts').insert(rows);
+    if (partsInsertError) {
+      // Best-effort rollback — a failed parts insert must not leave an empty
+      // orphan grouping behind. Supabase has no cross-statement transaction
+      // control from the client, same caveat updateSavedRecipe documents.
+      await supabase.from('groupings').delete().eq('id', groupingId).eq('user_id', userId);
+      throw partsInsertError;
+    }
+  }
+
+  return groupingId;
+}
+
+// Full parts replace (delete-then-reinsert), preserving order by array index
+// as position — simpler than a diff/patch and matches this grouping's small
+// expected part counts. Throws on validation failure, missing/not-owned
+// grouping, or any DB error.
+export async function updateGrouping(
+  groupingId: string,
+  title: string,
+  parts: GroupingPartInput[],
+): Promise<void> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    throw new Error('No user session');
+  }
+
+  const { data: existing, error: fetchError } = await supabase
+    .from('groupings')
+    .select('kind')
+    .eq('id', groupingId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (fetchError) throw fetchError;
+  if (!existing) throw new Error('Grouping not found');
+
+  const validationError = validateGroupingContents(existing.kind as GroupingKind, title, parts);
+  if (validationError) throw new Error(validationError);
+
+  const { error: titleError } = await supabase
+    .from('groupings')
+    .update({ title: title.trim(), updated_at: new Date().toISOString() })
+    .eq('id', groupingId)
+    .eq('user_id', userId);
+  if (titleError) throw titleError;
+
+  const { error: deleteError } = await supabase
+    .from('grouping_parts')
+    .delete()
+    .eq('grouping_id', groupingId)
+    .eq('user_id', userId);
+  if (deleteError) throw deleteError;
+
+  if (parts.length > 0) {
+    const rows = parts.map((part, index) => ({
+      grouping_id: groupingId,
+      section: part.section,
+      recipe_id: part.recipeId ?? null,
+      freeform_text: part.freeformText ?? null,
+      child_grouping_id: part.childGroupingId ?? null,
+      position: index,
+    }));
+    const { error: partsInsertError } = await supabase.from('grouping_parts').insert(rows);
+    if (partsInsertError) throw partsInsertError;
+  }
+}
+
+// Deletes a dish/menu grouping. grouping_parts cascades automatically
+// (groupings ON DELETE CASCADE); any menu part that embedded this dish via
+// child_grouping_id cascades away too (ON DELETE CASCADE on that column) —
+// see getMenusUsingDish below for the pre-delete warning read. Any posted/
+// unposted cook_posts row pointing at this grouping SURVIVES with
+// grouping_id set to null (ON DELETE SET NULL) — deleting a private grouping
+// must not silently delete a public post about it. Returns boolean, same
+// unchecked-zero-rows convention as deleteSavedRecipe/deleteCookEvent —
+// callers MUST check it.
+export async function deleteGrouping(groupingId: string): Promise<boolean> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot delete grouping: no user session');
+    return false;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('groupings')
+      .delete()
+      .eq('id', groupingId)
+      .eq('user_id', userId)
+      .select('id');
+    if (error) throw error;
+
+    if (!data || data.length === 0) {
+      console.error('Delete grouping matched 0 rows (id/user_id mismatch or already deleted):', groupingId);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error deleting grouping:', error);
+    return false;
+  }
+}
+
+export type MenuUsage = { id: string; title: string | null };
+
+// For the dish-delete warning screen: which of the caller's own menus
+// currently embed this dish via a child_grouping_id part. Deliberately two
+// flat queries rather than a nested embed — grouping_parts has TWO FKs
+// pointing at groupings (grouping_id and child_grouping_id), which PostgREST
+// treats as ambiguous unless the embed is hinted by column name; flat
+// queries sidestep needing to get that hint syntax exactly right.
+export async function getMenusUsingDish(dishId: string): Promise<MenuUsage[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
+
+  try {
+    const { data: parts, error: partsError } = await supabase
+      .from('grouping_parts')
+      .select('grouping_id')
+      .eq('child_grouping_id', dishId)
+      .eq('user_id', userId);
+    if (partsError) throw partsError;
+
+    const menuIds = Array.from(new Set((parts ?? []).map((p) => p.grouping_id)));
+    if (menuIds.length === 0) return [];
+
+    const { data: menus, error: menusError } = await supabase
+      .from('groupings')
+      .select('id, title')
+      .in('id', menuIds)
+      .eq('user_id', userId);
+    if (menusError) throw menusError;
+
+    return menus ?? [];
+  } catch (error) {
+    console.error('Error checking dish usage in menus:', error);
+    return [];
+  }
+}
+
+// ---------- Plan reads (listMyPlans / getPlan) ----------
+
+export type PlanSummary = {
+  id: string;
+  kind: GroupingKind;
+  title: string | null;
+  partCount: number;
+  lastCookedOn: string | null;
+  inspiredByName: string | null;
+};
+
+// Lists the caller's own dishes/menus (never kind='recipe' — those are an
+// internal implementation detail of the single-recipe cook-feed path, not a
+// user-facing "Plan"). inspiredByName is resolved from the credit this
+// grouping's OWN component recipes carry (inspired_by_name, stamped by
+// save_grouping_from_post at save-from-feed time) rather than reading the
+// original poster's cook_posts/profiles row directly — the caller has no RLS
+// access to either (cook_posts is owner-only SELECT; profiles is owner-only
+// SELECT), so the recipe-level credit already stamped onto the caller's own
+// rows is the only readable source of truth for it.
+export async function listMyPlans(): Promise<PlanSummary[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
+
+  try {
+    const { data: groupings, error: groupingsError } = await supabase
+      .from('groupings')
+      .select('id, kind, title, source_post_id, created_at')
+      .eq('user_id', userId)
+      .in('kind', ['dish', 'menu'])
+      .order('created_at', { ascending: false });
+    if (groupingsError) throw groupingsError;
+    if (!groupings || groupings.length === 0) return [];
+
+    const groupingIds = groupings.map((g) => g.id);
+
+    const { data: parts, error: partsError } = await supabase
+      .from('grouping_parts')
+      .select('grouping_id, recipe_id, child_grouping_id')
+      .in('grouping_id', groupingIds);
+    if (partsError) throw partsError;
+
+    const partCountByGrouping = new Map<string, number>();
+    const directRecipeIdsByGrouping = new Map<string, string[]>();
+    const childDishIdsByGrouping = new Map<string, string[]>();
+    for (const part of parts ?? []) {
+      partCountByGrouping.set(part.grouping_id, (partCountByGrouping.get(part.grouping_id) ?? 0) + 1);
+      if (part.recipe_id) {
+        const list = directRecipeIdsByGrouping.get(part.grouping_id) ?? [];
+        list.push(part.recipe_id);
+        directRecipeIdsByGrouping.set(part.grouping_id, list);
+      }
+      if (part.child_grouping_id) {
+        const list = childDishIdsByGrouping.get(part.grouping_id) ?? [];
+        list.push(part.child_grouping_id);
+        childDishIdsByGrouping.set(part.grouping_id, list);
+      }
+    }
+
+    // One level down: recipe ids embedded inside a referenced child dish —
+    // needed only to resolve credit for a saved MENU whose credit lives on a
+    // nested dish's recipe, not a top-level part.
+    const allChildDishIds = Array.from(new Set(Array.from(childDishIdsByGrouping.values()).flat()));
+    const nestedRecipeIdsByChildDish = new Map<string, string[]>();
+    if (allChildDishIds.length > 0) {
+      const { data: childParts, error: childPartsError } = await supabase
+        .from('grouping_parts')
+        .select('grouping_id, recipe_id')
+        .in('grouping_id', allChildDishIds)
+        .not('recipe_id', 'is', null);
+      if (childPartsError) throw childPartsError;
+      for (const part of childParts ?? []) {
+        const list = nestedRecipeIdsByChildDish.get(part.grouping_id) ?? [];
+        list.push(part.recipe_id);
+        nestedRecipeIdsByChildDish.set(part.grouping_id, list);
+      }
+    }
+
+    // Credit lookup only matters for groupings actually saved from a feed
+    // post (source_post_id set) — gather every candidate recipe id (direct
+    // parts + one level into any embedded dish) across those only.
+    const creditCandidateIds = new Set<string>();
+    for (const g of groupings) {
+      if (!g.source_post_id) continue;
+      for (const id of directRecipeIdsByGrouping.get(g.id) ?? []) creditCandidateIds.add(id);
+      for (const dishId of childDishIdsByGrouping.get(g.id) ?? []) {
+        for (const id of nestedRecipeIdsByChildDish.get(dishId) ?? []) creditCandidateIds.add(id);
+      }
+    }
+
+    const inspiredByNameByRecipe = new Map<string, string>();
+    if (creditCandidateIds.size > 0) {
+      const { data: recipes, error: recipesError } = await supabase
+        .from('recipes')
+        .select('id, inspired_by_name')
+        .in('id', Array.from(creditCandidateIds))
+        .eq('user_id', userId)
+        .not('inspired_by_name', 'is', null);
+      if (recipesError) throw recipesError;
+      for (const r of recipes ?? []) {
+        inspiredByNameByRecipe.set(r.id, r.inspired_by_name as string);
+      }
+    }
+
+    const { data: cookPosts, error: cookPostsError } = await supabase
+      .from('cook_posts')
+      .select('grouping_id, cooked_on')
+      .in('grouping_id', groupingIds)
+      .eq('user_id', userId)
+      .order('cooked_on', { ascending: false });
+    if (cookPostsError) throw cookPostsError;
+
+    const lastCookedByGrouping = new Map<string, string>();
+    for (const post of cookPosts ?? []) {
+      if (!post.grouping_id) continue;
+      if (!lastCookedByGrouping.has(post.grouping_id)) {
+        lastCookedByGrouping.set(post.grouping_id, post.cooked_on);
+      }
+    }
+
+    return groupings.map((g) => {
+      let inspiredByName: string | null = null;
+      if (g.source_post_id) {
+        for (const id of directRecipeIdsByGrouping.get(g.id) ?? []) {
+          const name = inspiredByNameByRecipe.get(id);
+          if (name) { inspiredByName = name; break; }
+        }
+        if (!inspiredByName) {
+          outer: for (const dishId of childDishIdsByGrouping.get(g.id) ?? []) {
+            for (const id of nestedRecipeIdsByChildDish.get(dishId) ?? []) {
+              const name = inspiredByNameByRecipe.get(id);
+              if (name) { inspiredByName = name; break outer; }
+            }
+          }
+        }
+      }
+
+      return {
+        id: g.id,
+        kind: g.kind,
+        title: g.title,
+        partCount: partCountByGrouping.get(g.id) ?? 0,
+        lastCookedOn: lastCookedByGrouping.get(g.id) ?? null,
+        inspiredByName,
+      };
+    });
+  } catch (error) {
+    console.error('Error listing plans:', error);
+    throw error;
+  }
+}
+
+export type PlanPart = {
+  id: string;
+  section: string | null;
+  position: number;
+  recipe: { id: string; title: string } | null;
+  freeformText: string | null;
+  childDish: { id: string; title: string | null; parts: PlanPart[] } | null;
+};
+
+export type PlanCook = {
+  postId: string;
+  cookedOn: string;
+  score: number | null;
+  isPosted: boolean;
+};
+
+export type PlanDetail = {
+  id: string;
+  kind: GroupingKind;
+  title: string | null;
+  parts: PlanPart[];
+  cooks: PlanCook[];
+};
+
+// One level of dish expansion only — menu -> dish -> recipe/freeform is the
+// schema's structural ceiling (grouping_parts_before_write forbids a dish's
+// own parts from holding a further child_grouping_id), so the recursion here
+// can never actually go past depth 2.
+async function getGroupingPartsExpanded(groupingId: string, userId: string): Promise<PlanPart[]> {
+  const { data: rows, error } = await supabase
+    .from('grouping_parts')
+    .select('id, section, position, recipe_id, freeform_text, child_grouping_id, recipes(id, title)')
+    .eq('grouping_id', groupingId)
+    .order('position');
+  if (error) throw error;
+
+  const parts: PlanPart[] = [];
+  for (const row of rows ?? []) {
+    let childDish: PlanPart['childDish'] = null;
+    if (row.child_grouping_id) {
+      const { data: dish, error: dishError } = await supabase
+        .from('groupings')
+        .select('id, title')
+        .eq('id', row.child_grouping_id)
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (dishError) throw dishError;
+      if (dish) {
+        const dishParts = await getGroupingPartsExpanded(dish.id, userId);
+        childDish = { id: dish.id, title: dish.title, parts: dishParts };
+      }
+    }
+    const recipeRow = row.recipes as unknown as { id: string; title: string } | null;
+    parts.push({
+      id: row.id,
+      section: row.section,
+      position: row.position,
+      recipe: recipeRow ? { id: recipeRow.id, title: recipeRow.title } : null,
+      freeformText: row.freeform_text,
+      childDish,
+    });
+  }
+  return parts;
+}
+
+// Full detail for a plan's own screen: parts by section (dish parts expanded
+// one level so a menu row can render its embedded dish's own components
+// inline), plus this grouping's past cooks (date/score/posted), newest
+// first.
+export async function getPlan(groupingId: string): Promise<PlanDetail | null> {
+  const userId = await getCurrentUserId();
+  if (!userId) return null;
+
+  try {
+    const { data: grouping, error: groupingError } = await supabase
+      .from('groupings')
+      .select('id, kind, title')
+      .eq('id', groupingId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (groupingError) throw groupingError;
+    if (!grouping) return null;
+
+    const parts = await getGroupingPartsExpanded(groupingId, userId);
+
+    const { data: cookRows, error: cookError } = await supabase
+      .from('cook_posts')
+      .select('id, cooked_on, score, is_posted')
+      .eq('grouping_id', groupingId)
+      .eq('user_id', userId)
+      .order('cooked_on', { ascending: false });
+    if (cookError) throw cookError;
+
+    const cooks: PlanCook[] = (cookRows ?? []).map((row) => ({
+      postId: row.id,
+      cookedOn: row.cooked_on,
+      score: row.score,
+      isPosted: row.is_posted,
+    }));
+
+    return { id: grouping.id, kind: grouping.kind as GroupingKind, title: grouping.title, parts, cooks };
+  } catch (error) {
+    console.error('Error loading plan:', error);
+    throw error;
+  }
+}
+
+// ---------- Logging a cook of a dish/menu ----------
+
+// Builds one grouping_parts row's worth of RecipeSendSnapshot, same
+// reconstitution shape postCook already builds inline for the recipe-kind
+// case — factored out here so the nested dish-in-menu case (below) can reuse
+// it instead of duplicating the ingredient-sort/step-normalize logic.
+async function buildRecipeSendSnapshot(recipeId: string, userId: string): Promise<RecipeSendSnapshot> {
+  const { data: recipe, error } = await supabase
+    .from('recipes')
+    .select('title, description, steps, cook_time, serves, ingredients(name, quantity, sort_order)')
+    .eq('id', recipeId)
+    .eq('user_id', userId)
+    .single();
+  if (error) throw error;
+
+  return {
+    title: recipe.title,
+    description: recipe.description,
+    ingredients: ((recipe.ingredients as any[]) || [])
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((ing) => ({ name: ing.name, quantity: ing.quantity, sort_order: ing.sort_order })),
+    steps: ((recipe.steps as RecipeStep[]) || []).map((step) => normalizeStep(step)),
+    cook_time: recipe.cook_time ?? null,
+    serves: recipe.serves ?? null,
+  };
+}
+
+// Reads a grouping's CURRENT live parts and freezes them into
+// GroupingPartSnapshot[], one level of dish expansion for a menu part that
+// embeds a dish (grouping_parts_before_write forbids going deeper) — the
+// exact shape documented in 20261104000001_menu_contains_dish.sql's
+// save_grouping_from_post header comment.
+async function buildGroupingPartSnapshots(groupingId: string, userId: string): Promise<GroupingPartSnapshot[]> {
+  const { data: rows, error } = await supabase
+    .from('grouping_parts')
+    .select('section, position, recipe_id, freeform_text, child_grouping_id')
+    .eq('grouping_id', groupingId)
+    .order('position');
+  if (error) throw error;
+
+  const parts: GroupingPartSnapshot[] = [];
+  for (const row of rows ?? []) {
+    if (row.recipe_id) {
+      parts.push({
+        section: row.section,
+        position: row.position,
+        freeform_text: null,
+        dish: null,
+        recipe: await buildRecipeSendSnapshot(row.recipe_id, userId),
+      });
+    } else if (row.child_grouping_id) {
+      const { data: dish, error: dishError } = await supabase
+        .from('groupings')
+        .select('id, title')
+        .eq('id', row.child_grouping_id)
+        .eq('user_id', userId)
+        .single();
+      if (dishError) throw dishError;
+      const dishParts = await buildGroupingPartSnapshots(dish.id, userId);
+      parts.push({
+        section: row.section,
+        position: row.position,
+        recipe: null,
+        freeform_text: null,
+        dish: { kind: 'dish', title: dish.title ?? '', parts: dishParts },
+      });
+    } else {
+      parts.push({
+        section: row.section,
+        position: row.position,
+        recipe: null,
+        freeform_text: row.freeform_text,
+        dish: null,
+      });
+    }
+  }
+  return parts;
+}
+
+async function buildGroupingSnapshot(groupingId: string, userId: string): Promise<GroupingSnapshot> {
+  const { data: grouping, error: groupingError } = await supabase
+    .from('groupings')
+    .select('id, kind, title')
+    .eq('id', groupingId)
+    .eq('user_id', userId)
+    .single();
+  if (groupingError) throw groupingError;
+
+  const parts = await buildGroupingPartSnapshots(groupingId, userId);
+
+  return {
+    kind: grouping.kind as 'dish' | 'menu',
+    title: grouping.title ?? '',
+    parts,
+  };
+}
+
+export type LogGroupingCookInput = {
+  cookedOn: string;
+  score: number | null;
+  note: string | null;
+  isPosted: boolean;
+  photoFile?: Blob | null;
+};
+
+export type LogGroupingCookResult = {
+  postId: string;
+};
+
+// Dish/menu analog of postCook — but unlike the recipe-kind path (which logs
+// a cook_events row first, then posts it separately later), a dish/menu has
+// no cook_events row to anchor to, so this does both in one call: freezes
+// the grouping's CURRENT parts into a GroupingSnapshot, optionally uploads a
+// cook photo to cook-photos-private, and (if is_posted) copies that same
+// blob into the public recipe-photos path — then inserts cook_posts. Photo
+// steps are the ONLY allowed soft-fail (same discipline as postCook): a
+// storage failure leaves the cook logged, just photoless. Unposting/
+// re-posting an already-logged dish/menu cook reuses unpostCook/postCook's
+// sibling as-is — unpostCook is already generic over any cook_posts row
+// (keyed on id/user_id, touches only columns the column-lock trigger permits
+// regardless of kind) and is NOT forked here.
+export async function logGroupingCook(
+  groupingId: string,
+  input: LogGroupingCookInput,
+): Promise<LogGroupingCookResult | null> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    console.error('Cannot log cook: no user session');
+    return null;
+  }
+
+  const postId = crypto.randomUUID();
+  const privatePath = `${userId}/post-${postId}.jpg`;
+  const publicPath = `${userId}/post-${postId}.jpg`;
+
+  let privatePhotoUploaded = false;
+  let publicPhotoCopied = false;
+
+  try {
+    const snapshot = await buildGroupingSnapshot(groupingId, userId);
+
+    if (input.photoFile) {
+      try {
+        const { error: uploadError } = await supabase.storage
+          .from('cook-photos-private')
+          .upload(privatePath, input.photoFile, { contentType: 'image/jpeg', upsert: true });
+        if (uploadError) throw uploadError;
+        privatePhotoUploaded = true;
+
+        if (input.isPosted) {
+          // Uploaded from the same in-memory blob rather than a
+          // download-then-upload copy of the private object — we already
+          // hold the bytes from the upload above, so there's no source
+          // object to round-trip through; both uploads are upsert:true
+          // against the same blob, so the result is identical either way.
+          const { error: copyUploadError } = await supabase.storage
+            .from('recipe-photos')
+            .upload(publicPath, input.photoFile, { contentType: 'image/jpeg', upsert: true });
+          if (copyUploadError) {
+            const destFile = `post-${postId}.jpg`;
+            const { data: listing } = await supabase.storage.from('recipe-photos').list(userId, { search: destFile });
+            const landedAnyway = listing?.some((f) => f.name === destFile) ?? false;
+            if (!landedAnyway) throw copyUploadError;
+          }
+          publicPhotoCopied = true;
+        }
+      } catch (photoError) {
+        console.error('Grouping-cook photo upload failed (cook will be saved photoless):', photoError);
+      }
+    }
+
+    const { error: insertError } = await supabase.from('cook_posts').insert({
+      id: postId,
+      user_id: userId,
+      grouping_id: groupingId,
+      cook_event_id: null,
+      grouping_snapshot: snapshot,
+      private_photo_path: privatePhotoUploaded ? privatePath : null,
+      photo_url: publicPhotoCopied ? publicPath : null,
+      photo_source: privatePhotoUploaded ? 'cook' : null,
+      is_posted: input.isPosted,
+      posted_at: input.isPosted ? new Date().toISOString() : null,
+      score: input.score,
+      note: input.note,
+      cooked_on: input.cookedOn,
+    });
+    if (insertError) throw insertError;
+
+    return { postId };
+  } catch (error) {
+    console.error('Error logging grouping cook (nothing was saved):', error);
+    if (publicPhotoCopied) {
+      try { await supabase.storage.from('recipe-photos').remove([publicPath]); } catch { /* best-effort cleanup only */ }
+    }
+    if (privatePhotoUploaded) {
+      try { await supabase.storage.from('cook-photos-private').remove([privatePath]); } catch { /* best-effort cleanup only */ }
+    }
+    return null;
+  }
 }
 
 // ==================== STEP-TITLE BACKFILL (one-time, already run) ====================
