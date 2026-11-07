@@ -4633,6 +4633,11 @@ export type CookFeedPost = {
   grouping_kind: 'recipe' | 'dish' | 'menu';
   grouping_title: string;
   grouping_description: string | null;
+  // dish/menu only (null for kind='recipe') — see feed_parts_preview.sql for
+  // the exact preview rules (dish: first 3 parts incl. freeform; menu: first
+  // 2 dish-or-recipe labels, freeform excluded) and remaining-count math.
+  parts_preview: string[] | null;
+  parts_remaining: number | null;
   poster_id: string;
   poster_display_name: string;
   poster_handle: string;

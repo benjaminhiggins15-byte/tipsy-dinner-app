@@ -76,7 +76,12 @@ begin
             select array_agg(label order by ord) from (
               select coalesce(part -> 'dish' ->> 'title', part -> 'recipe' ->> 'title') as label, ord
               from jsonb_array_elements(cp.grouping_snapshot -> 'parts') with ordinality as t(part, ord)
-              where (part -> 'dish') is not null or (part -> 'recipe') is not null
+              -- ->> (not ->) deliberately: a freeform part's `recipe`/`dish` keys
+              -- are present but set to JSON null (GroupingPartSnapshot always
+              -- serializes them), and `jsonb -> key` treats "present with JSON
+              -- null" as non-NULL. `->>` collapses JSON null to SQL NULL, so
+              -- freeform parts are correctly excluded here.
+              where (part ->> 'dish') is not null or (part ->> 'recipe') is not null
               order by ord
               limit 2
             ) s
@@ -88,7 +93,8 @@ begin
             (select count(*)::int from jsonb_array_elements(cp.grouping_snapshot -> 'parts')) - 3)
           when 'menu' then greatest(0,
             (select count(*)::int from jsonb_array_elements(cp.grouping_snapshot -> 'parts') as t(part)
-             where (t.part -> 'dish') is not null or (t.part -> 'recipe') is not null) - 2)
+             -- Same ->> fix as the preview CTE above -- see that comment.
+             where (t.part ->> 'dish') is not null or (t.part ->> 'recipe') is not null) - 2)
           else null
         end as parts_remaining
     ) pv on true
