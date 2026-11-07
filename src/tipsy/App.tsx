@@ -15,6 +15,7 @@ import AuthFlow from "./AuthFlow";
 import SharedRecipeView from "./SharedRecipeView";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
 import Home, { ReceivedPending, ReceivedRecipeView, SuggestionDetailView, DiscoveredDetailView } from "./Home";
+import LogCookTypePicker from "./LogCookTypePicker";
 import { CookFeedScreen, CookPostDetailScreen, type CookFeedState } from "./CookFeed";
 import { supabase } from "../lib/supabase";
 import { logEvent, isAccountDeletionInFlight } from "../lib/events";
@@ -315,8 +316,8 @@ type Screen =
   | { name: "editcategory"; categoryKey: string }
   | { name: "categories" }
   | { name: "recipes"; categoryKey: string; categoryLabel: string }
-  | { name: "allrecipes" }
-  | { name: "recipe"; recipe: Recipe; categoryLabel: string; categoryKey: string }
+  | { name: "allrecipes"; pickForLog?: boolean }
+  | { name: "recipe"; recipe: Recipe; categoryLabel: string; categoryKey: string; autoOpenLog?: boolean }
   | { name: "grocerylist" }
   | { name: "occasions" }
   | { name: "menus"; occasionId: string; occasionName: string }
@@ -326,7 +327,7 @@ type Screen =
   | { name: "profileedit"; fieldKey: "email" | "palate" | "inspiration" | "table" | "constraints" | "identity" | "drinks" }
   | { name: "accountPrivacy" }
   | { name: "deleteAccountConfirm" }
-  | { name: "placeholder"; title: string }
+  | { name: "placeholder"; title: string; kind?: "dish" | "menu"; recipeId?: string }
   | { name: "home" }
   | { name: "receivedPending"; items: PendingReceivedRecipe[] }
   | { name: "receivedRecipe"; item: PendingReceivedRecipe; newCategory?: { key: string; label: string } }
@@ -508,6 +509,7 @@ function renderScreen(
         back={back}
         recipesByCategory={recipesByCategory ?? {}}
         ensureRecipesLoaded={ensureRecipesLoaded}
+        pickForLog={s.pickForLog}
       />
     );
     case "recipe": return (
@@ -521,6 +523,7 @@ function renderScreen(
         transferToRecipeChat={transferToRecipeChat}
         profile={profile}
         onUpdate={onUpdate}
+        autoOpenLog={s.autoOpenLog}
       />
     );
     case "grocerylist": return <GroceryList push={push} back={back} />;
@@ -559,7 +562,7 @@ function renderScreen(
     case "profileedit": return <ProfileEdit fieldKey={s.fieldKey} back={back} profile={profile || null} onUpdate={onUpdate || (async () => {})} />;
     case "accountPrivacy": return <AccountPrivacy back={back} openDeleteAccount={() => push({ name: "deleteAccountConfirm" })} />;
     case "deleteAccountConfirm": return <DeleteAccountConfirm back={back} onSignOut={onSignOut!} profile={profile || null} />;
-    case "placeholder": return <Placeholder title={s.title} back={back} />;
+    case "placeholder": return <Placeholder title={s.title} back={back} kind={s.kind} recipeId={s.recipeId} />;
     case "home": return <Home profile={profile || null} push={push} seedBuildFromChip={seedBuildFromChip || (() => {})} goToReceivedShelf={goToReceivedShelf || (() => {})} switchToTab={switchToTab || (() => {})} />;
     case "receivedPending": return <ReceivedPending items={s.items} back={back} push={push} />;
     case "receivedRecipe": return (
@@ -2752,11 +2755,13 @@ function AllRecipes({
   back,
   recipesByCategory,
   ensureRecipesLoaded,
+  pickForLog,
 }: {
   push: (s: Screen) => void;
   back: () => void;
   recipesByCategory: Record<string, Recipe[]>;
   ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void>;
+  pickForLog?: boolean;
 }) {
   const recipes = recipesByCategory["__all__"] ?? [];
   // Resets to "Recently added" on every visit — deliberately not persisted.
@@ -2917,7 +2922,7 @@ function AllRecipes({
         {sortedRecipes.map((r) => (
           <div
             key={r.savedId}
-            onClick={() => push({ name: "recipe", recipe: r, categoryLabel: r.category, categoryKey: r.categoryKey ?? "" })}
+            onClick={() => push({ name: "recipe", recipe: r, categoryLabel: r.category, categoryKey: r.categoryKey ?? "", autoOpenLog: pickForLog })}
             style={{
               height: 80,
               background: "rgba(35,60,0,0.06)",
@@ -3105,6 +3110,7 @@ function RecipeCard({
   transferToRecipeChat,
   profile,
   onUpdate,
+  autoOpenLog,
 }: {
   recipe: Recipe;
   categoryLabel: string;
@@ -3115,6 +3121,7 @@ function RecipeCard({
   transferToRecipeChat?: (recipe: SavedRecipe, question: string, onCollisionCancel: () => void) => void;
   profile?: ProfileType | null;
   onUpdate?: (updates: Partial<ProfileType>) => Promise<void>;
+  autoOpenLog?: boolean;
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps" | "history" | "pairings">("ingredients");
   const [shareConfirm, setShareConfirm] = useState(false);
@@ -3139,6 +3146,7 @@ function RecipeCard({
   const [cropFile, setCropFile] = useState<File | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const [showLogSheet, setShowLogSheet] = useState(false);
+  const [showLogTypePicker, setShowLogTypePicker] = useState(false);
   const [logMode, setLogMode] = useState<"create" | "edit">("create");
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [logDate, setLogDate] = useState("");
@@ -3445,6 +3453,15 @@ function RecipeCard({
     clearPendingCookPhoto();
     setShowLogSheet(true);
   };
+
+  // Home's "+ Log cook" -> picker -> choose-a-recipe path arrives here via a
+  // freshly pushed "recipe" screen carrying autoOpenLog — open today's
+  // unchanged Log a cook sheet immediately rather than requiring a second tap.
+  useEffect(() => {
+    if (!autoOpenLog) return;
+    openLogSheetForCreate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenLog]);
 
   const openLogSheetForEdit = (event: CookEvent) => {
     setLogMode("edit");
@@ -4287,7 +4304,7 @@ function RecipeCard({
               the description above). */}
           {editable && (
             <button
-              onClick={openLogSheetForCreate}
+              onClick={() => setShowLogTypePicker(true)}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -4998,6 +5015,28 @@ function RecipeCard({
           </div>
         </div>
       )}
+
+      <LogCookTypePicker
+        open={showLogTypePicker}
+        onClose={() => setShowLogTypePicker(false)}
+        preselectedRecipeTitle={recipe.title}
+        onPickRecipe={() => {
+          setShowLogTypePicker(false);
+          openLogSheetForCreate();
+        }}
+        onPickDish={() => {
+          setShowLogTypePicker(false);
+          push({ name: "placeholder", title: "Dish (preview)", kind: "dish", recipeId: recipe.savedId != null ? String(recipe.savedId) : undefined });
+        }}
+        onPickMenu={() => {
+          setShowLogTypePicker(false);
+          push({ name: "placeholder", title: "Menu (preview)", kind: "menu", recipeId: recipe.savedId != null ? String(recipe.savedId) : undefined });
+        }}
+        onStartFromSaved={() => {
+          setShowLogTypePicker(false);
+          push({ name: "placeholder", title: "Saved dishes & menus" });
+        }}
+      />
 
       {/* Log-cook create/edit sheet */}
       {showLogSheet && (
@@ -6792,7 +6831,7 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
 }
 
 /* ---------------- Placeholder ---------------- */
-function Placeholder({ title, back }: { title: string; back: () => void }) {
+function Placeholder({ title, back, kind, recipeId }: { title: string; back: () => void; kind?: "dish" | "menu"; recipeId?: string }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div style={{ padding: "32px 24px 14px", flexShrink: 0 }}>
@@ -6813,6 +6852,13 @@ function Placeholder({ title, back }: { title: string; back: () => void }) {
         <div style={{ fontSize: 12, color: "#185FA5", letterSpacing: "0.04em" }}>
           we're still simmering this one.
         </div>
+        {/* dev-only: surfaces the handoff payload so step 2a can be verified
+            locally ahead of step 2b actually building this screen. */}
+        {(kind || recipeId) && (
+          <div style={{ fontSize: 11, color: "#185FA5", letterSpacing: "0.04em", fontFamily: "monospace" }}>
+            {kind ? `kind: ${kind}` : ""}{kind && recipeId ? " · " : ""}{recipeId ? `recipeId: ${recipeId}` : ""}
+          </div>
+        )}
       </div>
     </div>
   );

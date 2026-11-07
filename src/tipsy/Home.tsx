@@ -29,6 +29,7 @@ import watermarkSquare from "../Logos/watermark_square.png";
 import watermarkCircle from "../Logos/watermark_circle.png";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
+import LogCookTypePicker from "./LogCookTypePicker";
 
 // ScreenStage renders the outgoing screen in a separate overlay-layer JSX
 // position during transitions (App.tsx), which mounts a fresh
@@ -47,6 +48,8 @@ type HomePush = (
     | { name: "discoveredDetail"; recipe: DiscoveredRecipe; newCategory?: { key: string; label: string } }
     | { name: "newcategoryfordiscovered"; recipe: DiscoveredRecipe }
     | { name: "cookFeed" }
+    | { name: "allrecipes"; pickForLog?: boolean }
+    | { name: "placeholder"; title: string; kind?: "dish" | "menu"; recipeId?: string }
 ) => void;
 
 type ProfileType = {
@@ -118,6 +121,7 @@ export default function Home({
   // shared/lifted state; each fetch is separate on purpose. getPendingReceivedRecipes
   // already orders by created_at descending, so items[0] is the most recent.
   const [pendingSummary, setPendingSummary] = useState<{ title: string; senderName: string; count: number } | null>(null);
+  const [showLogTypePicker, setShowLogTypePicker] = useState(false);
   // Discovered shelf (public-share chunk 3). Recorded as pending here too,
   // not only in Onboarding's Loader — this is the "View in app" path for an
   // already-signed-in user re-opening the same share link, where the token
@@ -235,8 +239,58 @@ export default function Home({
         >
           {greetingForNow()}{firstName ? `, ${firstName}` : ""}
         </div>
-        <img src={watermarkCircle} alt="Tipsy Dinner" style={{ height: 36, width: "auto", display: "block" }} />
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button
+            onClick={() => setShowLogTypePicker(true)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              height: 44,
+              padding: "0 16px",
+              borderRadius: 999,
+              background: "#233C00",
+              border: "none",
+              color: "#FEE7C0",
+              fontFamily: fontSans,
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              cursor: "pointer",
+              flexShrink: 0,
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FEE7C0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Log cook
+          </button>
+          <img src={watermarkCircle} alt="Tipsy Dinner" style={{ height: 36, width: "auto", display: "block" }} />
+        </div>
       </div>
+
+      <LogCookTypePicker
+        open={showLogTypePicker}
+        onClose={() => setShowLogTypePicker(false)}
+        onPickRecipe={() => {
+          setShowLogTypePicker(false);
+          push({ name: "allrecipes", pickForLog: true });
+        }}
+        onPickDish={() => {
+          setShowLogTypePicker(false);
+          push({ name: "placeholder", title: "Dish (preview)", kind: "dish" });
+        }}
+        onPickMenu={() => {
+          setShowLogTypePicker(false);
+          push({ name: "placeholder", title: "Menu (preview)", kind: "menu" });
+        }}
+        onStartFromSaved={() => {
+          setShowLogTypePicker(false);
+          push({ name: "placeholder", title: "Saved dishes & menus" });
+        }}
+      />
 
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: 16 }}>
         <div
