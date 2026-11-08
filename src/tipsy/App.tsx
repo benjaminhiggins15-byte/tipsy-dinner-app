@@ -17,6 +17,7 @@ import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
 import Home, { ReceivedPending, ReceivedRecipeView, SuggestionDetailView, DiscoveredDetailView } from "./Home";
 import LogCookTypePicker from "./LogCookTypePicker";
 import ChooseDishOrMenu from "./ChooseDishOrMenu";
+import DishScreen from "./DishScreen";
 import { CookFeedScreen, CookPostDetailScreen, type CookFeedState } from "./CookFeed";
 import { supabase } from "../lib/supabase";
 import { logEvent, isAccountDeletionInFlight } from "../lib/events";
@@ -330,6 +331,7 @@ type Screen =
   | { name: "deleteAccountConfirm" }
   | { name: "placeholder"; title: string; kind?: "dish" | "menu"; recipeId?: string; groupingId?: string }
   | { name: "chooseDishOrMenu" }
+  | { name: "dishScreen"; groupingId?: string; recipe?: Recipe }
   | { name: "home" }
   | { name: "receivedPending"; items: PendingReceivedRecipe[] }
   | { name: "receivedRecipe"; item: PendingReceivedRecipe; newCategory?: { key: string; label: string } }
@@ -389,6 +391,7 @@ function screenKey(s: Screen): string {
     case "deleteAccountConfirm": return "deleteAccountConfirm";
     case "placeholder": return `placeholder:${s.title}`;
     case "chooseDishOrMenu": return "chooseDishOrMenu";
+    case "dishScreen": return s.groupingId ? `dishScreen:${s.groupingId}` : `dishScreen:new:${s.recipe?.savedId ?? ""}`;
     case "home": return "home";
     case "receivedPending": return "receivedPending";
     case "receivedRecipe": return `receivedRecipe:${s.item.sendId}`;
@@ -567,6 +570,7 @@ function renderScreen(
     case "deleteAccountConfirm": return <DeleteAccountConfirm back={back} onSignOut={onSignOut!} profile={profile || null} />;
     case "placeholder": return <Placeholder title={s.title} back={back} kind={s.kind} recipeId={s.recipeId} groupingId={s.groupingId} />;
     case "chooseDishOrMenu": return <ChooseDishOrMenu back={back} push={push} />;
+    case "dishScreen": return <DishScreen back={back} push={push} groupingId={s.groupingId} seedRecipe={s.recipe} recipesByCategory={recipesByCategory ?? {}} ensureRecipesLoaded={ensureRecipesLoaded} />;
     case "home": return <Home profile={profile || null} push={push} seedBuildFromChip={seedBuildFromChip || (() => {})} goToReceivedShelf={goToReceivedShelf || (() => {})} switchToTab={switchToTab || (() => {})} />;
     case "receivedPending": return <ReceivedPending items={s.items} back={back} push={push} />;
     case "receivedRecipe": return (
@@ -5030,7 +5034,7 @@ function RecipeCard({
         }}
         onPickDish={() => {
           setShowLogTypePicker(false);
-          push({ name: "placeholder", title: "Dish (preview)", kind: "dish", recipeId: recipe.savedId != null ? String(recipe.savedId) : undefined });
+          push({ name: "dishScreen", recipe });
         }}
         onPickMenu={() => {
           setShowLogTypePicker(false);

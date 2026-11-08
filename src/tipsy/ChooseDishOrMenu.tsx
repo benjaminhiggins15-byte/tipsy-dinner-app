@@ -3,11 +3,12 @@ import { listMyPlans, type PlanSummary } from "./data";
 import { DishIcon, MenuIcon, ChevronIcon } from "./LogCookTypePicker";
 
 // Dishes & Menus v1.5 step 2b — reached only via LogCookTypePicker's "Start
-// from a saved dish or menu" link. Rows push the existing dev-only
-// "placeholder" screen (same one step 2a wired for a fresh dish/menu) but
-// carrying groupingId instead of recipeId — step 3 builds the real
-// dish/menu Log Cook sheet behind that same placeholder slot.
-type Screen = { name: "placeholder"; title: string; kind?: "dish" | "menu"; groupingId?: string };
+// from a saved dish or menu" link. Dish rows push the real Dish screen
+// (step 3a) with groupingId for the edit flow; menu rows still push the
+// dev-only "placeholder" screen until menus get their own real screen.
+type Screen =
+  | { name: "placeholder"; title: string; kind?: "dish" | "menu"; groupingId?: string }
+  | { name: "dishScreen"; groupingId?: string };
 
 const FONT_SANS = "'Inter', sans-serif";
 const FONT_SERIF_ITALIC = "'Fraunces', serif";
@@ -156,12 +157,9 @@ export default function ChooseDishOrMenu({
             <button
               key={plan.id}
               onClick={() =>
-                push({
-                  name: "placeholder",
-                  title: plan.kind === "dish" ? "Dish (preview)" : "Menu (preview)",
-                  kind: plan.kind,
-                  groupingId: plan.id,
-                })
+                plan.kind === "dish"
+                  ? push({ name: "dishScreen", groupingId: plan.id })
+                  : push({ name: "placeholder", title: "Menu (preview)", kind: "menu", groupingId: plan.id })
               }
               style={{
                 display: "flex",
