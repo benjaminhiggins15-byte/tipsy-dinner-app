@@ -51,6 +51,7 @@ type HomePush = (
     | { name: "allrecipes"; pickForLog?: boolean }
     | { name: "placeholder"; title: string; kind?: "dish" | "menu"; recipeId?: string }
     | { name: "chooseDishOrMenu" }
+    | { name: "dishScreen" }
 ) => void;
 
 type ProfileType = {
@@ -281,7 +282,7 @@ export default function Home({
         }}
         onPickDish={() => {
           setShowLogTypePicker(false);
-          push({ name: "placeholder", title: "Dish (preview)", kind: "dish" });
+          push({ name: "dishScreen" });
         }}
         onPickMenu={() => {
           setShowLogTypePicker(false);
