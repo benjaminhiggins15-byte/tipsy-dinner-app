@@ -50,6 +50,7 @@ type HomePush = (
     | { name: "cookFeed" }
     | { name: "allrecipes"; pickForLog?: boolean }
     | { name: "placeholder"; title: string; kind?: "dish" | "menu"; recipeId?: string }
+    | { name: "chooseDishOrMenu" }
 ) => void;
 
 type ProfileType = {
@@ -288,7 +289,7 @@ export default function Home({
         }}
         onStartFromSaved={() => {
           setShowLogTypePicker(false);
-          push({ name: "placeholder", title: "Saved dishes & menus" });
+          push({ name: "chooseDishOrMenu" });
         }}
       />
 

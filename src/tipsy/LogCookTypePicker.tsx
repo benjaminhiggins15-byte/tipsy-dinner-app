@@ -22,7 +22,7 @@ function RecipeIcon() {
   );
 }
 
-function DishIcon() {
+export function DishIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={FOREST} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="9" />
@@ -31,7 +31,7 @@ function DishIcon() {
   );
 }
 
-function MenuIcon() {
+export function MenuIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={FOREST} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <line x1="5" y1="7" x2="19" y2="7" />
@@ -49,7 +49,7 @@ function CheckIcon() {
   );
 }
 
-function ChevronIcon() {
+export function ChevronIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={FOREST} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="9,5 16,12 9,19" />

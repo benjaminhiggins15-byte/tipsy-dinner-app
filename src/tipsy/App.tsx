@@ -16,6 +16,7 @@ import SharedRecipeView from "./SharedRecipeView";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
 import Home, { ReceivedPending, ReceivedRecipeView, SuggestionDetailView, DiscoveredDetailView } from "./Home";
 import LogCookTypePicker from "./LogCookTypePicker";
+import ChooseDishOrMenu from "./ChooseDishOrMenu";
 import { CookFeedScreen, CookPostDetailScreen, type CookFeedState } from "./CookFeed";
 import { supabase } from "../lib/supabase";
 import { logEvent, isAccountDeletionInFlight } from "../lib/events";
@@ -327,7 +328,8 @@ type Screen =
   | { name: "profileedit"; fieldKey: "email" | "palate" | "inspiration" | "table" | "constraints" | "identity" | "drinks" }
   | { name: "accountPrivacy" }
   | { name: "deleteAccountConfirm" }
-  | { name: "placeholder"; title: string; kind?: "dish" | "menu"; recipeId?: string }
+  | { name: "placeholder"; title: string; kind?: "dish" | "menu"; recipeId?: string; groupingId?: string }
+  | { name: "chooseDishOrMenu" }
   | { name: "home" }
   | { name: "receivedPending"; items: PendingReceivedRecipe[] }
   | { name: "receivedRecipe"; item: PendingReceivedRecipe; newCategory?: { key: string; label: string } }
@@ -386,6 +388,7 @@ function screenKey(s: Screen): string {
     case "accountPrivacy": return "accountPrivacy";
     case "deleteAccountConfirm": return "deleteAccountConfirm";
     case "placeholder": return `placeholder:${s.title}`;
+    case "chooseDishOrMenu": return "chooseDishOrMenu";
     case "home": return "home";
     case "receivedPending": return "receivedPending";
     case "receivedRecipe": return `receivedRecipe:${s.item.sendId}`;
@@ -562,7 +565,8 @@ function renderScreen(
     case "profileedit": return <ProfileEdit fieldKey={s.fieldKey} back={back} profile={profile || null} onUpdate={onUpdate || (async () => {})} />;
     case "accountPrivacy": return <AccountPrivacy back={back} openDeleteAccount={() => push({ name: "deleteAccountConfirm" })} />;
     case "deleteAccountConfirm": return <DeleteAccountConfirm back={back} onSignOut={onSignOut!} profile={profile || null} />;
-    case "placeholder": return <Placeholder title={s.title} back={back} kind={s.kind} recipeId={s.recipeId} />;
+    case "placeholder": return <Placeholder title={s.title} back={back} kind={s.kind} recipeId={s.recipeId} groupingId={s.groupingId} />;
+    case "chooseDishOrMenu": return <ChooseDishOrMenu back={back} push={push} />;
     case "home": return <Home profile={profile || null} push={push} seedBuildFromChip={seedBuildFromChip || (() => {})} goToReceivedShelf={goToReceivedShelf || (() => {})} switchToTab={switchToTab || (() => {})} />;
     case "receivedPending": return <ReceivedPending items={s.items} back={back} push={push} />;
     case "receivedRecipe": return (
@@ -5034,7 +5038,7 @@ function RecipeCard({
         }}
         onStartFromSaved={() => {
           setShowLogTypePicker(false);
-          push({ name: "placeholder", title: "Saved dishes & menus" });
+          push({ name: "chooseDishOrMenu" });
         }}
       />
 
@@ -6831,7 +6835,7 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
 }
 
 /* ---------------- Placeholder ---------------- */
-function Placeholder({ title, back, kind, recipeId }: { title: string; back: () => void; kind?: "dish" | "menu"; recipeId?: string }) {
+function Placeholder({ title, back, kind, recipeId, groupingId }: { title: string; back: () => void; kind?: "dish" | "menu"; recipeId?: string; groupingId?: string }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div style={{ padding: "32px 24px 14px", flexShrink: 0 }}>
@@ -6852,11 +6856,13 @@ function Placeholder({ title, back, kind, recipeId }: { title: string; back: () 
         <div style={{ fontSize: 12, color: "#185FA5", letterSpacing: "0.04em" }}>
           we're still simmering this one.
         </div>
-        {/* dev-only: surfaces the handoff payload so step 2a can be verified
-            locally ahead of step 2b actually building this screen. */}
-        {(kind || recipeId) && (
+        {/* dev-only: surfaces the handoff payload so steps 2a/2b can be
+            verified locally ahead of step 3 actually building this screen. */}
+        {(kind || recipeId || groupingId) && (
           <div style={{ fontSize: 11, color: "#185FA5", letterSpacing: "0.04em", fontFamily: "monospace" }}>
-            {kind ? `kind: ${kind}` : ""}{kind && recipeId ? " · " : ""}{recipeId ? `recipeId: ${recipeId}` : ""}
+            {kind ? `kind: ${kind}` : ""}{kind && (recipeId || groupingId) ? " · " : ""}
+            {recipeId ? `recipeId: ${recipeId}` : ""}{recipeId && groupingId ? " · " : ""}
+            {groupingId ? `groupingId: ${groupingId}` : ""}
           </div>
         )}
       </div>
