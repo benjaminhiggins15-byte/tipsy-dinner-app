@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { IconBook, IconCheck, IconLayoutList, IconPencil, IconPlus, IconSearch, IconX } from "@tabler/icons-react";
 import { createGrouping, updateGrouping, getPlan, type Recipe, type GroupingPartInput } from "./data";
 
@@ -47,6 +48,11 @@ export default function DishScreen({
 }) {
   const [loading, setLoading] = useState(!!groupingId);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Tracks the id this screen is currently editing — starts as the groupingId
+  // prop, but a successful save on a fresh dish (step 3a: SAVE stays on this
+  // screen instead of navigating back) flips it to the new id so the header
+  // and subsequent saves become "edit" from then on.
+  const [activeGroupingId, setActiveGroupingId] = useState(groupingId);
   const [name, setName] = useState("");
   const [nameFocused, setNameFocused] = useState(false);
   const [parts, setParts] = useState<DishPart[]>([]);
@@ -120,8 +126,8 @@ export default function DishScreen({
     try {
       const trimmedName = name.trim();
       const groupingParts = toGroupingParts(parts);
-      const id = groupingId
-        ? (await updateGrouping(groupingId, trimmedName, groupingParts), groupingId)
+      const id = activeGroupingId
+        ? (await updateGrouping(activeGroupingId, trimmedName, groupingParts), activeGroupingId)
         : await createGrouping("dish", trimmedName, groupingParts);
       setSaving(false);
       return id;
@@ -135,13 +141,18 @@ export default function DishScreen({
   async function handleSaveClick() {
     const id = await doSave();
     if (!id) return;
+    // Step 3a: stay on this screen and become the edit view for the saved
+    // dish, rather than navigating back. Step 5 will route SAVE to the
+    // dish's detail screen instead.
+    setActiveGroupingId(id);
     setJustSaved(true);
-    setTimeout(() => back(), 650);
+    setTimeout(() => setJustSaved(false), 1800);
   }
 
   async function handleLogCookClick() {
     const id = await doSave();
     if (!id) return;
+    setActiveGroupingId(id);
     push({ name: "placeholder", title: "Log this cook (preview)", kind: "dish", groupingId: id });
   }
 
@@ -169,7 +180,7 @@ export default function DishScreen({
               color: FOREST,
             }}
           >
-            {groupingId ? "Edit dish" : "New dish"}
+            {activeGroupingId ? "Edit dish" : "New dish"}
           </div>
         </div>
       </div>
@@ -436,11 +447,23 @@ function AddPartSheet({
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dragStartY = useRef<number | null>(null);
   const allRecipes = recipesByCategory["__all__"];
 
   useEffect(() => {
     if (!allRecipes) ensureRecipesLoaded?.("__all__", "All Recipes");
   }, [allRecipes, ensureRecipesLoaded]);
+
+  // Always clears the search box, regardless of which of the three dismiss
+  // paths (backdrop tap, handle drag, X button) triggered it.
+  function handleClose() {
+    setQuery("");
+    onClose();
+  }
+
+  function handleAddFreeform() {
+    if (trimmed) onAddFreeform(trimmed);
+  }
 
   const trimmed = query.trim();
   const candidateRecipes = useMemo(() => {
@@ -452,17 +475,26 @@ function AddPartSheet({
     return list.filter((r) => r.title.toLowerCase().includes(q));
   }, [allRecipes, trimmed]);
 
-  return (
+  // Rendered via a portal straight onto document.body: ScreenStage applies an
+  // inline `transform` to every screen layer (even a no-op translateX(0) when
+  // idle), which per the CSS spec makes that layer a new containing block for
+  // `position: fixed` descendants. Nested inside that tree, "fixed" no longer
+  // means "relative to the viewport" — it was resolving against the
+  // transformed layer instead, which is what let the bottom nav visibly shift
+  // during the sheet's slide animation. A portal escapes that tree entirely so
+  // the sheet is truly viewport-fixed and can paint above the nav bar
+  // (zIndex 100) without touching its layout.
+  return createPortal(
     <div
-      onClick={onClose}
+      onClick={handleClose}
       style={{
         position: "fixed",
         top: 96,
         left: 0,
         right: 0,
-        bottom: 64, // nav-bar clearance
+        bottom: 0,
         background: "rgba(35, 60, 0, 0.08)",
-        zIndex: 90,
+        zIndex: 200,
         display: "flex",
         alignItems: "flex-end",
         justifyContent: "center",
@@ -472,6 +504,7 @@ function AddPartSheet({
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
+          position: "relative",
           background: BODY_BG,
           borderRadius: "28px 28px 0 0",
           width: "100%",
@@ -481,8 +514,50 @@ function AddPartSheet({
           animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
         }}
       >
+        <button
+          onClick={handleClose}
+          aria-label="Close"
+          style={{
+            position: "absolute",
+            top: 14,
+            right: 16,
+            width: 32,
+            height: 32,
+            minWidth: 32,
+            borderRadius: "50%",
+            background: "rgba(35,60,0,0.06)",
+            border: "none",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            zIndex: 1,
+          }}
+        >
+          <IconX size={16} stroke={1.75} color={MUTED_TEXT} />
+        </button>
         <div style={{ flexShrink: 0, padding: "14px 20px 0" }}>
-          <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(35,60,0,0.15)", margin: "0 auto 18px" }} />
+          <div
+            onPointerDown={(e) => {
+              dragStartY.current = e.clientY;
+            }}
+            onPointerMove={(e) => {
+              if (dragStartY.current == null) return;
+              if (e.clientY - dragStartY.current > 60) {
+                dragStartY.current = null;
+                handleClose();
+              }
+            }}
+            onPointerUp={() => {
+              dragStartY.current = null;
+            }}
+            onPointerCancel={() => {
+              dragStartY.current = null;
+            }}
+            style={{ width: 60, padding: "10px 0", margin: "-10px auto 8px", display: "flex", justifyContent: "center", cursor: "grab", touchAction: "none" }}
+          >
+            <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(35,60,0,0.15)" }} />
+          </div>
           <div
             style={{
               fontFamily: FONT_SANS,
@@ -529,6 +604,12 @@ function AddPartSheet({
               onChange={(e) => setQuery(e.target.value)}
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleAddFreeform();
+                }
+              }}
               placeholder="Search your recipes, or name something else"
               style={{ flex: 1, minWidth: 0, background: "transparent", border: "none", outline: "none", fontFamily: FONT_SANS, fontSize: 15, color: FOREST }}
             />
@@ -627,9 +708,7 @@ function AddPartSheet({
           )}
 
           <button
-            onClick={() => {
-              if (trimmed) onAddFreeform(trimmed);
-            }}
+            onClick={handleAddFreeform}
             disabled={!trimmed}
             style={{
               display: "flex",
@@ -661,10 +740,44 @@ function AddPartSheet({
             >
               <IconPlus size={16} stroke={2} color="#FAF7F2" />
             </div>
-            <span style={{ fontFamily: FONT_SANS, fontWeight: 700, fontSize: 14, color: FOREST }}>Add other elements</span>
+            {trimmed ? (
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontFamily: FONT_SANS,
+                    fontWeight: 700,
+                    fontSize: 14,
+                    color: FOREST,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  Add &quot;{trimmed}&quot;
+                </div>
+                <div
+                  style={{
+                    fontFamily: FONT_SANS,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    color: MUTED_TEXT,
+                    marginTop: 3,
+                  }}
+                >
+                  Other
+                </div>
+              </div>
+            ) : (
+              <span style={{ fontFamily: FONT_SERIF_ITALIC, fontStyle: "italic", fontSize: 13, color: MUTED_TEXT }}>
+                Type above to add anything else
+              </span>
+            )}
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
