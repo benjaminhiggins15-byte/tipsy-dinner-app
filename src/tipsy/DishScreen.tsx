@@ -506,6 +506,8 @@ export function AddPartSheet({
   dishes,
   addedDishIds,
   onAddDish,
+  title = "Add a part",
+  subtitle = "Saved recipes or freeform items",
 }: {
   onClose: () => void;
   recipesByCategory: Record<string, Recipe[]>;
@@ -518,6 +520,10 @@ export function AddPartSheet({
   dishes?: PlanSummary[];
   addedDishIds?: Set<string>;
   onAddDish?: (dish: PlanSummary) => void;
+  // MenuScreen overrides these to "Add to <Course>" / a dishes-aware
+  // subtitle; DishScreen's own sheet keeps the defaults above.
+  title?: string;
+  subtitle?: string;
 }) {
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
@@ -664,7 +670,7 @@ export function AddPartSheet({
               textAlign: "center",
             }}
           >
-            Add a part
+            {title}
           </div>
           <div
             style={{
@@ -677,7 +683,7 @@ export function AddPartSheet({
               marginBottom: 16,
             }}
           >
-            Saved recipes or freeform items
+            {subtitle}
           </div>
 
           <div

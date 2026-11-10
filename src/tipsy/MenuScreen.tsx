@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { IconBook, IconChevronRight, IconLayoutList, IconX } from "@tabler/icons-react";
 import {
   createGrouping,
@@ -25,6 +26,7 @@ import {
   CARD_BORDER,
   MUTED_TEXT,
   BODY_BG,
+  APP_MAX_WIDTH,
 } from "./DishScreen";
 import { DishIcon } from "./LogCookTypePicker";
 
@@ -70,7 +72,7 @@ export default function MenuScreen({
   push: (s: Screen) => void;
   groupingId?: string;
   // Present only when opened fresh from a recipe screen (no groupingId) —
-  // pre-added under MAINS as the menu's first part.
+  // triggers the "Which course?" sheet on mount instead of being auto-added.
   seedRecipe?: Recipe;
   recipesByCategory: Record<string, Recipe[]>;
   ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void>;
@@ -85,6 +87,9 @@ export default function MenuScreen({
   const [parts, setParts] = useState<MenuPart[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [addSheetCourse, setAddSheetCourse] = useState<MenuSection | null>(null);
+  // Opened automatically on arrival with a seedRecipe and no groupingId —
+  // closing without picking a course leaves `parts` untouched (empty menu).
+  const [seedCoursePickerOpen, setSeedCoursePickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
@@ -146,7 +151,7 @@ export default function MenuScreen({
         }
       })();
     } else if (seedRecipe && seedRecipe.savedId != null) {
-      setParts([{ uid: crypto.randomUUID(), course: "mains", kind: "recipe", recipeId: String(seedRecipe.savedId), title: seedRecipe.title }]);
+      setSeedCoursePickerOpen(true);
     }
     return () => {
       ignore = true;
@@ -184,6 +189,15 @@ export default function MenuScreen({
       else next.add(uid);
       return next;
     });
+  }
+
+  function addSeedToCourse(course: MenuSection) {
+    if (!seedRecipe || seedRecipe.savedId == null) return;
+    setParts((prev) => [
+      ...prev,
+      { uid: crypto.randomUUID(), course, kind: "recipe", recipeId: String(seedRecipe.savedId), title: seedRecipe.title },
+    ]);
+    setSeedCoursePickerOpen(false);
   }
 
   function addRecipePart(recipeId: string, title: string) {
@@ -262,6 +276,7 @@ export default function MenuScreen({
 
   const visibleCourses = COURSES.filter((c) => parts.some((p) => p.course === c.key));
   const hiddenCourses = COURSES.filter((c) => !parts.some((p) => p.course === c.key));
+  const addSheetCourseLabel = addSheetCourse ? COURSES.find((c) => c.key === addSheetCourse)?.label : undefined;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: BODY_BG, position: "relative" }}>
@@ -383,6 +398,16 @@ export default function MenuScreen({
           dishes={allDishes ?? undefined}
           addedDishIds={addedDishIds}
           onAddDish={addDishPart}
+          title={addSheetCourseLabel ? `Add to ${addSheetCourseLabel}` : undefined}
+          subtitle="Your dishes, saved recipes or anything else"
+        />
+      )}
+
+      {seedCoursePickerOpen && seedRecipe && (
+        <WhichCourseSheet
+          recipeTitle={seedRecipe.title}
+          onClose={() => setSeedCoursePickerOpen(false)}
+          onPick={addSeedToCourse}
         />
       )}
 
@@ -411,6 +436,89 @@ function CourseChip({ label, onClick }: { label: string; onClick: () => void }) 
     >
       + {label}
     </button>
+  );
+}
+
+// Small bottom sheet shown on arrival from a recipe screen (seedRecipe, no
+// groupingId) — same backdrop/portal/close chrome as AddPartSheet, but a
+// short content-sized card (no scrolling list) since it's just five chips.
+function WhichCourseSheet({
+  recipeTitle,
+  onClose,
+  onPick,
+}: {
+  recipeTitle: string;
+  onClose: () => void;
+  onPick: (course: MenuSection) => void;
+}) {
+  return createPortal(
+    <div
+      onClick={onClose}
+      style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 200, display: "flex", justifyContent: "center" }}
+    >
+      <div style={{ position: "relative", width: "100%", maxWidth: APP_MAX_WIDTH, height: "100%", display: "flex", alignItems: "flex-end" }}>
+        <div style={{ position: "absolute", inset: 0, background: "rgba(35, 60, 0, 0.08)", animation: "tipsy-fade 0.22s ease" }} />
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "relative",
+            background: BODY_BG,
+            borderRadius: "28px 28px 0 0",
+            width: "100%",
+            maxWidth: APP_MAX_WIDTH,
+            display: "flex",
+            flexDirection: "column",
+            padding: "22px 20px 28px",
+            animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
+          }}
+        >
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              position: "absolute",
+              top: 14,
+              right: 16,
+              width: 32,
+              height: 32,
+              minWidth: 32,
+              borderRadius: "50%",
+              background: "rgba(35,60,0,0.06)",
+              border: "none",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              zIndex: 1,
+            }}
+          >
+            <IconX size={16} stroke={1.75} color={MUTED_TEXT} />
+          </button>
+          <div style={{ fontFamily: FONT_SANS, fontSize: 15, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: FOREST, textAlign: "center" }}>
+            Which course?
+          </div>
+          <div
+            style={{
+              fontFamily: FONT_SERIF_ITALIC,
+              fontStyle: "italic",
+              fontSize: 13,
+              color: MUTED_TEXT,
+              textAlign: "center",
+              marginTop: 4,
+              marginBottom: 20,
+            }}
+          >
+            Where does {recipeTitle} go?
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+            {COURSES.map((c) => (
+              <CourseChip key={c.key} label={c.label} onClick={() => onPick(c.key)} />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
