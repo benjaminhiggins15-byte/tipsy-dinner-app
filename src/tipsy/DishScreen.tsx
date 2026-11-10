@@ -16,6 +16,11 @@ const CARD_BG = "rgba(35,60,0,0.05)";
 const CARD_BORDER = "rgba(35,60,0,0.1)";
 const MUTED_TEXT = "rgba(35,60,0,0.6)";
 const BODY_BG = "#FAF7F2";
+// Matches App.tsx's S.phone maxWidth — AddPartSheet portals to document.body
+// (see its render below) to escape ScreenStage's transformed layer, which
+// also means it escapes the phone frame's own width constraint and must
+// restate it here to stay lined up on wide screens.
+const APP_MAX_WIDTH = 480;
 
 type DishPart =
   | { uid: string; kind: "recipe"; recipeId: string; title: string }
@@ -508,6 +513,7 @@ function AddPartSheet({
           background: BODY_BG,
           borderRadius: "28px 28px 0 0",
           width: "100%",
+          maxWidth: APP_MAX_WIDTH,
           height: "100%",
           display: "flex",
           flexDirection: "column",
