@@ -52,6 +52,7 @@ type HomePush = (
     | { name: "placeholder"; title: string; kind?: "dish" | "menu"; recipeId?: string }
     | { name: "chooseDishOrMenu" }
     | { name: "dishScreen" }
+    | { name: "menuScreen" }
 ) => void;
 
 type ProfileType = {
@@ -286,7 +287,7 @@ export default function Home({
         }}
         onPickMenu={() => {
           setShowLogTypePicker(false);
-          push({ name: "placeholder", title: "Menu (preview)", kind: "menu" });
+          push({ name: "menuScreen" });
         }}
         onStartFromSaved={() => {
           setShowLogTypePicker(false);

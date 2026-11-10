@@ -1,26 +1,206 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { IconBook, IconCheck, IconLayoutList, IconPencil, IconPlus, IconSearch, IconX } from "@tabler/icons-react";
-import { createGrouping, updateGrouping, getPlan, type Recipe, type GroupingPartInput } from "./data";
+import { createGrouping, updateGrouping, getPlan, type Recipe, type GroupingPartInput, type PlanSummary } from "./data";
 
-// Dishes & Menus v1.5 step 3a — the real Dish screen, replacing the
-// "placeholder" slot for kind="dish" (step 2a/2b wired the handoff; the
-// placeholder itself stays in place for the still-unbuilt dish Log Cook
-// sheet, step 3c, and for menus).
+// Dishes & Menus v1.5 step 3a/3b — the real Dish and Menu screens, replacing
+// the "placeholder" slot for kind="dish"/"menu" (step 2a/2b wired the
+// handoff). Several pieces below (constants, NameField, SaveLogFooter,
+// SavedToast, ScreenTitleHeader, PlanKeyframes, AddPartSheet) are exported
+// so MenuScreen.tsx (step 3b) can reuse them rather than re-implementing —
+// the placeholder itself stays in place only for the still-unbuilt Log Cook
+// sheet (step 3c).
 type Screen = { name: "placeholder"; title: string; kind?: "dish" | "menu"; groupingId?: string };
 
-const FONT_SANS = "'Inter', sans-serif";
-const FONT_SERIF_ITALIC = "'Fraunces', serif";
-const FOREST = "#233C00";
-const CARD_BG = "rgba(35,60,0,0.05)";
-const CARD_BORDER = "rgba(35,60,0,0.1)";
-const MUTED_TEXT = "rgba(35,60,0,0.6)";
-const BODY_BG = "#FAF7F2";
+export const FONT_SANS = "'Inter', sans-serif";
+export const FONT_SERIF_ITALIC = "'Fraunces', serif";
+export const FOREST = "#233C00";
+export const CARD_BG = "rgba(35,60,0,0.05)";
+export const CARD_BORDER = "rgba(35,60,0,0.1)";
+export const MUTED_TEXT = "rgba(35,60,0,0.6)";
+export const BODY_BG = "#FAF7F2";
 // Matches App.tsx's S.phone maxWidth — AddPartSheet portals to document.body
 // (see its render below) to escape ScreenStage's transformed layer, which
 // also means it escapes the phone frame's own width constraint and must
 // restate it here to stay lined up on wide screens.
-const APP_MAX_WIDTH = 480;
+export const APP_MAX_WIDTH = 480;
+
+// Shared @keyframes for the "Saved" toast fade and the Add-a-part sheet's
+// slide-up — a <style> tag's rules are only live while that component
+// instance is mounted, so every screen that renders SavedToast/AddPartSheet
+// must render this too (cheap: a handful of CSS keyframe rules).
+export function PlanKeyframes() {
+  return (
+    <style>{`
+      @keyframes tipsy-fade { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes tipsy-slideup { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    `}</style>
+  );
+}
+
+// Back arrow + uppercase title — identical chrome across the Dish and Menu
+// screens, only the title text differs ("New/Edit dish" vs "New/Edit menu").
+export function ScreenTitleHeader({ title, onBack }: { title: string; onBack: () => void }) {
+  return (
+    <div style={{ padding: "16px 24px 0", flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+        <button
+          onClick={onBack}
+          aria-label="Back"
+          style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={MUTED_TEXT} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+        <div
+          style={{
+            fontFamily: FONT_SANS,
+            fontSize: 15,
+            fontWeight: 700,
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+            color: FOREST,
+          }}
+        >
+          {title}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Name input card with pencil icon — shared by the dish/menu name field.
+export function NameField({
+  value,
+  onChange,
+  placeholder,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  disabled?: boolean;
+}) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "14px 16px",
+          borderRadius: 16,
+          background: CARD_BG,
+          border: focused || !value ? `1.5px solid ${FOREST}` : `1px solid ${CARD_BORDER}`,
+          marginBottom: 24,
+        }}
+      >
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          placeholder={placeholder}
+          className="plan-name-input"
+          disabled={disabled}
+          style={{ flex: 1, minWidth: 0, background: "transparent", border: "none", outline: "none", fontFamily: FONT_SANS, fontSize: 16, fontWeight: 600, color: FOREST }}
+        />
+        <IconPencil size={18} stroke={1.5} color={MUTED_TEXT} />
+      </div>
+      <style>{`.plan-name-input::placeholder { font-family: ${FONT_SERIF_ITALIC}; font-style: italic; font-weight: 400; color: rgba(35,60,0,0.35); }`}</style>
+    </>
+  );
+}
+
+// SAVE / LOG THIS COOK footer — shared by the dish/menu screens. Both
+// buttons share one canSave/saving gate; SAVE stays on-screen (edit mode),
+// LOG THIS COOK saves then navigates to the Log Cook placeholder.
+export function SaveLogFooter({
+  canSave,
+  saving,
+  onSave,
+  onLogCook,
+}: {
+  canSave: boolean;
+  saving: boolean;
+  onSave: () => void;
+  onLogCook: () => void;
+}) {
+  return (
+    <div style={{ flexShrink: 0, display: "flex", gap: 10, padding: "14px 20px 20px", borderTop: `1px solid ${CARD_BORDER}` }}>
+      <button
+        onClick={onSave}
+        disabled={!canSave || saving}
+        style={{
+          flex: 1,
+          padding: "15px 10px",
+          borderRadius: 14,
+          background: "transparent",
+          border: canSave ? `1.5px solid ${FOREST}` : "1.5px solid rgba(35,60,0,0.18)",
+          color: canSave ? FOREST : "rgba(35,60,0,0.35)",
+          fontFamily: FONT_SANS,
+          fontSize: 13,
+          fontWeight: 700,
+          letterSpacing: "0.05em",
+          textTransform: "uppercase",
+          cursor: canSave && !saving ? "pointer" : "not-allowed",
+        }}
+      >
+        Save
+      </button>
+      <button
+        onClick={onLogCook}
+        disabled={!canSave || saving}
+        style={{
+          flex: 2,
+          padding: "15px 10px",
+          borderRadius: 14,
+          background: canSave ? FOREST : "rgba(35,60,0,0.2)",
+          border: "none",
+          color: "#FAF7F2",
+          fontFamily: FONT_SANS,
+          fontSize: 13,
+          fontWeight: 700,
+          letterSpacing: "0.05em",
+          textTransform: "uppercase",
+          cursor: canSave && !saving ? "pointer" : "not-allowed",
+        }}
+      >
+        Log this cook
+      </button>
+    </div>
+  );
+}
+
+// "Saved" pill toast — shared by the dish/menu screens.
+export function SavedToast({ show }: { show: boolean }) {
+  if (!show) return null;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 12,
+        left: "50%",
+        transform: "translateX(-50%)",
+        background: FOREST,
+        color: "#FAF7F2",
+        padding: "8px 16px",
+        borderRadius: 999,
+        fontFamily: FONT_SANS,
+        fontSize: 12,
+        fontWeight: 700,
+        letterSpacing: "0.05em",
+        textTransform: "uppercase",
+        zIndex: 95,
+        animation: "tipsy-fade 0.2s ease",
+      }}
+    >
+      Saved
+    </div>
+  );
+}
 
 type DishPart =
   | { uid: string; kind: "recipe"; recipeId: string; title: string }
@@ -59,7 +239,6 @@ export default function DishScreen({
   // and subsequent saves become "edit" from then on.
   const [activeGroupingId, setActiveGroupingId] = useState(groupingId);
   const [name, setName] = useState("");
-  const [nameFocused, setNameFocused] = useState(false);
   const [parts, setParts] = useState<DishPart[]>([]);
   const [addSheetOpen, setAddSheetOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -163,32 +342,7 @@ export default function DishScreen({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: BODY_BG, position: "relative" }}>
-      {/* Header */}
-      <div style={{ padding: "16px 24px 0", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-          <button
-            onClick={back}
-            aria-label="Back"
-            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={MUTED_TEXT} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
-          </button>
-          <div
-            style={{
-              fontFamily: FONT_SANS,
-              fontSize: 15,
-              fontWeight: 700,
-              letterSpacing: "0.06em",
-              textTransform: "uppercase",
-              color: FOREST,
-            }}
-          >
-            {activeGroupingId ? "Edit dish" : "New dish"}
-          </div>
-        </div>
-      </div>
+      <ScreenTitleHeader title={activeGroupingId ? "Edit dish" : "New dish"} onBack={back} />
 
       {loadError ? (
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
@@ -198,32 +352,7 @@ export default function DishScreen({
         <>
           {/* Body */}
           <div style={{ flex: 1, overflowY: "auto", padding: "4px 20px 16px" }}>
-            {/* Name field */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "14px 16px",
-                borderRadius: 16,
-                background: CARD_BG,
-                border: nameFocused || !name ? `1.5px solid ${FOREST}` : `1px solid ${CARD_BORDER}`,
-                marginBottom: 24,
-              }}
-            >
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                onFocus={() => setNameFocused(true)}
-                onBlur={() => setNameFocused(false)}
-                placeholder="Name your dish"
-                className="dish-name-input"
-                disabled={loading}
-                style={{ flex: 1, minWidth: 0, background: "transparent", border: "none", outline: "none", fontFamily: FONT_SANS, fontSize: 16, fontWeight: 600, color: FOREST }}
-              />
-              <IconPencil size={18} stroke={1.5} color={MUTED_TEXT} />
-            </div>
-            <style>{`.dish-name-input::placeholder { font-family: ${FONT_SERIF_ITALIC}; font-style: italic; font-weight: 400; color: rgba(35,60,0,0.35); }`}</style>
+            <NameField value={name} onChange={setName} placeholder="Name your dish" disabled={loading} />
 
             {/* Parts header */}
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 10 }}>
@@ -345,75 +474,11 @@ export default function DishScreen({
             )}
           </div>
 
-          {/* Footer */}
-          <div style={{ flexShrink: 0, display: "flex", gap: 10, padding: "14px 20px 20px", borderTop: `1px solid ${CARD_BORDER}` }}>
-            <button
-              onClick={handleSaveClick}
-              disabled={!canSave || saving}
-              style={{
-                flex: 1,
-                padding: "15px 10px",
-                borderRadius: 14,
-                background: "transparent",
-                border: canSave ? `1.5px solid ${FOREST}` : "1.5px solid rgba(35,60,0,0.18)",
-                color: canSave ? FOREST : "rgba(35,60,0,0.35)",
-                fontFamily: FONT_SANS,
-                fontSize: 13,
-                fontWeight: 700,
-                letterSpacing: "0.05em",
-                textTransform: "uppercase",
-                cursor: canSave && !saving ? "pointer" : "not-allowed",
-              }}
-            >
-              Save
-            </button>
-            <button
-              onClick={handleLogCookClick}
-              disabled={!canSave || saving}
-              style={{
-                flex: 2,
-                padding: "15px 10px",
-                borderRadius: 14,
-                background: canSave ? FOREST : "rgba(35,60,0,0.2)",
-                border: "none",
-                color: "#FAF7F2",
-                fontFamily: FONT_SANS,
-                fontSize: 13,
-                fontWeight: 700,
-                letterSpacing: "0.05em",
-                textTransform: "uppercase",
-                cursor: canSave && !saving ? "pointer" : "not-allowed",
-              }}
-            >
-              Log this cook
-            </button>
-          </div>
+          <SaveLogFooter canSave={canSave} saving={saving} onSave={handleSaveClick} onLogCook={handleLogCookClick} />
         </>
       )}
 
-      {justSaved && (
-        <div
-          style={{
-            position: "absolute",
-            top: 12,
-            left: "50%",
-            transform: "translateX(-50%)",
-            background: FOREST,
-            color: "#FAF7F2",
-            padding: "8px 16px",
-            borderRadius: 999,
-            fontFamily: FONT_SANS,
-            fontSize: 12,
-            fontWeight: 700,
-            letterSpacing: "0.05em",
-            textTransform: "uppercase",
-            zIndex: 95,
-            animation: "tipsy-fade 0.2s ease",
-          }}
-        >
-          Saved
-        </div>
-      )}
+      <SavedToast show={justSaved} />
 
       {addSheetOpen && (
         <AddPartSheet
@@ -426,21 +491,21 @@ export default function DishScreen({
         />
       )}
 
-      <style>{`
-        @keyframes tipsy-fade { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes tipsy-slideup { from { transform: translateY(100%); } to { transform: translateY(0); } }
-      `}</style>
+      <PlanKeyframes />
     </div>
   );
 }
 
-function AddPartSheet({
+export function AddPartSheet({
   onClose,
   recipesByCategory,
   ensureRecipesLoaded,
   addedRecipeIds,
   onAddRecipe,
   onAddFreeform,
+  dishes,
+  addedDishIds,
+  onAddDish,
 }: {
   onClose: () => void;
   recipesByCategory: Record<string, Recipe[]>;
@@ -448,6 +513,11 @@ function AddPartSheet({
   addedRecipeIds: Set<string>;
   onAddRecipe: (recipeId: string, title: string) => void;
   onAddFreeform: (text: string) => void;
+  // Present only when the sheet is opened from MenuScreen, which can add
+  // saved dishes (not just recipes) as a course's part.
+  dishes?: PlanSummary[];
+  addedDishIds?: Set<string>;
+  onAddDish?: (dish: PlanSummary) => void;
 }) {
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
@@ -480,6 +550,16 @@ function AddPartSheet({
     return list.filter((r) => r.title.toLowerCase().includes(q));
   }, [allRecipes, trimmed]);
 
+  // listMyPlans() (the source of `dishes`) is already sorted created_at desc,
+  // so an empty query just takes the first 8 as "recent" — same convention
+  // as candidateRecipes above.
+  const candidateDishes = useMemo(() => {
+    const list = dishes ?? [];
+    if (!trimmed) return list.slice(0, 8);
+    const q = trimmed.toLowerCase();
+    return list.filter((d) => (d.title || "").toLowerCase().includes(q));
+  }, [dishes, trimmed]);
+
   // Rendered via a portal straight onto document.body: ScreenStage applies an
   // inline `transform` to every screen layer (even a no-op translateX(0) when
   // idle), which per the CSS spec makes that layer a new containing block for
@@ -494,32 +574,41 @@ function AddPartSheet({
       onClick={handleClose}
       style={{
         position: "fixed",
-        top: 96,
+        top: 0,
         left: 0,
         right: 0,
         bottom: 0,
-        background: "rgba(35, 60, 0, 0.08)",
         zIndex: 200,
         display: "flex",
-        alignItems: "flex-end",
         justifyContent: "center",
-        animation: "tipsy-fade 0.22s ease",
       }}
     >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          position: "relative",
-          background: BODY_BG,
-          borderRadius: "28px 28px 0 0",
-          width: "100%",
-          maxWidth: APP_MAX_WIDTH,
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
-          animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
-        }}
-      >
+      {/* Constrains the dim layer to the app column's width (matching
+          APP_MAX_WIDTH below) and stacks it under the sheet within that same
+          column, instead of dimming the full browser viewport. */}
+      <div style={{ position: "relative", width: "100%", maxWidth: APP_MAX_WIDTH, height: "100%", display: "flex", alignItems: "flex-end" }}>
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "rgba(35, 60, 0, 0.08)",
+            animation: "tipsy-fade 0.22s ease",
+          }}
+        />
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "relative",
+            background: BODY_BG,
+            borderRadius: "28px 28px 0 0",
+            width: "100%",
+            maxWidth: APP_MAX_WIDTH,
+            height: "100%",
+            display: "flex",
+            flexDirection: "column",
+            animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
+          }}
+        >
         <button
           onClick={handleClose}
           aria-label="Close"
@@ -635,7 +724,88 @@ function AddPartSheet({
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px 24px" }}>
-          <div style={{ fontFamily: FONT_SANS, fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: MUTED_TEXT, marginBottom: 6 }}>
+          {dishes && dishes.length > 0 && (
+            <>
+              <div style={{ fontFamily: FONT_SANS, fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: MUTED_TEXT, marginBottom: 6 }}>
+                Your dishes
+              </div>
+
+              {trimmed && candidateDishes.length === 0 ? (
+                <div style={{ padding: "10px 0 16px" }}>
+                  <span style={{ fontFamily: FONT_SERIF_ITALIC, fontStyle: "italic", fontSize: 13, color: MUTED_TEXT }}>No matching dishes</span>
+                </div>
+              ) : (
+                candidateDishes.map((d) => {
+                  const added = !!addedDishIds?.has(d.id);
+                  return (
+                    <div
+                      key={d.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        padding: "12px 2px",
+                        borderBottom: "1px solid rgba(35,60,0,0.06)",
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontFamily: FONT_SANS,
+                            fontWeight: 700,
+                            fontSize: 14,
+                            color: FOREST,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {d.title || "Untitled dish"}
+                        </div>
+                        <div
+                          style={{
+                            fontFamily: FONT_SANS,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            letterSpacing: "0.06em",
+                            textTransform: "uppercase",
+                            color: MUTED_TEXT,
+                            marginTop: 3,
+                          }}
+                        >
+                          Dish · {d.partCount} {d.partCount === 1 ? "part" : "parts"}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (!added) onAddDish?.(d);
+                        }}
+                        disabled={added}
+                        aria-label={added ? `${d.title} already added` : `Add ${d.title}`}
+                        style={{
+                          width: 32,
+                          height: 32,
+                          minWidth: 32,
+                          borderRadius: "50%",
+                          background: added ? "rgba(35,60,0,0.08)" : "transparent",
+                          border: added ? "none" : `1.5px solid ${FOREST}`,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          cursor: added ? "default" : "pointer",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {added ? <IconCheck size={16} stroke={2} color={MUTED_TEXT} /> : <IconPlus size={16} stroke={2} color={FOREST} />}
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </>
+          )}
+
+          <div style={{ fontFamily: FONT_SANS, fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: MUTED_TEXT, marginBottom: 6, marginTop: dishes && dishes.length > 0 ? 20 : 0 }}>
             Saved recipes
           </div>
 
@@ -781,6 +951,7 @@ function AddPartSheet({
               </span>
             )}
           </button>
+        </div>
         </div>
       </div>
     </div>,

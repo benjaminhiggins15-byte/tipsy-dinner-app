@@ -18,6 +18,7 @@ import Home, { ReceivedPending, ReceivedRecipeView, SuggestionDetailView, Discov
 import LogCookTypePicker from "./LogCookTypePicker";
 import ChooseDishOrMenu from "./ChooseDishOrMenu";
 import DishScreen from "./DishScreen";
+import MenuScreen from "./MenuScreen";
 import { CookFeedScreen, CookPostDetailScreen, type CookFeedState } from "./CookFeed";
 import { supabase } from "../lib/supabase";
 import { logEvent, isAccountDeletionInFlight } from "../lib/events";
@@ -332,6 +333,7 @@ type Screen =
   | { name: "placeholder"; title: string; kind?: "dish" | "menu"; recipeId?: string; groupingId?: string }
   | { name: "chooseDishOrMenu" }
   | { name: "dishScreen"; groupingId?: string; recipe?: Recipe }
+  | { name: "menuScreen"; groupingId?: string; recipe?: Recipe }
   | { name: "home" }
   | { name: "receivedPending"; items: PendingReceivedRecipe[] }
   | { name: "receivedRecipe"; item: PendingReceivedRecipe; newCategory?: { key: string; label: string } }
@@ -392,6 +394,7 @@ function screenKey(s: Screen): string {
     case "placeholder": return `placeholder:${s.title}`;
     case "chooseDishOrMenu": return "chooseDishOrMenu";
     case "dishScreen": return s.groupingId ? `dishScreen:${s.groupingId}` : `dishScreen:new:${s.recipe?.savedId ?? ""}`;
+    case "menuScreen": return s.groupingId ? `menuScreen:${s.groupingId}` : `menuScreen:new:${s.recipe?.savedId ?? ""}`;
     case "home": return "home";
     case "receivedPending": return "receivedPending";
     case "receivedRecipe": return `receivedRecipe:${s.item.sendId}`;
@@ -571,6 +574,7 @@ function renderScreen(
     case "placeholder": return <Placeholder title={s.title} back={back} kind={s.kind} recipeId={s.recipeId} groupingId={s.groupingId} />;
     case "chooseDishOrMenu": return <ChooseDishOrMenu back={back} push={push} />;
     case "dishScreen": return <DishScreen back={back} push={push} groupingId={s.groupingId} seedRecipe={s.recipe} recipesByCategory={recipesByCategory ?? {}} ensureRecipesLoaded={ensureRecipesLoaded} />;
+    case "menuScreen": return <MenuScreen back={back} push={push} groupingId={s.groupingId} seedRecipe={s.recipe} recipesByCategory={recipesByCategory ?? {}} ensureRecipesLoaded={ensureRecipesLoaded} />;
     case "home": return <Home profile={profile || null} push={push} seedBuildFromChip={seedBuildFromChip || (() => {})} goToReceivedShelf={goToReceivedShelf || (() => {})} switchToTab={switchToTab || (() => {})} />;
     case "receivedPending": return <ReceivedPending items={s.items} back={back} push={push} />;
     case "receivedRecipe": return (
@@ -5038,7 +5042,7 @@ function RecipeCard({
         }}
         onPickMenu={() => {
           setShowLogTypePicker(false);
-          push({ name: "placeholder", title: "Menu (preview)", kind: "menu", recipeId: recipe.savedId != null ? String(recipe.savedId) : undefined });
+          push({ name: "menuScreen", recipe });
         }}
         onStartFromSaved={() => {
           setShowLogTypePicker(false);

@@ -4,11 +4,12 @@ import { DishIcon, MenuIcon, ChevronIcon } from "./LogCookTypePicker";
 
 // Dishes & Menus v1.5 step 2b — reached only via LogCookTypePicker's "Start
 // from a saved dish or menu" link. Dish rows push the real Dish screen
-// (step 3a) with groupingId for the edit flow; menu rows still push the
-// dev-only "placeholder" screen until menus get their own real screen.
+// (step 3a); menu rows push the real Menu screen (step 3b) — both with
+// groupingId for the edit flow.
 type Screen =
   | { name: "placeholder"; title: string; kind?: "dish" | "menu"; groupingId?: string }
-  | { name: "dishScreen"; groupingId?: string };
+  | { name: "dishScreen"; groupingId?: string }
+  | { name: "menuScreen"; groupingId?: string };
 
 const FONT_SANS = "'Inter', sans-serif";
 const FONT_SERIF_ITALIC = "'Fraunces', serif";
@@ -159,7 +160,7 @@ export default function ChooseDishOrMenu({
               onClick={() =>
                 plan.kind === "dish"
                   ? push({ name: "dishScreen", groupingId: plan.id })
-                  : push({ name: "placeholder", title: "Menu (preview)", kind: "menu", groupingId: plan.id })
+                  : push({ name: "menuScreen", groupingId: plan.id })
               }
               style={{
                 display: "flex",
