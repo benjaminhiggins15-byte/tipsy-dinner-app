@@ -320,7 +320,7 @@ type Screen =
   | { name: "categories" }
   | { name: "recipes"; categoryKey: string; categoryLabel: string }
   | { name: "allrecipes"; pickForLog?: boolean }
-  | { name: "recipe"; recipe: Recipe; categoryLabel: string; categoryKey: string; autoOpenLog?: boolean }
+  | { name: "recipe"; recipe: Recipe; categoryLabel: string; categoryKey: string; autoOpenLog?: boolean; toastMessage?: string }
   | { name: "grocerylist" }
   | { name: "occasions" }
   | { name: "menus"; occasionId: string; occasionName: string }
@@ -334,7 +334,7 @@ type Screen =
   | { name: "chooseDishOrMenu" }
   | { name: "dishScreen"; groupingId?: string; recipe?: Recipe }
   | { name: "menuScreen"; groupingId?: string; recipe?: Recipe }
-  | { name: "home" }
+  | { name: "home"; toastMessage?: string }
   | { name: "receivedPending"; items: PendingReceivedRecipe[] }
   | { name: "receivedRecipe"; item: PendingReceivedRecipe; newCategory?: { key: string; label: string } }
   | { name: "newcategoryforreceived"; item: PendingReceivedRecipe }
@@ -445,6 +445,7 @@ function renderScreen(
   cookFeedState?: CookFeedState,
   finishCreateCategoryForCookPost?: (catKey: string, catLabel: string, postId: string) => void,
   currentUserId?: string | null,
+  popChooseDishOrMenuWithToast?: (message: string) => void,
 ) {
   switch (s.name) {
     case "cook": return (
@@ -533,6 +534,7 @@ function renderScreen(
         profile={profile}
         onUpdate={onUpdate}
         autoOpenLog={s.autoOpenLog}
+        toastMessage={s.toastMessage}
       />
     );
     case "grocerylist": return <GroceryList push={push} back={back} />;
@@ -572,10 +574,10 @@ function renderScreen(
     case "accountPrivacy": return <AccountPrivacy back={back} openDeleteAccount={() => push({ name: "deleteAccountConfirm" })} />;
     case "deleteAccountConfirm": return <DeleteAccountConfirm back={back} onSignOut={onSignOut!} profile={profile || null} />;
     case "placeholder": return <Placeholder title={s.title} back={back} kind={s.kind} recipeId={s.recipeId} groupingId={s.groupingId} />;
-    case "chooseDishOrMenu": return <ChooseDishOrMenu back={back} push={push} />;
+    case "chooseDishOrMenu": return <ChooseDishOrMenu back={back} onLogged={(msg) => popChooseDishOrMenuWithToast?.(msg)} />;
     case "dishScreen": return <DishScreen back={back} push={push} groupingId={s.groupingId} seedRecipe={s.recipe} recipesByCategory={recipesByCategory ?? {}} ensureRecipesLoaded={ensureRecipesLoaded} />;
     case "menuScreen": return <MenuScreen back={back} push={push} groupingId={s.groupingId} seedRecipe={s.recipe} recipesByCategory={recipesByCategory ?? {}} ensureRecipesLoaded={ensureRecipesLoaded} />;
-    case "home": return <Home profile={profile || null} push={push} seedBuildFromChip={seedBuildFromChip || (() => {})} goToReceivedShelf={goToReceivedShelf || (() => {})} switchToTab={switchToTab || (() => {})} />;
+    case "home": return <Home profile={profile || null} push={push} seedBuildFromChip={seedBuildFromChip || (() => {})} goToReceivedShelf={goToReceivedShelf || (() => {})} switchToTab={switchToTab || (() => {})} toastMessage={s.toastMessage} />;
     case "receivedPending": return <ReceivedPending items={s.items} back={back} push={push} />;
     case "receivedRecipe": return (
       <ReceivedRecipeView
@@ -1373,6 +1375,30 @@ export default function App() {
     });
   };
 
+  // Logging a cook from ChooseDishOrMenu (step 3c's "Choose a dish or menu"
+  // flow) pops that screen AND stamps a toastMessage onto whichever screen
+  // sits below it — "home" or "recipe", the only two push({name:
+  // "chooseDishOrMenu"}) call sites — so the screen the user actually
+  // started from can show "Cook logged"/"Posted" after the back-transition
+  // completes. Same pop-and-rewrite shape as replaceRecipeAndBack above.
+  const popChooseDishOrMenuWithToast = (message: string) => {
+    if (transition) return;
+    if (currentStack.length < 2) return;
+    const prev = currentStack[currentStack.length - 2];
+    if (prev.name !== "home" && prev.name !== "recipe") {
+      back();
+      return;
+    }
+    const newPrev: Screen = { ...prev, toastMessage: message };
+    const prevIsTabRoot = currentStack.length === 2;
+    setTransition({ from: current, to: newPrev, direction: "back", fromIsTabRoot: isTabRoot, toIsTabRoot: prevIsTabRoot });
+    updateCurrentTabStack((st) => {
+      const next = st.slice(0, -1);
+      next[next.length - 1] = newPrev;
+      return next;
+    });
+  };
+
   // Pop the editcategory screen and replace the recipes screen below with the
   // new label, animating back to it.
   const finishEditCategory = (newLabel: string) => {
@@ -1803,6 +1829,7 @@ export default function App() {
           cookFeedState={cookFeedState}
           finishCreateCategoryForCookPost={finishCreateCategoryForCookPost}
           currentUserId={session?.user?.id ?? null}
+          popChooseDishOrMenuWithToast={popChooseDishOrMenuWithToast}
         />
         <BottomTabBar activeTab={activeTab} onTabClick={switchToTab} />
       </div>
@@ -1986,6 +2013,7 @@ function ScreenStage({
   cookFeedState,
   finishCreateCategoryForCookPost,
   currentUserId,
+  popChooseDishOrMenuWithToast,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back"; fromIsTabRoot?: boolean; toIsTabRoot?: boolean } | null;
@@ -2023,6 +2051,7 @@ function ScreenStage({
   cookFeedState: CookFeedState;
   finishCreateCategoryForCookPost: (catKey: string, catLabel: string, postId: string) => void;
   currentUserId: string | null;
+  popChooseDishOrMenuWithToast: (message: string) => void;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
@@ -2112,7 +2141,7 @@ function ScreenStage({
         pointerEvents: isTransitioning ? "none" : "auto",
         paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
       }}>
-        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState, finishCreateCategoryForCookPost, currentUserId)}
+        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState, finishCreateCategoryForCookPost, currentUserId, popChooseDishOrMenuWithToast)}
       </div>
 
       {/* Overlay layer - only during transitions, renders from screen */}
@@ -2125,7 +2154,7 @@ function ScreenStage({
           pointerEvents: "none",
           paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
         }}>
-          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState, finishCreateCategoryForCookPost, currentUserId)}
+          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState, finishCreateCategoryForCookPost, currentUserId, popChooseDishOrMenuWithToast)}
         </div>
       )}
     </div>
@@ -3123,6 +3152,7 @@ function RecipeCard({
   profile,
   onUpdate,
   autoOpenLog,
+  toastMessage,
 }: {
   recipe: Recipe;
   categoryLabel: string;
@@ -3134,6 +3164,7 @@ function RecipeCard({
   profile?: ProfileType | null;
   onUpdate?: (updates: Partial<ProfileType>) => Promise<void>;
   autoOpenLog?: boolean;
+  toastMessage?: string;
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps" | "history" | "pairings">("ingredients");
   const [shareConfirm, setShareConfirm] = useState(false);
@@ -3201,6 +3232,9 @@ function RecipeCard({
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [sentConfirm, setSentConfirm] = useState(false);
+  // Toast carried in from ChooseDishOrMenu (step 3c) via popChooseDishOrMenuWithToast
+  // — "Cook logged"/"Posted" after logging a cook for a saved dish/menu plan.
+  const [incomingToast, setIncomingToast] = useState<string | null>(toastMessage ?? null);
   // Pairings tab state — kept per-mount (reset on recipe change below) so
   // switching tabs back and forth never refetches. "off" means the server
   // truth (wants_pairings read fresh in getPairingsForRecipe) disagreed with
@@ -3474,6 +3508,14 @@ function RecipeCard({
     openLogSheetForCreate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpenLog]);
+
+  useEffect(() => {
+    if (!toastMessage) return;
+    setIncomingToast(toastMessage);
+    const t = setTimeout(() => setIncomingToast(null), 1800);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toastMessage]);
 
   const openLogSheetForEdit = (event: CookEvent) => {
     setLogMode("edit");
@@ -6165,6 +6207,28 @@ function RecipeCard({
             </div>
           </div>
         </>
+      )}
+
+      {/* Cook-logged toast, carried in from ChooseDishOrMenu */}
+      {incomingToast && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "80px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "#233C00",
+            color: "#FEE7C0",
+            padding: "8px 16px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            fontFamily: "Inter, sans-serif",
+            fontWeight: 500,
+            zIndex: 1000,
+          }}
+        >
+          {incomingToast}
+        </div>
       )}
 
       {/* Sent confirmation toast */}

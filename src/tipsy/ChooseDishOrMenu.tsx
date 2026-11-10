@@ -1,15 +1,12 @@
 import { useEffect, useState } from "react";
 import { listMyPlans, type PlanSummary } from "./data";
 import { DishIcon, MenuIcon, ChevronIcon } from "./LogCookTypePicker";
+import LogGroupingCookSheet from "./LogGroupingCookSheet";
 
-// Dishes & Menus v1.5 step 2b — reached only via LogCookTypePicker's "Start
-// from a saved dish or menu" link. Dish rows push the real Dish screen
-// (step 3a); menu rows push the real Menu screen (step 3b) — both with
-// groupingId for the edit flow.
-type Screen =
-  | { name: "placeholder"; title: string; kind?: "dish" | "menu"; groupingId?: string }
-  | { name: "dishScreen"; groupingId?: string }
-  | { name: "menuScreen"; groupingId?: string };
+// Dishes & Menus v1.5 step 2b/3c — reached only via LogCookTypePicker's
+// "Start from a saved dish or menu" link. A row tap opens the LOG THIS COOK
+// sheet for that plan, over this screen (step 3c) — it no longer navigates
+// to the Dish/Menu edit screen.
 
 const FONT_SANS = "'Inter', sans-serif";
 const FONT_SERIF_ITALIC = "'Fraunces', serif";
@@ -35,13 +32,14 @@ function subtitleFor(plan: PlanSummary): string {
 
 export default function ChooseDishOrMenu({
   back,
-  push,
+  onLogged,
 }: {
   back: () => void;
-  push: (s: Screen) => void;
+  onLogged: (message: string) => void;
 }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [state, setState] = useState<{ loaded: boolean; plans: PlanSummary[] }>({ loaded: false, plans: [] });
+  const [openPlan, setOpenPlan] = useState<PlanSummary | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -157,11 +155,7 @@ export default function ChooseDishOrMenu({
           filteredPlans.map((plan) => (
             <button
               key={plan.id}
-              onClick={() =>
-                plan.kind === "dish"
-                  ? push({ name: "dishScreen", groupingId: plan.id })
-                  : push({ name: "menuScreen", groupingId: plan.id })
-              }
+              onClick={() => setOpenPlan(plan)}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -237,6 +231,19 @@ export default function ChooseDishOrMenu({
           ))
         )}
       </div>
+
+      {openPlan && (
+        <LogGroupingCookSheet
+          groupingId={openPlan.id}
+          planTitle={openPlan.title || (openPlan.kind === "dish" ? "Untitled dish" : "Untitled menu")}
+          partCount={openPlan.partCount}
+          onClose={() => setOpenPlan(null)}
+          onLogged={(msg) => {
+            setOpenPlan(null);
+            onLogged(msg);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -29,6 +29,7 @@ import {
   APP_MAX_WIDTH,
 } from "./DishScreen";
 import { DishIcon } from "./LogCookTypePicker";
+import LogGroupingCookSheet from "./LogGroupingCookSheet";
 
 // Dishes & Menus v1.5 step 3b — the real Menu screen, replacing the
 // "placeholder" slot for kind="menu" (step 2b wired the handoff). Reuses
@@ -94,6 +95,8 @@ export default function MenuScreen({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
   const [allDishes, setAllDishes] = useState<PlanSummary[] | null>(null);
+  const [logCookOpen, setLogCookOpen] = useState(false);
+  const [logCookToast, setLogCookToast] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -271,7 +274,13 @@ export default function MenuScreen({
     const id = await doSave();
     if (!id) return;
     setActiveGroupingId(id);
-    push({ name: "placeholder", title: "Log this cook (preview)", kind: "menu", groupingId: id });
+    setLogCookOpen(true);
+  }
+
+  function handleCookLogged(message: string) {
+    setLogCookOpen(false);
+    setLogCookToast(message);
+    setTimeout(() => setLogCookToast(null), 1800);
   }
 
   const visibleCourses = COURSES.filter((c) => parts.some((p) => p.course === c.key));
@@ -386,6 +395,7 @@ export default function MenuScreen({
       )}
 
       <SavedToast show={justSaved} />
+      <SavedToast show={!!logCookToast} message={logCookToast ?? undefined} />
 
       {addSheetCourse && (
         <AddPartSheet
@@ -408,6 +418,16 @@ export default function MenuScreen({
           recipeTitle={seedRecipe.title}
           onClose={() => setSeedCoursePickerOpen(false)}
           onPick={addSeedToCourse}
+        />
+      )}
+
+      {logCookOpen && activeGroupingId && (
+        <LogGroupingCookSheet
+          groupingId={activeGroupingId}
+          planTitle={name}
+          partCount={parts.length}
+          onClose={() => setLogCookOpen(false)}
+          onLogged={handleCookLogged}
         />
       )}
 

@@ -111,12 +111,14 @@ export default function Home({
   seedBuildFromChip,
   goToReceivedShelf,
   switchToTab,
+  toastMessage,
 }: {
   profile: ProfileType | null;
   push: HomePush;
   seedBuildFromChip: (prompt: string) => void;
   goToReceivedShelf: () => void;
   switchToTab: (tab: "build" | "recipes" | "grocery" | "profile" | "home") => void;
+  toastMessage?: string;
 }) {
   // Slim summary only (most recent title + sender + count) — the actual
   // shelf/list (full tile data) lives on the Recipes tab, which runs its own
@@ -125,6 +127,17 @@ export default function Home({
   // already orders by created_at descending, so items[0] is the most recent.
   const [pendingSummary, setPendingSummary] = useState<{ title: string; senderName: string; count: number } | null>(null);
   const [showLogTypePicker, setShowLogTypePicker] = useState(false);
+  // Toast carried in from ChooseDishOrMenu (step 3c) via App.tsx's
+  // popChooseDishOrMenuWithToast — "Cook logged"/"Posted" after logging a
+  // cook for a saved dish/menu plan started from Home.
+  const [incomingToast, setIncomingToast] = useState<string | null>(toastMessage ?? null);
+  useEffect(() => {
+    if (!toastMessage) return;
+    setIncomingToast(toastMessage);
+    const t = setTimeout(() => setIncomingToast(null), 1800);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toastMessage]);
   // Discovered shelf (public-share chunk 3). Recorded as pending here too,
   // not only in Onboarding's Loader — this is the "View in app" path for an
   // already-signed-in user re-opening the same share link, where the token
@@ -601,6 +614,27 @@ export default function Home({
           </div>
         </div>
       </div>
+
+      {incomingToast && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "80px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "#233C00",
+            color: "#FEE7C0",
+            padding: "8px 16px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            fontFamily: "Inter, sans-serif",
+            fontWeight: 500,
+            zIndex: 1000,
+          }}
+        >
+          {incomingToast}
+        </div>
+      )}
     </div>
   );
 }

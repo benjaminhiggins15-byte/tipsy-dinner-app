@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { IconBook, IconCheck, IconLayoutList, IconPencil, IconPlus, IconSearch, IconX } from "@tabler/icons-react";
 import { createGrouping, updateGrouping, getPlan, type Recipe, type GroupingPartInput, type PlanSummary } from "./data";
+import LogGroupingCookSheet from "./LogGroupingCookSheet";
 
 // Dishes & Menus v1.5 step 3a/3b — the real Dish and Menu screens, replacing
 // the "placeholder" slot for kind="dish"/"menu" (step 2a/2b wired the
@@ -175,7 +176,7 @@ export function SaveLogFooter({
 }
 
 // "Saved" pill toast — shared by the dish/menu screens.
-export function SavedToast({ show }: { show: boolean }) {
+export function SavedToast({ show, message = "Saved" }: { show: boolean; message?: string }) {
   if (!show) return null;
   return (
     <div
@@ -197,7 +198,7 @@ export function SavedToast({ show }: { show: boolean }) {
         animation: "tipsy-fade 0.2s ease",
       }}
     >
-      Saved
+      {message}
     </div>
   );
 }
@@ -244,6 +245,8 @@ export default function DishScreen({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
+  const [logCookOpen, setLogCookOpen] = useState(false);
+  const [logCookToast, setLogCookToast] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -337,7 +340,13 @@ export default function DishScreen({
     const id = await doSave();
     if (!id) return;
     setActiveGroupingId(id);
-    push({ name: "placeholder", title: "Log this cook (preview)", kind: "dish", groupingId: id });
+    setLogCookOpen(true);
+  }
+
+  function handleCookLogged(message: string) {
+    setLogCookOpen(false);
+    setLogCookToast(message);
+    setTimeout(() => setLogCookToast(null), 1800);
   }
 
   return (
@@ -479,6 +488,7 @@ export default function DishScreen({
       )}
 
       <SavedToast show={justSaved} />
+      <SavedToast show={!!logCookToast} message={logCookToast ?? undefined} />
 
       {addSheetOpen && (
         <AddPartSheet
@@ -488,6 +498,16 @@ export default function DishScreen({
           addedRecipeIds={addedRecipeIds}
           onAddRecipe={addRecipePart}
           onAddFreeform={addFreeformPart}
+        />
+      )}
+
+      {logCookOpen && activeGroupingId && (
+        <LogGroupingCookSheet
+          groupingId={activeGroupingId}
+          planTitle={name}
+          partCount={parts.length}
+          onClose={() => setLogCookOpen(false)}
+          onLogged={handleCookLogged}
         />
       )}
 
