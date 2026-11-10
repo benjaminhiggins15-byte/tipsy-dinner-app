@@ -218,6 +218,41 @@ export default function LogGroupingCookSheet({
 
           {/* Scrollable body */}
           <div style={{ flex: 1, overflowY: "auto", padding: "12px 20px 16px" }}>
+            {/* Post publicly */}
+            <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", marginBottom: 6 }}>
+              <span style={{ fontFamily: FONT_SANS, fontSize: 14, fontWeight: 500, color: FOREST }}>Post publicly</span>
+              <span
+                role="switch"
+                aria-checked={isPosted}
+                onClick={() => setIsPosted((v) => !v)}
+                style={{
+                  position: "relative",
+                  width: 42,
+                  height: 24,
+                  borderRadius: 12,
+                  background: isPosted ? FOREST : "rgba(35,60,0,0.15)",
+                  transition: "background 150ms ease",
+                  flexShrink: 0,
+                }}
+              >
+                <span
+                  style={{
+                    position: "absolute",
+                    top: 3,
+                    left: isPosted ? 21 : 3,
+                    width: 18,
+                    height: 18,
+                    borderRadius: "50%",
+                    background: "#FAF7F2",
+                    transition: "left 150ms ease",
+                  }}
+                />
+              </span>
+            </label>
+            <div style={{ marginBottom: 20, fontFamily: FONT_SANS, fontSize: 12, color: MUTED_TEXT }}>
+              {isPosted ? "Shows in the feed. Off keeps it in your private history." : "Only you see this. Turn on to share it in the feed."}
+            </div>
+
             {/* Date */}
             <div style={{ fontFamily: FONT_SANS, fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: MUTED_TEXT, marginBottom: 8 }}>
               Date
@@ -370,41 +405,6 @@ export default function LogGroupingCookSheet({
                 marginBottom: 20,
               }}
             />
-
-            {/* Post publicly */}
-            <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
-              <span style={{ fontFamily: FONT_SANS, fontSize: 14, fontWeight: 500, color: FOREST }}>Post publicly</span>
-              <span
-                role="switch"
-                aria-checked={isPosted}
-                onClick={() => setIsPosted((v) => !v)}
-                style={{
-                  position: "relative",
-                  width: 42,
-                  height: 24,
-                  borderRadius: 12,
-                  background: isPosted ? FOREST : "rgba(35,60,0,0.15)",
-                  transition: "background 150ms ease",
-                  flexShrink: 0,
-                }}
-              >
-                <span
-                  style={{
-                    position: "absolute",
-                    top: 3,
-                    left: isPosted ? 21 : 3,
-                    width: 18,
-                    height: 18,
-                    borderRadius: "50%",
-                    background: "#FAF7F2",
-                    transition: "left 150ms ease",
-                  }}
-                />
-              </span>
-            </label>
-            <div style={{ marginTop: 6, fontFamily: FONT_SANS, fontSize: 12, color: MUTED_TEXT }}>
-              {isPosted ? "Shows in the feed. Off keeps it in your private history." : "Only you see this. Turn on to share it in the feed."}
-            </div>
 
             {saveError && (
               <div style={{ marginTop: 16, fontFamily: FONT_SANS, fontSize: 13, color: "#B85C5C", textAlign: "center" }}>{saveError}</div>
