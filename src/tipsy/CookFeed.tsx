@@ -9,7 +9,6 @@ import {
   getAllCategories,
   getRecipesForCategory,
   saveGroupingFromPost,
-  getSavedGroupingIdForPost,
   COOK_FEED_PAGE_SIZE,
   type CookFeedPost,
   type CookPostDetail,
@@ -978,6 +977,9 @@ export function DishMenuPostDetailScreen({
   currentUserId,
   back,
   push,
+  cachedEntry,
+  ensureLoaded,
+  onSaved,
 }: {
   postId: string;
   // Unused since step 4e (dish/menu saves no longer go through a category
@@ -991,8 +993,17 @@ export function DishMenuPostDetailScreen({
   currentUserId: string | null;
   back: () => void;
   push: (s: Screen) => void;
+  // App-level cache (App.tsx's dishMenuPostDetailCache), keyed by postId —
+  // ScreenStage remounts this screen into a fresh instance whenever it
+  // becomes the transition's outgoing ("from") layer, so fetched data must
+  // live above this component to survive that remount without a refetch/flash.
+  cachedEntry?: { detail: CookPostDetail | null; savedGroupingId: string | null };
+  ensureLoaded: (postId: string) => Promise<void>;
+  onSaved: (postId: string, groupingId: string) => void;
 }) {
-  const [detail, setDetail] = useState<CookPostDetail | null | undefined>(undefined);
+  // undefined = cache miss, not yet fetched; detail null = fetched, post gone.
+  const detail = cachedEntry ? cachedEntry.detail : undefined;
+  const savedGroupingId = cachedEntry ? cachedEntry.savedGroupingId : undefined;
   // Keyed on each part's index within the top-level grouping_snapshot.parts
   // array (snapshot parts carry no id) — dish rows start expanded by default
   // per spec, collapsed by removing their index from this set.
@@ -1002,39 +1013,22 @@ export function DishMenuPostDetailScreen({
   // plays; only the boolean toggles on tap/close, the data stays put.
   const [overlayRecipe, setOverlayRecipe] = useState<RecipeSendSnapshot | null>(null);
   const [overlayOpen, setOverlayOpen] = useState(false);
-  // undefined = not yet checked (getSavedGroupingIdForPost hasn't resolved);
-  // null = checked, nothing saved; string = this grouping's own saved
-  // grouping id. Persisted (unlike CookPostDetailScreen's local-only
-  // `saved`) because step 4c's spec requires re-opening the post to show
-  // SAVED from the start — see getSavedGroupingIdForPost's own doc comment
-  // in data.ts for the query this mirrors.
-  const [savedGroupingId, setSavedGroupingId] = useState<string | null | undefined>(undefined);
   const [toast, setToast] = useState<{ groupingId: string; kind: "dish" | "menu" } | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
 
   useEffect(() => {
-    let ignore = false;
-    (async () => {
-      // Fetched in parallel (not sequentially) so the already-saved check
-      // resolves before the loading gate clears — avoids a "Save" → "Saved"
-      // flash on screens that were already saved.
-      const [result, existingGroupingId] = await Promise.all([getCookPost(postId), getSavedGroupingIdForPost(postId)]);
-      if (ignore) return;
-      setDetail(result);
-      setSavedGroupingId(existingGroupingId);
-      if (result) {
-        const initial = new Set<number>();
-        result.grouping_snapshot.parts.forEach((p, i) => {
-          if (p.dish) initial.add(i);
-        });
-        setExpandedDishes(initial);
-      }
-    })();
-    return () => {
-      ignore = true;
-    };
+    ensureLoaded(postId);
   }, [postId]);
+
+  useEffect(() => {
+    if (!detail) return;
+    const initial = new Set<number>();
+    detail.grouping_snapshot.parts.forEach((p, i) => {
+      if (p.dish) initial.add(i);
+    });
+    setExpandedDishes(initial);
+  }, [detail, postId]);
 
   function toggleDish(idx: number) {
     setExpandedDishes((prev) => {
@@ -1107,7 +1101,7 @@ export function DishMenuPostDetailScreen({
     setSaveError(false);
     try {
       const groupingId = await saveGroupingFromPost(postId);
-      setSavedGroupingId(groupingId);
+      onSaved(postId, groupingId);
       setToast({ groupingId, kind });
       // recipe_saved — cook feed dish/menu post saved to the library
       // (reuses the closest existing event type; no grouping-specific

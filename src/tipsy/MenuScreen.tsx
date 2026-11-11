@@ -292,19 +292,36 @@ export default function MenuScreen({
       <ScreenTitleHeader title={activeGroupingId ? "Edit menu" : "New menu"} onBack={back} />
 
       {loadError ? (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, gap: 16 }}>
           <p style={{ fontFamily: FONT_SERIF_ITALIC, fontStyle: "italic", fontSize: 14, color: MUTED_TEXT, textAlign: "center" }}>{loadError}</p>
+          <button
+            onClick={back}
+            style={{
+              background: "transparent",
+              border: "none",
+              padding: 0,
+              cursor: "pointer",
+              fontFamily: FONT_SANS,
+              fontSize: 13,
+              fontWeight: 700,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              color: FOREST,
+            }}
+          >
+            Go back
+          </button>
+        </div>
+      ) : loading ? (
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <span style={{ fontFamily: FONT_SERIF_ITALIC, fontStyle: "italic", fontSize: 14, color: MUTED_TEXT }}>Loading…</span>
         </div>
       ) : (
         <>
           <div style={{ flex: 1, overflowY: "auto", padding: "4px 20px 16px" }}>
-            <NameField value={name} onChange={setName} placeholder="Name your menu" disabled={loading} />
+            <NameField value={name} onChange={setName} placeholder="Name your menu" />
 
-            {loading ? (
-              <div style={{ padding: "28px 0", textAlign: "center" }}>
-                <span style={{ fontFamily: FONT_SERIF_ITALIC, fontStyle: "italic", fontSize: 14, color: MUTED_TEXT }}>Loading…</span>
-              </div>
-            ) : parts.length === 0 ? (
+            {parts.length === 0 ? (
               <>
                 <div
                   style={{ fontFamily: FONT_SANS, fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: MUTED_TEXT, marginBottom: 10 }}
