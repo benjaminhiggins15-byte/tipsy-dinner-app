@@ -980,6 +980,10 @@ export function DishMenuPostDetailScreen({
   push,
 }: {
   postId: string;
+  // Unused since step 4e (dish/menu saves no longer go through a category
+  // sheet) — kept on the prop type and still threaded in from App.tsx so
+  // step 5's "Add to my recipes" (reusing SaveToSheet below) can wire it
+  // back up without a signature change.
   newCategory?: { key: string; label: string };
   // Null is a valid, expected state (not yet resolved) — treated the same as
   // "not the poster" so the Save button never shows before identity is known,
@@ -998,10 +1002,6 @@ export function DishMenuPostDetailScreen({
   // plays; only the boolean toggles on tap/close, the data stays put.
   const [overlayRecipe, setOverlayRecipe] = useState<RecipeSendSnapshot | null>(null);
   const [overlayOpen, setOverlayOpen] = useState(false);
-  // Mirrors DiscoveredDetailView's pattern (Home.tsx) / CookPostDetailScreen
-  // above — trayOpen starts true when re-entering with a freshly created
-  // category.
-  const [trayOpen, setTrayOpen] = useState(!!newCategory);
   // undefined = not yet checked (getSavedGroupingIdForPost hasn't resolved);
   // null = checked, nothing saved; string = this grouping's own saved
   // grouping id. Persisted (unlike CookPostDetailScreen's local-only
@@ -1009,7 +1009,9 @@ export function DishMenuPostDetailScreen({
   // SAVED from the start — see getSavedGroupingIdForPost's own doc comment
   // in data.ts for the query this mirrors.
   const [savedGroupingId, setSavedGroupingId] = useState<string | null | undefined>(undefined);
-  const [toast, setToast] = useState<{ categoryLabel: string; groupingId: string; kind: "dish" | "menu" } | null>(null);
+  const [toast, setToast] = useState<{ groupingId: string; kind: "dish" | "menu" } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
 
   useEffect(() => {
     let ignore = false;
@@ -1094,6 +1096,31 @@ export function DishMenuPostDetailScreen({
             .sort((a, b) => a.part.position - b.part.position),
         })).filter((c) => c.items.length > 0)
       : [];
+
+  // Step 4e — one-tap save, no category sheet: p_category_id is left
+  // unset (save_grouping_from_post ignores it for kind in ('dish','menu')
+  // and the recipes it creates land hidden, in_library=false — see
+  // saveGroupingFromPost's own comment in data.ts).
+  async function handleSave() {
+    if (saving) return;
+    setSaving(true);
+    setSaveError(false);
+    try {
+      const groupingId = await saveGroupingFromPost(postId);
+      setSavedGroupingId(groupingId);
+      setToast({ groupingId, kind });
+      // recipe_saved — cook feed dish/menu post saved to the library
+      // (reuses the closest existing event type; no grouping-specific
+      // event exists yet, same convention as CookPostDetailScreen's
+      // own recipe_saved call above).
+      logEvent("recipe_saved", { grouping_id: groupingId, source: "cook_feed_dish_menu" });
+    } catch (error) {
+      console.error("Couldn't save this grouping:", error);
+      setSaveError(true);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: BODY_BG, position: "relative" }}>
@@ -1228,6 +1255,11 @@ export function DishMenuPostDetailScreen({
             }}
           />
           <div style={{ padding: "0 20px 20px", background: BODY_BG }}>
+            {saveError && (
+              <div style={{ marginBottom: 12, fontFamily: FONT_SANS, fontSize: 13, color: "#B85C5C", textAlign: "center" }}>
+                Couldn't save. Nothing was added. Try again.
+              </div>
+            )}
             {savedGroupingId ? (
               <div
                 style={{
@@ -1253,13 +1285,14 @@ export function DishMenuPostDetailScreen({
               </div>
             ) : (
               <button
-                onClick={() => setTrayOpen(true)}
+                onClick={handleSave}
+                disabled={saving}
                 style={{
                   display: "block",
                   width: "100%",
                   height: 56,
                   borderRadius: 100,
-                  background: FOREST,
+                  background: saving ? "rgba(35,60,0,0.4)" : FOREST,
                   color: "#FAF7F2",
                   border: "none",
                   fontFamily: FONT_SANS,
@@ -1267,41 +1300,18 @@ export function DishMenuPostDetailScreen({
                   fontWeight: 700,
                   textTransform: "uppercase",
                   letterSpacing: "0.08em",
-                  cursor: "pointer",
+                  cursor: saving ? "default" : "pointer",
                 }}
               >
-                {kind === "dish" ? "Save dish" : "Save menu"}
+                {saving ? "Saving…" : kind === "dish" ? "Save dish" : "Save menu"}
               </button>
             )}
           </div>
         </div>
       )}
 
-      {trayOpen && (
-        <SaveToSheet
-          kind={kind}
-          initialSelectedCategory={newCategory || null}
-          onClose={() => setTrayOpen(false)}
-          onNew={() => {
-            setTrayOpen(false);
-            push({ name: "newcategoryfordishmenupost", postId });
-          }}
-          onSave={async (catKey, catLabel) => {
-            const groupingId = await saveGroupingFromPost(postId, catKey);
-            setSavedGroupingId(groupingId);
-            setToast({ categoryLabel: catLabel, groupingId, kind });
-            // recipe_saved — cook feed dish/menu post saved to the library
-            // (reuses the closest existing event type; no grouping-specific
-            // event exists yet, same convention as CookPostDetailScreen's
-            // own recipe_saved call above).
-            logEvent("recipe_saved", { grouping_id: groupingId, source: "cook_feed_dish_menu" });
-          }}
-        />
-      )}
-
       {toast && (
         <SaveToast
-          categoryLabel={toast.categoryLabel}
           onView={() => {
             const target = toast;
             setToast(null);
@@ -1333,12 +1343,25 @@ export function DishMenuPostDetailScreen({
 // existing toast (App.tsx's incomingToast, DishScreen's SavedToast) supports
 // (both are plain auto-dismiss text); a longer-than-usual auto-dismiss gives
 // the user time to tap View before it clears itself.
+//
+// Step 4e fix: this never actually appeared. `position: fixed` doesn't
+// escape ScreenStage's screen layer (App.tsx) -- that layer always carries
+// an inline `transform` (even "translateX(0)" at rest) plus
+// `willChange: "transform"`, and per spec EITHER one makes the layer a
+// containing block for fixed descendants, same trap CLAUDE.md's
+// `paddingBottom: 64` note documents for the Cook History sheet. A `bottom`
+// offset measured from that layer's bottom edge (64px past the real
+// viewport bottom, for nav-bar clearance) landed this toast behind/under
+// the real bottom tab bar (BottomTabBar, a true sibling fixed element with
+// zIndex 100) instead of above it -- invisible regardless of this
+// component's own zIndex, which only ranks it within the layer's own local
+// stacking context. Fixed the same way SaveToSheet above escapes the same
+// layer: createPortal straight to document.body, restating APP_MAX_WIDTH
+// to stay centered on wide screens.
 function SaveToast({
-  categoryLabel,
   onView,
   onDismiss,
 }: {
-  categoryLabel: string;
   onView: () => void;
   onDismiss: () => void;
 }) {
@@ -1347,38 +1370,57 @@ function SaveToast({
     return () => clearTimeout(timer);
   }, [onDismiss]);
 
-  return (
+  return createPortal(
     <div
       style={{
         position: "fixed",
-        left: 16,
-        right: 16,
-        bottom: 24,
-        zIndex: 60,
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 210,
         display: "flex",
         justifyContent: "center",
+        pointerEvents: "none",
       }}
     >
       <div
         style={{
-          background: FOREST,
-          color: "#FAF7F2",
-          borderRadius: 14,
-          padding: "12px 16px",
-          fontFamily: FONT_SANS,
-          fontSize: 13,
-          textAlign: "center",
-          maxWidth: APP_MAX_WIDTH - 32,
+          position: "relative",
+          width: "100%",
+          maxWidth: APP_MAX_WIDTH,
+          height: "100%",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          paddingBottom: 80,
         }}
       >
-        Saved. Recipes added to {categoryLabel}.{" "}
-        <span
-          onClick={onView}
-          style={{ fontFamily: FONT_SERIF_ITALIC, fontStyle: "italic", textDecoration: "underline", cursor: "pointer" }}
+        <div
+          style={{
+            pointerEvents: "auto",
+            background: FOREST,
+            color: "#FAF7F2",
+            borderRadius: 14,
+            padding: "12px 16px",
+            fontFamily: FONT_SANS,
+            fontSize: 13,
+            textAlign: "center",
+            maxWidth: APP_MAX_WIDTH - 32,
+            animation: "tipsy-fade 0.22s ease",
+          }}
         >
-          View
-        </span>
+          Saved to Dishes &amp; Menus.{" "}
+          <span
+            onClick={onView}
+            style={{ fontFamily: FONT_SERIF_ITALIC, fontStyle: "italic", textDecoration: "underline", cursor: "pointer" }}
+          >
+            View
+          </span>
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

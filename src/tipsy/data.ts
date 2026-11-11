@@ -1606,6 +1606,7 @@ export async function getSavedRecipesForCategory(categoryId: string, label: stri
       `)
       .eq('category_id', categoryId)
       .eq('user_id', userId)
+      .eq('recipes.in_library', true)
       .order('cooked_on', { ascending: false, foreignTable: 'recipes.cook_events' });
 
     if (error) throw error;
@@ -1692,6 +1693,7 @@ export async function getSavedRecipesAll(): Promise<Recipe[]> {
         )
       `)
       .eq('user_id', userId)
+      .eq('recipes.in_library', true)
       .order('cooked_on', { ascending: false, foreignTable: 'recipes.cook_events' });
 
     if (error) throw error;
@@ -4849,10 +4851,14 @@ export async function saveFeedRecipe(
 // existing recipe-kind behavior), there's no prior dish/menu save feature
 // establishing a parity bar, and the RPC itself never sets photo_url on the
 // recipes it creates.
-export async function saveGroupingFromPost(postId: string, categoryId: string): Promise<string> {
+// categoryId is omitted entirely for a dish/menu one-tap save (step 4e) --
+// save_grouping_from_post ignores p_category_id for kind in ('dish','menu')
+// and defaults it to null; a recipe-kind save (step 5's future "Add to my
+// recipes") still passes one.
+export async function saveGroupingFromPost(postId: string, categoryId?: string): Promise<string> {
   const { data: groupingId, error } = await supabase.rpc('save_grouping_from_post', {
     p_post_id: postId,
-    p_category_id: categoryId,
+    p_category_id: categoryId ?? null,
   });
   if (error) throw error;
   return groupingId as string;
