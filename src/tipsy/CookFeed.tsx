@@ -538,6 +538,7 @@ export function CookPostDetailScreen({
         recipe={recipe}
         sharerName={detail.poster_display_name}
         sharerLabel="cooked by"
+        sharerDate={formatCookedOn(detail.cooked_on)}
         photoUrl={detail.photo_url ?? undefined}
         onBack={back}
         onSave={isOwnPost ? undefined : saved ? () => {} : saving ? undefined : () => setTrayOpen(true)}
@@ -999,6 +1000,9 @@ export function DishMenuPostDetailScreen({
         }}
         cookTime={overlayRecipe?.cook_time}
         serves={overlayRecipe?.serves}
+        sharerName={detail.poster_display_name}
+        sharerLabel="cooked by"
+        sharerDate={formatCookedOn(detail.cooked_on)}
         onBack={() => setOverlayOpen(false)}
       />
     </div>

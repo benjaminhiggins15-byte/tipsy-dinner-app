@@ -15,6 +15,7 @@ export default function ExpandedRecipeOverlay({
   saveDisabled = false,
   sharerName,
   sharerLabel = "inspired by",
+  sharerDate,
   onSignIn,
   photoUrl,
   onBack,
@@ -51,6 +52,11 @@ export default function ExpandedRecipeOverlay({
   // by" phrasing; Cook Feed passes "cooked by" since sharerName there is the
   // poster, not an inspiration source.
   sharerLabel?: string;
+  // Pre-formatted (e.g. "Nov 10") — callers format with their own date logic
+  // (local date, no UTC off-by-one) rather than this component owning a
+  // second copy of that math. Appended after sharerName; has no effect
+  // without sharerName also set.
+  sharerDate?: string;
   onSignIn?: () => void;
   photoUrl?: string | null;
   // Optional back control for callers that mount this as a full navigated
@@ -218,7 +224,7 @@ export default function ExpandedRecipeOverlay({
               color: "rgba(35,60,0,0.5)",
               marginBottom: 12,
             }}>
-              {sharerLabel} {sharerName}
+              {sharerLabel} {sharerName}{sharerDate ? ` · ${sharerDate}` : ""}
             </div>
           )}
           {(cookTime || serves) && (
