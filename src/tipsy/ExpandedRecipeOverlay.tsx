@@ -19,6 +19,8 @@ export default function ExpandedRecipeOverlay({
   photoUrl,
   onBack,
   onDismiss,
+  cookTime,
+  serves,
 }: {
   open: boolean;
   bottomOffset: number;
@@ -31,6 +33,12 @@ export default function ExpandedRecipeOverlay({
     ingredients: { name: string; qty: string }[];
     steps: RecipeStep[];
   };
+  // Optional meta line (e.g. "35 min · Serves 4") rendered between the
+  // sharer line and the description — omitted entirely when both are
+  // absent, same convention as the public share route's own cook-time/
+  // serves meta row (src/routes/r.$token.tsx).
+  cookTime?: string | null;
+  serves?: string | null;
   // Optional, additive props for the logged-out share-view caller — all
   // default to Build's original behavior exactly when omitted.
   saveLabel?: string;
@@ -211,6 +219,19 @@ export default function ExpandedRecipeOverlay({
               marginBottom: 12,
             }}>
               {sharerLabel} {sharerName}
+            </div>
+          )}
+          {(cookTime || serves) && (
+            <div style={{
+              fontFamily: "Inter, sans-serif",
+              fontSize: 13,
+              fontWeight: 500,
+              color: "rgba(35,60,0,0.5)",
+              marginBottom: 12,
+            }}>
+              {cookTime}
+              {cookTime && serves && " · "}
+              {serves && `Serves ${serves}`}
             </div>
           )}
           <div style={{

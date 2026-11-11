@@ -19,7 +19,7 @@ import LogCookTypePicker from "./LogCookTypePicker";
 import ChooseDishOrMenu from "./ChooseDishOrMenu";
 import DishScreen from "./DishScreen";
 import MenuScreen from "./MenuScreen";
-import { CookFeedScreen, CookPostDetailScreen, type CookFeedState } from "./CookFeed";
+import { CookFeedScreen, CookPostDetailScreen, DishMenuPostDetailScreen, type CookFeedState } from "./CookFeed";
 import { supabase } from "../lib/supabase";
 import { logEvent, isAccountDeletionInFlight } from "../lib/events";
 import type { Session } from "@supabase/supabase-js";
@@ -344,7 +344,8 @@ type Screen =
   | { name: "newcategoryfordiscovered"; recipe: DiscoveredRecipe }
   | { name: "cookFeed" }
   | { name: "cookPostDetail"; postId: string; newCategory?: { key: string; label: string } }
-  | { name: "newcategoryforcookpost"; postId: string };
+  | { name: "newcategoryforcookpost"; postId: string }
+  | { name: "dishMenuPostDetail"; postId: string };
 
 type TabId = "build" | "recipes" | "grocery" | "profile" | "home";
 
@@ -406,6 +407,7 @@ function screenKey(s: Screen): string {
     case "cookFeed": return "cookFeed";
     case "cookPostDetail": return `cookPostDetail:${s.postId}`;
     case "newcategoryforcookpost": return `newcategoryforcookpost:${s.postId}`;
+    case "dishMenuPostDetail": return `dishMenuPostDetail:${s.postId}`;
   }
 }
 
@@ -661,6 +663,14 @@ function renderScreen(
         onSaved={(cat) => {
           if (cat) finishCreateCategoryForCookPost?.(cat.key, cat.label, s.postId);
         }}
+      />
+    );
+    case "dishMenuPostDetail": return (
+      <DishMenuPostDetailScreen
+        postId={s.postId}
+        currentUserId={currentUserId ?? null}
+        back={back}
+        push={push}
       />
     );
   }
