@@ -1,10 +1,15 @@
-import { useState, useEffect } from "react";
-import { IconRefresh, IconBook, IconLayoutList, IconChevronRight } from "@tabler/icons-react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
+import { IconRefresh, IconBook, IconLayoutList, IconChevronRight, IconPlus, IconCheck, IconX } from "@tabler/icons-react";
 import {
   getCookFeed,
   getCookPost,
   saveFeedRecipe,
   addRecipeToMenuSection,
+  getAllCategories,
+  getRecipesForCategory,
+  saveGroupingFromPost,
+  getSavedGroupingIdForPost,
   COOK_FEED_PAGE_SIZE,
   type CookFeedPost,
   type CookPostDetail,
@@ -17,7 +22,7 @@ import { logEvent } from "../lib/events";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 import { DishIcon } from "./LogCookTypePicker";
-import { FONT_SANS, FONT_SERIF_ITALIC, FOREST, CARD_BG, CARD_BORDER, MUTED_TEXT, BODY_BG, PosterRow } from "./DishScreen";
+import { FONT_SANS, FONT_SERIF_ITALIC, FOREST, CARD_BG, CARD_BORDER, MUTED_TEXT, BODY_BG, APP_MAX_WIDTH, PosterRow } from "./DishScreen";
 
 // Cook Feed — Step 2b (the screen itself). Reads ONLY through get_cook_feed/
 // get_cook_post (see CLAUDE.md's Cooking Feed — Step 2a entry); this file
@@ -62,7 +67,10 @@ export type CookFeedState = {
 type Screen =
   | { name: "cookPostDetail"; postId: string; newCategory?: { key: string; label: string } }
   | { name: "newcategoryforcookpost"; postId: string }
-  | { name: "dishMenuPostDetail"; postId: string }
+  | { name: "dishMenuPostDetail"; postId: string; newCategory?: { key: string; label: string } }
+  | { name: "newcategoryfordishmenupost"; postId: string }
+  | { name: "dishScreen"; groupingId?: string; recipe?: Recipe }
+  | { name: "menuScreen"; groupingId?: string; recipe?: Recipe }
   | { name: "placeholder"; title: string; kind?: "dish" | "menu"; recipeId?: string; groupingId?: string; postId?: string };
 
 const COURSES: { key: MenuSection; label: string }[] = [
@@ -706,6 +714,255 @@ function SnapshotPartRow({
   );
 }
 
+// Dishes & Menus v1.5 step 4c — the "SAVE TO" sheet for dish/menu posts.
+// Mirrors AddPartSheet's shell exactly (DishScreen.tsx: portal to
+// document.body, app-column-width backdrop, X/backdrop-tap/drag-down close)
+// rather than forking it, since no standalone reusable "sheet shell"
+// component exists to import instead. The category list itself is NOT
+// SaveRecipeFlow's horizontal gradient-card picker — this is a bespoke
+// vertical single-select list (name + italic count + check circle) per the
+// v1.5 spec. Only the "new category" sub-flow is reused, via the same onNew
+// push-then-return contract SaveRecipeFlow/AddPartSheet already use.
+// Saving/error state lives HERE (not lifted to the parent) because, unlike
+// CookPostDetailScreen's recipe-save tray (which closes immediately on
+// pick), this sheet must stay open and show "Saving…"/"Try again" in place
+// — the parent's onSave is only responsible for the RPC call and its own
+// success side effects (closing the sheet on success is this component's
+// job: it closes itself once onSave resolves without throwing).
+function SaveToSheet({
+  kind,
+  onClose,
+  onNew,
+  onSave,
+  initialSelectedCategory,
+}: {
+  kind: "dish" | "menu";
+  onClose: () => void;
+  onNew: () => void;
+  onSave: (categoryKey: string, categoryLabel: string) => Promise<void>;
+  initialSelectedCategory?: { key: string; label: string } | null;
+}) {
+  const [categories, setCategories] = useState<{ key: string; label: string; count: number }[] | null>(null);
+  const [selected, setSelected] = useState<{ key: string; label: string } | null>(initialSelectedCategory ?? null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const dragStartY = useRef<number | null>(null);
+
+  useEffect(() => {
+    let ignore = false;
+    (async () => {
+      const cats = await getAllCategories();
+      const counts: Record<string, number> = {};
+      await Promise.all(
+        cats.map(async (cat) => {
+          const recipes = await getRecipesForCategory(cat.key, cat.label);
+          counts[cat.key] = recipes.length;
+        })
+      );
+      if (ignore) return;
+      setCategories(cats.map((c) => ({ key: c.key, label: c.label, count: counts[c.key] ?? 0 })));
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  // Re-fetched categories won't come back pre-sorted with a just-created
+  // category first — reorder it to the top, same convention as
+  // SaveRecipeFlow's initialSelectedCategory handling.
+  const orderedCategories = useMemo(() => {
+    if (!categories) return null;
+    if (!initialSelectedCategory) return categories;
+    return [
+      ...categories.filter((c) => c.key === initialSelectedCategory.key),
+      ...categories.filter((c) => c.key !== initialSelectedCategory.key),
+    ];
+  }, [categories, initialSelectedCategory]);
+
+  async function handleSave() {
+    if (!selected || saving) return;
+    setSaving(true);
+    setSaveError(false);
+    try {
+      await onSave(selected.key, selected.label);
+      onClose();
+    } catch (error) {
+      console.error("Couldn't save this grouping:", error);
+      setSaving(false);
+      setSaveError(true);
+    }
+  }
+
+  function handleClose() {
+    if (saving) return;
+    onClose();
+  }
+
+  return createPortal(
+    <div
+      onClick={handleClose}
+      style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 200, display: "flex", justifyContent: "center" }}
+    >
+      <div style={{ position: "relative", width: "100%", maxWidth: APP_MAX_WIDTH, height: "100%", display: "flex", alignItems: "flex-end" }}>
+        <div style={{ position: "absolute", inset: 0, background: "rgba(35, 60, 0, 0.08)", animation: "tipsy-fade 0.22s ease" }} />
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "relative",
+            background: BODY_BG,
+            borderRadius: "28px 28px 0 0",
+            width: "100%",
+            maxWidth: APP_MAX_WIDTH,
+            maxHeight: "85%",
+            display: "flex",
+            flexDirection: "column",
+            animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
+          }}
+        >
+          <button
+            onClick={handleClose}
+            aria-label="Close"
+            style={{
+              position: "absolute",
+              top: 14,
+              right: 16,
+              width: 32,
+              height: 32,
+              minWidth: 32,
+              borderRadius: "50%",
+              background: "rgba(35,60,0,0.06)",
+              border: "none",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              zIndex: 1,
+            }}
+          >
+            <IconX size={16} stroke={1.75} color={MUTED_TEXT} />
+          </button>
+
+          <div style={{ flexShrink: 0, padding: "14px 20px 0" }}>
+            <div
+              onPointerDown={(e) => {
+                dragStartY.current = e.clientY;
+              }}
+              onPointerMove={(e) => {
+                if (dragStartY.current == null) return;
+                if (e.clientY - dragStartY.current > 60) {
+                  dragStartY.current = null;
+                  handleClose();
+                }
+              }}
+              onPointerUp={() => {
+                dragStartY.current = null;
+              }}
+              onPointerCancel={() => {
+                dragStartY.current = null;
+              }}
+              style={{ width: 60, padding: "10px 0", margin: "-10px auto 8px", display: "flex", justifyContent: "center", cursor: "grab", touchAction: "none" }}
+            >
+              <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(35,60,0,0.15)" }} />
+            </div>
+            <div
+              style={{
+                fontFamily: FONT_SANS,
+                fontSize: 15,
+                fontWeight: 700,
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                color: FOREST,
+                textAlign: "center",
+              }}
+            >
+              Save to
+            </div>
+            <div style={{ fontFamily: FONT_SERIF_ITALIC, fontStyle: "italic", fontSize: 13, color: MUTED_TEXT, textAlign: "center", marginTop: 4, marginBottom: 4 }}>
+              {kind === "dish" ? "Recipes in this dish go here" : "Recipes in this menu go here"}
+            </div>
+          </div>
+
+          <div style={{ flex: 1, overflowY: "auto", padding: "12px 20px 12px" }}>
+            {orderedCategories === null ? (
+              <div style={{ padding: "24px 0", textAlign: "center", fontFamily: FONT_SANS, fontSize: 13, color: MUTED_TEXT }}>Loading…</div>
+            ) : (
+              <>
+                <div
+                  onClick={onNew}
+                  style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 4px", cursor: "pointer", borderBottom: "1px solid rgba(35,60,0,0.08)" }}
+                >
+                  <div style={{ width: 44, height: 44, borderRadius: 12, background: FOREST, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <IconPlus size={22} stroke={2} color="#FAF7F2" />
+                  </div>
+                  <div style={{ flex: 1, fontFamily: FONT_SANS, fontSize: 15, fontWeight: 600, color: FOREST }}>New category</div>
+                  <IconChevronRight size={18} stroke={1.75} color={MUTED_TEXT} />
+                </div>
+
+                {orderedCategories.map((cat) => {
+                  const isSelected = selected?.key === cat.key;
+                  return (
+                    <div
+                      key={cat.key}
+                      onClick={() => setSelected({ key: cat.key, label: cat.label })}
+                      style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 4px", cursor: "pointer", borderBottom: "1px solid rgba(35,60,0,0.08)" }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontFamily: FONT_SANS, fontSize: 15, fontWeight: 600, color: FOREST, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {cat.label}
+                        </div>
+                        <div style={{ fontFamily: FONT_SERIF_ITALIC, fontStyle: "italic", fontSize: 13, color: MUTED_TEXT, marginTop: 2 }}>
+                          {cat.count} {cat.count === 1 ? "recipe" : "recipes"}
+                        </div>
+                      </div>
+                      {isSelected ? (
+                        <div style={{ width: 22, height: 22, borderRadius: "50%", background: FOREST, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          <IconCheck size={14} stroke={3} color="#FAF7F2" />
+                        </div>
+                      ) : (
+                        <div style={{ width: 22, height: 22, borderRadius: "50%", border: `1.5px solid ${CARD_BORDER}`, flexShrink: 0 }} />
+                      )}
+                    </div>
+                  );
+                })}
+              </>
+            )}
+          </div>
+
+          <div style={{ flexShrink: 0, padding: "4px 20px 20px", background: BODY_BG }}>
+            {saveError && (
+              <div style={{ marginBottom: 12, fontFamily: FONT_SANS, fontSize: 13, color: "#B85C5C", textAlign: "center" }}>
+                Couldn't save. Nothing was added. Try again.
+              </div>
+            )}
+            <button
+              onClick={handleSave}
+              disabled={!selected || saving}
+              style={{
+                display: "block",
+                width: "100%",
+                height: 56,
+                borderRadius: 100,
+                background: !selected ? "rgba(35,60,0,0.15)" : FOREST,
+                color: "#FAF7F2",
+                border: "none",
+                fontFamily: FONT_SANS,
+                fontSize: 13,
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                cursor: !selected || saving ? "default" : "pointer",
+              }}
+            >
+              {saving ? "Saving…" : saveError ? "Try again" : "Save"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 // Dishes & Menus v1.5 step 4b — the real dish/menu post detail screen,
 // replacing step 4a's placeholder for the dish/menu card tap. Reads the
 // same frozen grouping_snapshot getCookPost already returns (no new data
@@ -717,11 +974,13 @@ function SnapshotPartRow({
 // convention as this file's own card vs. RecipeCard.
 export function DishMenuPostDetailScreen({
   postId,
+  newCategory,
   currentUserId,
   back,
   push,
 }: {
   postId: string;
+  newCategory?: { key: string; label: string };
   // Null is a valid, expected state (not yet resolved) — treated the same as
   // "not the poster" so the Save button never shows before identity is known,
   // same convention as CookPostDetailScreen above.
@@ -739,13 +998,29 @@ export function DishMenuPostDetailScreen({
   // plays; only the boolean toggles on tap/close, the data stays put.
   const [overlayRecipe, setOverlayRecipe] = useState<RecipeSendSnapshot | null>(null);
   const [overlayOpen, setOverlayOpen] = useState(false);
+  // Mirrors DiscoveredDetailView's pattern (Home.tsx) / CookPostDetailScreen
+  // above — trayOpen starts true when re-entering with a freshly created
+  // category.
+  const [trayOpen, setTrayOpen] = useState(!!newCategory);
+  // undefined = not yet checked (getSavedGroupingIdForPost hasn't resolved);
+  // null = checked, nothing saved; string = this grouping's own saved
+  // grouping id. Persisted (unlike CookPostDetailScreen's local-only
+  // `saved`) because step 4c's spec requires re-opening the post to show
+  // SAVED from the start — see getSavedGroupingIdForPost's own doc comment
+  // in data.ts for the query this mirrors.
+  const [savedGroupingId, setSavedGroupingId] = useState<string | null | undefined>(undefined);
+  const [toast, setToast] = useState<{ categoryLabel: string; groupingId: string; kind: "dish" | "menu" } | null>(null);
 
   useEffect(() => {
     let ignore = false;
     (async () => {
-      const result = await getCookPost(postId);
+      // Fetched in parallel (not sequentially) so the already-saved check
+      // resolves before the loading gate clears — avoids a "Save" → "Saved"
+      // flash on screens that were already saved.
+      const [result, existingGroupingId] = await Promise.all([getCookPost(postId), getSavedGroupingIdForPost(postId)]);
       if (ignore) return;
       setDetail(result);
+      setSavedGroupingId(existingGroupingId);
       if (result) {
         const initial = new Set<number>();
         result.grouping_snapshot.parts.forEach((p, i) => {
@@ -953,35 +1228,87 @@ export function DishMenuPostDetailScreen({
             }}
           />
           <div style={{ padding: "0 20px 20px", background: BODY_BG }}>
-            <button
-              onClick={() =>
-                push({
-                  name: "placeholder",
-                  title: kind === "dish" ? "Save dish" : "Save menu",
-                  kind,
-                  postId,
-                })
-              }
-              style={{
-                display: "block",
-                width: "100%",
-                height: 56,
-                borderRadius: 100,
-                background: FOREST,
-                color: "#FAF7F2",
-                border: "none",
-                fontFamily: FONT_SANS,
-                fontSize: 13,
-                fontWeight: 700,
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-                cursor: "pointer",
-              }}
-            >
-              {kind === "dish" ? "Save dish" : "Save menu"}
-            </button>
+            {savedGroupingId ? (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  width: "100%",
+                  height: 56,
+                  borderRadius: 100,
+                  background: CARD_BG,
+                  border: `1.5px solid ${FOREST}`,
+                  fontFamily: FONT_SANS,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: FOREST,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                }}
+              >
+                <IconCheck size={16} stroke={2.5} color={FOREST} />
+                Saved
+              </div>
+            ) : (
+              <button
+                onClick={() => setTrayOpen(true)}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  height: 56,
+                  borderRadius: 100,
+                  background: FOREST,
+                  color: "#FAF7F2",
+                  border: "none",
+                  fontFamily: FONT_SANS,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                  cursor: "pointer",
+                }}
+              >
+                {kind === "dish" ? "Save dish" : "Save menu"}
+              </button>
+            )}
           </div>
         </div>
+      )}
+
+      {trayOpen && (
+        <SaveToSheet
+          kind={kind}
+          initialSelectedCategory={newCategory || null}
+          onClose={() => setTrayOpen(false)}
+          onNew={() => {
+            setTrayOpen(false);
+            push({ name: "newcategoryfordishmenupost", postId });
+          }}
+          onSave={async (catKey, catLabel) => {
+            const groupingId = await saveGroupingFromPost(postId, catKey);
+            setSavedGroupingId(groupingId);
+            setToast({ categoryLabel: catLabel, groupingId, kind });
+            // recipe_saved — cook feed dish/menu post saved to the library
+            // (reuses the closest existing event type; no grouping-specific
+            // event exists yet, same convention as CookPostDetailScreen's
+            // own recipe_saved call above).
+            logEvent("recipe_saved", { grouping_id: groupingId, source: "cook_feed_dish_menu" });
+          }}
+        />
+      )}
+
+      {toast && (
+        <SaveToast
+          categoryLabel={toast.categoryLabel}
+          onView={() => {
+            const target = toast;
+            setToast(null);
+            push(target.kind === "dish" ? { name: "dishScreen", groupingId: target.groupingId } : { name: "menuScreen", groupingId: target.groupingId });
+          }}
+          onDismiss={() => setToast(null)}
+        />
       )}
 
       <ExpandedRecipeOverlay
@@ -998,6 +1325,60 @@ export function DishMenuPostDetailScreen({
         poster={{ name: detail.poster_display_name, date: formatCookedOn(detail.cooked_on) }}
         onBack={() => setOverlayOpen(false)}
       />
+    </div>
+  );
+}
+
+// Step 4c's success toast — needs a clickable "View" link, which neither
+// existing toast (App.tsx's incomingToast, DishScreen's SavedToast) supports
+// (both are plain auto-dismiss text); a longer-than-usual auto-dismiss gives
+// the user time to tap View before it clears itself.
+function SaveToast({
+  categoryLabel,
+  onView,
+  onDismiss,
+}: {
+  categoryLabel: string;
+  onView: () => void;
+  onDismiss: () => void;
+}) {
+  useEffect(() => {
+    const timer = setTimeout(onDismiss, 4200);
+    return () => clearTimeout(timer);
+  }, [onDismiss]);
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        left: 16,
+        right: 16,
+        bottom: 24,
+        zIndex: 60,
+        display: "flex",
+        justifyContent: "center",
+      }}
+    >
+      <div
+        style={{
+          background: FOREST,
+          color: "#FAF7F2",
+          borderRadius: 14,
+          padding: "12px 16px",
+          fontFamily: FONT_SANS,
+          fontSize: 13,
+          textAlign: "center",
+          maxWidth: APP_MAX_WIDTH - 32,
+        }}
+      >
+        Saved. Recipes added to {categoryLabel}.{" "}
+        <span
+          onClick={onView}
+          style={{ fontFamily: FONT_SERIF_ITALIC, fontStyle: "italic", textDecoration: "underline", cursor: "pointer" }}
+        >
+          View
+        </span>
+      </div>
     </div>
   );
 }

@@ -4839,6 +4839,47 @@ export async function saveFeedRecipe(
   return { recipeId, photoCopied, photoUrl: photoUrlOut, photoVersion: photoVersionOut };
 }
 
+// Dish/menu equivalent of saveFeedRecipe above — step 4c (SAVE TO sheet).
+// Thinner than saveFeedRecipe: a dish/menu save can create several recipes
+// (including one level of nested-dish recipes, per
+// 20261104000001_menu_contains_dish.sql's save_grouping_from_post branch),
+// so there's no single "the" new recipe to copy a post photo onto — this
+// function returns only the new grouping id, matching the RPC's own return
+// shape. No photo-copy step: unlike saveFeedRecipe (which preserves an
+// existing recipe-kind behavior), there's no prior dish/menu save feature
+// establishing a parity bar, and the RPC itself never sets photo_url on the
+// recipes it creates.
+export async function saveGroupingFromPost(postId: string, categoryId: string): Promise<string> {
+  const { data: groupingId, error } = await supabase.rpc('save_grouping_from_post', {
+    p_post_id: postId,
+    p_category_id: categoryId,
+  });
+  if (error) throw error;
+  return groupingId as string;
+}
+
+// Own-rows lookup against groupings.source_post_id (see save_grouping_from_post's
+// idempotent re-save short-circuit — this is the client-side mirror of that
+// same check, used to pre-show a SAVED state instead of waiting for a tap).
+// Fail-quiet (null on error), same convention as getCookPost.
+export async function getSavedGroupingIdForPost(postId: string): Promise<string | null> {
+  const userId = await getCurrentUserId();
+  if (!userId) return null;
+  try {
+    const { data, error } = await supabase
+      .from('groupings')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('source_post_id', postId)
+      .maybeSingle();
+    if (error) throw error;
+    return data?.id ?? null;
+  } catch (error) {
+    console.error('Error checking for an existing saved grouping:', error);
+    return null;
+  }
+}
+
 // ==================== DISHES & MENUS ("Plans" — groupings CRUD, reads, cook logging) ====================
 // Dishes/menus have NO category (the save-category picker applies to recipes
 // only — founder decision). "Post publicly" defaults OFF for a logged cook.
