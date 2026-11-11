@@ -330,7 +330,7 @@ type Screen =
   | { name: "profileedit"; fieldKey: "email" | "palate" | "inspiration" | "table" | "constraints" | "identity" | "drinks" }
   | { name: "accountPrivacy" }
   | { name: "deleteAccountConfirm" }
-  | { name: "placeholder"; title: string; kind?: "dish" | "menu"; recipeId?: string; groupingId?: string }
+  | { name: "placeholder"; title: string; kind?: "dish" | "menu"; recipeId?: string; groupingId?: string; postId?: string }
   | { name: "chooseDishOrMenu" }
   | { name: "dishScreen"; groupingId?: string; recipe?: Recipe }
   | { name: "menuScreen"; groupingId?: string; recipe?: Recipe }
@@ -391,7 +391,7 @@ function screenKey(s: Screen): string {
     case "profileedit": return `profileedit:${s.fieldKey}`;
     case "accountPrivacy": return "accountPrivacy";
     case "deleteAccountConfirm": return "deleteAccountConfirm";
-    case "placeholder": return `placeholder:${s.title}`;
+    case "placeholder": return s.postId ? `placeholder:${s.title}:${s.postId}` : `placeholder:${s.title}`;
     case "chooseDishOrMenu": return "chooseDishOrMenu";
     case "dishScreen": return s.groupingId ? `dishScreen:${s.groupingId}` : `dishScreen:new:${s.recipe?.savedId ?? ""}`;
     case "menuScreen": return s.groupingId ? `menuScreen:${s.groupingId}` : `menuScreen:new:${s.recipe?.savedId ?? ""}`;
@@ -573,7 +573,7 @@ function renderScreen(
     case "profileedit": return <ProfileEdit fieldKey={s.fieldKey} back={back} profile={profile || null} onUpdate={onUpdate || (async () => {})} />;
     case "accountPrivacy": return <AccountPrivacy back={back} openDeleteAccount={() => push({ name: "deleteAccountConfirm" })} />;
     case "deleteAccountConfirm": return <DeleteAccountConfirm back={back} onSignOut={onSignOut!} profile={profile || null} />;
-    case "placeholder": return <Placeholder title={s.title} back={back} kind={s.kind} recipeId={s.recipeId} groupingId={s.groupingId} />;
+    case "placeholder": return <Placeholder title={s.title} back={back} kind={s.kind} recipeId={s.recipeId} groupingId={s.groupingId} postId={s.postId} />;
     case "chooseDishOrMenu": return <ChooseDishOrMenu back={back} onLogged={(msg) => popChooseDishOrMenuWithToast?.(msg)} />;
     case "dishScreen": return <DishScreen back={back} push={push} groupingId={s.groupingId} seedRecipe={s.recipe} recipesByCategory={recipesByCategory ?? {}} ensureRecipesLoaded={ensureRecipesLoaded} />;
     case "menuScreen": return <MenuScreen back={back} push={push} groupingId={s.groupingId} seedRecipe={s.recipe} recipesByCategory={recipesByCategory ?? {}} ensureRecipesLoaded={ensureRecipesLoaded} />;
@@ -6907,7 +6907,7 @@ function GroceryList({ push, back }: { push: (s: Screen) => void; back: () => vo
 }
 
 /* ---------------- Placeholder ---------------- */
-function Placeholder({ title, back, kind, recipeId, groupingId }: { title: string; back: () => void; kind?: "dish" | "menu"; recipeId?: string; groupingId?: string }) {
+function Placeholder({ title, back, kind, recipeId, groupingId, postId }: { title: string; back: () => void; kind?: "dish" | "menu"; recipeId?: string; groupingId?: string; postId?: string }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div style={{ padding: "32px 24px 14px", flexShrink: 0 }}>
@@ -6930,11 +6930,12 @@ function Placeholder({ title, back, kind, recipeId, groupingId }: { title: strin
         </div>
         {/* dev-only: surfaces the handoff payload so steps 2a/2b can be
             verified locally ahead of step 3 actually building this screen. */}
-        {(kind || recipeId || groupingId) && (
+        {(kind || recipeId || groupingId || postId) && (
           <div style={{ fontSize: 11, color: "#185FA5", letterSpacing: "0.04em", fontFamily: "monospace" }}>
-            {kind ? `kind: ${kind}` : ""}{kind && (recipeId || groupingId) ? " · " : ""}
-            {recipeId ? `recipeId: ${recipeId}` : ""}{recipeId && groupingId ? " · " : ""}
-            {groupingId ? `groupingId: ${groupingId}` : ""}
+            {kind ? `kind: ${kind}` : ""}{kind && (recipeId || groupingId || postId) ? " · " : ""}
+            {recipeId ? `recipeId: ${recipeId}` : ""}{recipeId && (groupingId || postId) ? " · " : ""}
+            {groupingId ? `groupingId: ${groupingId}` : ""}{groupingId && postId ? " · " : ""}
+            {postId ? `postId: ${postId}` : ""}
           </div>
         )}
       </div>

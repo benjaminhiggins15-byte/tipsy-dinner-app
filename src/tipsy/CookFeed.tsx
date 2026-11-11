@@ -57,7 +57,8 @@ export type CookFeedState = {
 // MenuInterior's own local Screen type.
 type Screen =
   | { name: "cookPostDetail"; postId: string; newCategory?: { key: string; label: string } }
-  | { name: "newcategoryforcookpost"; postId: string };
+  | { name: "newcategoryforcookpost"; postId: string }
+  | { name: "placeholder"; title: string; kind?: "dish" | "menu"; recipeId?: string; groupingId?: string; postId?: string };
 
 function formatRelativeTime(isoString: string): string {
   const diffMs = Math.max(0, Date.now() - new Date(isoString).getTime());
@@ -77,17 +78,26 @@ function formatRelativeTime(isoString: string): string {
 
 function Headline({ post }: { post: CookFeedPost }) {
   return (
-    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
-      <span style={{ fontFamily: fontSans, fontSize: 14, fontWeight: 400, color: C.text, lineHeight: 1.35 }}>
+    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+      <span style={{
+        fontFamily: fontSans, fontSize: 14, fontWeight: 400, color: C.text, lineHeight: 1.35,
+        display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
+      }}>
         <span style={{ fontWeight: 600 }}>{post.poster_display_name}</span> cooked{" "}
         <span style={{ fontWeight: 600 }}>{post.grouping_title}</span>
       </span>
-      <span style={{ fontFamily: fontSans, fontSize: 11, fontWeight: 500, color: C.textFaint, flexShrink: 0, whiteSpace: "nowrap" }}>
+      <span style={{ fontFamily: fontSerif, fontStyle: "italic", fontSize: 11, fontWeight: 400, color: C.textFaint, flexShrink: 0, whiteSpace: "nowrap" }}>
         {formatRelativeTime(post.created_at)}
       </span>
     </div>
   );
 }
+
+const TYPE_LABEL: Record<CookFeedPost["grouping_kind"], string> = {
+  recipe: "RECIPE",
+  dish: "DISH",
+  menu: "MENU",
+};
 
 // Quoted so it reads unambiguously as the poster's own words, never
 // confusable with the recipe's own (frozen, AI/author-written) description
@@ -116,7 +126,20 @@ function NoteLine({ text }: { text: string }) {
 // recipe-kind case either.
 function CookFeedCard({ post, onTap }: { post: CookFeedPost; onTap: () => void }) {
   const hasNote = !!(post.note && post.note.trim().length > 0);
-  const hasDescription = !!(post.grouping_description && post.grouping_description.trim().length > 0);
+  const hasPhoto = !!post.photo_url;
+
+  // Recipe posts keep today's frozen description; dish/menu posts have no
+  // single description, so the body text is instead a parts preview joined
+  // with " · ", with "+ N more" appended when parts_remaining > 0 — the
+  // server (get_cook_feed, parts_preview/parts_remaining columns) already
+  // applies the dish-vs-menu label/count rules, this just renders them.
+  const bodyText =
+    post.grouping_kind === "recipe"
+      ? post.grouping_description
+      : post.parts_preview && post.parts_preview.length > 0
+        ? post.parts_preview.join(" · ") + (post.parts_remaining ? ` + ${post.parts_remaining} more` : "")
+        : null;
+  const hasBodyText = !!(bodyText && bodyText.trim().length > 0);
 
   return (
     <button
@@ -132,6 +155,13 @@ function CookFeedCard({ post, onTap }: { post: CookFeedPost; onTap: () => void }
         cursor: "pointer",
       }}
     >
+      <div style={{
+        fontFamily: fontSans, fontSize: 10.5, fontWeight: 600, letterSpacing: "0.08em",
+        textTransform: "uppercase", color: C.textMuted, marginBottom: 6,
+      }}>
+        {TYPE_LABEL[post.grouping_kind]}
+      </div>
+
       <Headline post={post} />
 
       {post.photo_url && (
@@ -147,7 +177,7 @@ function CookFeedCard({ post, onTap }: { post: CookFeedPost; onTap: () => void }
         </div>
       )}
 
-      {hasDescription && (
+      {hasBodyText && (
         <div style={{
           fontFamily: fontSerif,
           fontStyle: "italic",
@@ -156,8 +186,12 @@ function CookFeedCard({ post, onTap }: { post: CookFeedPost; onTap: () => void }
           color: "rgba(35,60,0,0.55)",
           lineHeight: 1.5,
           marginTop: 12,
+          display: "-webkit-box",
+          WebkitLineClamp: hasPhoto ? 2 : 3,
+          WebkitBoxOrient: "vertical",
+          overflow: "hidden",
         }}>
-          {post.grouping_description}
+          {bodyText}
         </div>
       )}
 
@@ -280,7 +314,17 @@ export function CookFeedScreen({
               <CookFeedCard
                 key={post.post_id}
                 post={post}
-                onTap={() => push({ name: "cookPostDetail", postId: post.post_id })}
+                onTap={() => {
+                  if (post.grouping_kind === "recipe") {
+                    push({ name: "cookPostDetail", postId: post.post_id });
+                  } else {
+                    // Dev-only placeholder — the real dish/menu detail screen
+                    // is step 4b. Carries the post id so that step can verify
+                    // the handoff, same convention as the existing
+                    // kind/recipeId/groupingId debug line on Placeholder.
+                    push({ name: "placeholder", title: post.grouping_kind === "dish" ? "Dish" : "Menu", kind: post.grouping_kind, postId: post.post_id });
+                  }
+                }}
               />
             ))}
           </div>
