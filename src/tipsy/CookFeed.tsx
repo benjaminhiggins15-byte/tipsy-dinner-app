@@ -16,9 +16,8 @@ import {
 import { logEvent } from "../lib/events";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
 import SaveRecipeFlow from "./SaveRecipeFlow";
-import { Avatar } from "./Profile";
 import { DishIcon } from "./LogCookTypePicker";
-import { FONT_SANS, FONT_SERIF_ITALIC, FOREST, CARD_BG, CARD_BORDER, MUTED_TEXT, BODY_BG } from "./DishScreen";
+import { FONT_SANS, FONT_SERIF_ITALIC, FOREST, CARD_BG, CARD_BORDER, MUTED_TEXT, BODY_BG, PosterRow } from "./DishScreen";
 
 // Cook Feed — Step 2b (the screen itself). Reads ONLY through get_cook_feed/
 // get_cook_post (see CLAUDE.md's Cooking Feed — Step 2a entry); this file
@@ -536,9 +535,7 @@ export function CookPostDetailScreen({
         open={true}
         bottomOffset={0}
         recipe={recipe}
-        sharerName={detail.poster_display_name}
-        sharerLabel="cooked by"
-        sharerDate={formatCookedOn(detail.cooked_on)}
+        poster={{ name: detail.poster_display_name, date: formatCookedOn(detail.cooked_on) }}
         photoUrl={detail.photo_url ?? undefined}
         onBack={back}
         onSave={isOwnPost ? undefined : saved ? () => {} : saving ? undefined : () => setTrayOpen(true)}
@@ -864,21 +861,19 @@ export function DishMenuPostDetailScreen({
           {detail.grouping_snapshot.title}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: detail.note ? 14 : 18 }}>
-          <Avatar size={34} name={detail.poster_display_name} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontFamily: FONT_SANS, fontSize: 14, fontWeight: 600, color: FOREST }}>{detail.poster_display_name}</div>
-            <div style={{ fontFamily: FONT_SERIF_ITALIC, fontStyle: "italic", fontSize: 12, color: MUTED_TEXT }}>
-              Cooked {formatCookedOn(detail.cooked_on)}
-            </div>
-          </div>
-          {detail.score != null && (
-            <div style={{ fontFamily: FONT_SANS, fontSize: 15, fontWeight: 700, color: FOREST, flexShrink: 0 }}>
-              {detail.score.toFixed(1)}
-              <span style={{ color: MUTED_TEXT, fontWeight: 500 }}>/10</span>
-            </div>
-          )}
-        </div>
+        <PosterRow
+          name={detail.poster_display_name}
+          date={formatCookedOn(detail.cooked_on)}
+          style={{ marginBottom: detail.note ? 14 : 18 }}
+          right={
+            detail.score != null ? (
+              <div style={{ fontFamily: FONT_SANS, fontSize: 15, fontWeight: 700, color: FOREST, flexShrink: 0 }}>
+                {detail.score.toFixed(1)}
+                <span style={{ color: MUTED_TEXT, fontWeight: 500 }}>/10</span>
+              </div>
+            ) : undefined
+          }
+        />
 
         {detail.note && (
           <div
@@ -1000,9 +995,7 @@ export function DishMenuPostDetailScreen({
         }}
         cookTime={overlayRecipe?.cook_time}
         serves={overlayRecipe?.serves}
-        sharerName={detail.poster_display_name}
-        sharerLabel="cooked by"
-        sharerDate={formatCookedOn(detail.cooked_on)}
+        poster={{ name: detail.poster_display_name, date: formatCookedOn(detail.cooked_on) }}
         onBack={() => setOverlayOpen(false)}
       />
     </div>

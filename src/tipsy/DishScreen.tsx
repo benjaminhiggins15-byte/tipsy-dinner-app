@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { IconBook, IconCheck, IconLayoutList, IconPencil, IconPlus, IconSearch, IconX } from "@tabler/icons-react";
 import { createGrouping, updateGrouping, getPlan, type Recipe, type GroupingPartInput, type PlanSummary } from "./data";
 import LogGroupingCookSheet from "./LogGroupingCookSheet";
+import { Avatar } from "./Profile";
 
 // Dishes & Menus v1.5 step 3a/3b — the real Dish and Menu screens, replacing
 // the "placeholder" slot for kind="dish"/"menu" (step 2a/2b wired the
@@ -25,6 +26,28 @@ export const BODY_BG = "#FAF7F2";
 // also means it escapes the phone frame's own width constraint and must
 // restate it here to stay lined up on wide screens.
 export const APP_MAX_WIDTH = 480;
+
+// The "who and when" row (round initials avatar, semibold name, italic
+// "Cooked <date>") — originated in DishMenuPostDetailScreen, now also reused
+// by ExpandedRecipeOverlay (via its optional `poster` prop) so the recipe
+// post detail and the read-only recipe view opened from a dish/menu post
+// show the identical component instead of a hand-matched copy. `right` is
+// for an optional trailing slot (e.g. the score) that only the dish/menu
+// detail screen uses.
+export function PosterRow({ name, date, right, style }: { name: string; date: string; right?: ReactNode; style?: CSSProperties }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, ...style }}>
+      <Avatar size={34} name={name} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontFamily: FONT_SANS, fontSize: 14, fontWeight: 600, color: FOREST }}>{name}</div>
+        <div style={{ fontFamily: FONT_SERIF_ITALIC, fontStyle: "italic", fontSize: 12, color: MUTED_TEXT }}>
+          Cooked {date}
+        </div>
+      </div>
+      {right}
+    </div>
+  );
+}
 
 // Shared @keyframes for the "Saved" toast fade and the Add-a-part sheet's
 // slide-up — a <style> tag's rules are only live while that component

@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { type RecipeStep, normalizeStep } from "./data";
+import { PosterRow } from "./DishScreen";
 
 // Build's "RECIPE PREVIEW" sheet. Extracted from App.tsx (Cook) so
 // SharedRecipeView can reuse the exact same component for the logged-out
@@ -16,6 +17,7 @@ export default function ExpandedRecipeOverlay({
   sharerName,
   sharerLabel = "inspired by",
   sharerDate,
+  poster,
   onSignIn,
   photoUrl,
   onBack,
@@ -57,6 +59,11 @@ export default function ExpandedRecipeOverlay({
   // second copy of that math. Appended after sharerName; has no effect
   // without sharerName also set.
   sharerDate?: string;
+  // Cook Feed's "who and when" row — renders the shared PosterRow (avatar,
+  // name, "Cooked <date>") in the same slot as the sharerName text line
+  // above, instead of it. Takes priority over sharerName when both are
+  // somehow set; no existing caller passes both.
+  poster?: { name: string; date: string };
   onSignIn?: () => void;
   photoUrl?: string | null;
   // Optional back control for callers that mount this as a full navigated
@@ -216,7 +223,9 @@ export default function ExpandedRecipeOverlay({
           }}>
             {recipe.title}
           </div>
-          {sharerName && (
+          {poster ? (
+            <PosterRow name={poster.name} date={poster.date} style={{ marginBottom: 12 }} />
+          ) : sharerName && (
             <div style={{
               fontFamily: "Inter, sans-serif",
               fontSize: 12,
