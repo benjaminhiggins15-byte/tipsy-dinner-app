@@ -5,7 +5,6 @@ import {
   getCookFeed,
   getCookPost,
   saveFeedRecipe,
-  addRecipeToMenuSection,
   getAllCategories,
   getRecipesForCategory,
   saveGroupingFromPost,
@@ -19,7 +18,6 @@ import {
 } from "./data";
 import { logEvent } from "../lib/events";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
-import SaveRecipeFlow from "./SaveRecipeFlow";
 import { DishIcon } from "./LogCookTypePicker";
 import { FONT_SANS, FONT_SERIF_ITALIC, FOREST, CARD_BG, CARD_BORDER, MUTED_TEXT, BODY_BG, APP_MAX_WIDTH, PosterRow } from "./DishScreen";
 
@@ -70,6 +68,7 @@ type Screen =
   | { name: "newcategoryfordishmenupost"; postId: string }
   | { name: "dishScreen"; groupingId?: string; recipe?: Recipe }
   | { name: "menuScreen"; groupingId?: string; recipe?: Recipe }
+  | { name: "recipe"; recipe: Recipe; categoryLabel: string; categoryKey: string }
   | { name: "placeholder"; title: string; kind?: "dish" | "menu"; recipeId?: string; groupingId?: string; postId?: string };
 
 const COURSES: { key: MenuSection; label: string }[] = [
@@ -390,8 +389,10 @@ export function CookPostDetailScreen({
   currentUserId,
   back,
   push,
-  finishSaveRecipe,
   clearRecipeCache,
+  cachedEntry,
+  ensureLoaded,
+  onSaved,
 }: {
   postId: string;
   newCategory?: { key: string; label: string };
@@ -400,37 +401,31 @@ export function CookPostDetailScreen({
   currentUserId: string | null;
   back: () => void;
   push: (s: Screen) => void;
-  finishSaveRecipe: (recipe: Recipe, categoryKey: string, categoryLabel: string) => void;
   clearRecipeCache: (categoryKey: string) => void;
+  // App-level cache (App.tsx's cookPostDetailCache), keyed by postId — same
+  // ScreenStage-remount reasoning as DishMenuPostDetailScreen's cachedEntry
+  // above: fetched data must live above this component to survive a
+  // transition remount without a refetch/flash. savedGroupingId doubles as
+  // the persisted "Saved" state (save_grouping_from_post creates a groupings
+  // row for a recipe-kind post too — see saveFeedRecipe's groupingId note in
+  // data.ts), replacing this screen's old local-only `saved` state.
+  cachedEntry?: { detail: CookPostDetail | null; savedGroupingId: string | null };
+  ensureLoaded: (postId: string) => Promise<void>;
+  onSaved: (postId: string, groupingId: string) => void;
 }) {
-  const [detail, setDetail] = useState<CookPostDetail | null | undefined>(undefined);
+  // undefined = cache miss, not yet fetched; detail null = fetched, post gone.
+  const detail = cachedEntry ? cachedEntry.detail : undefined;
+  const savedGroupingId = cachedEntry ? cachedEntry.savedGroupingId : undefined;
   // Mirrors DiscoveredDetailView's pattern exactly (Home.tsx) — trayOpen
   // starts true when re-entering with a freshly created category.
   const [trayOpen, setTrayOpen] = useState(!!newCategory);
-  const [saving, setSaving] = useState(false);
-  // Set when saveFeedRecipe's call chain throws — surfaces a retryable error
-  // instead of leaving the Save button silently stuck (saveRecipe has no
-  // try/catch anywhere upstream of here, so this is the only place it can be
-  // caught). Cleared on every new save attempt.
-  const [saveError, setSaveError] = useState(false);
-  // Local-only, per-mount — a disabled "Saved" state is enough to block a
-  // double-tap/repeat-tap from creating duplicate recipe copies (see
-  // saveFeedRecipe's duplicate-save note in data.ts: nothing server-side
-  // blocks a repeat save, so this is the only guard). Deliberately NOT
-  // persisted — re-entering this screen (e.g. back then forward again) always
-  // starts fresh, independent of save_grouping_from_post's own save history
-  // for this post.
-  const [saved, setSaved] = useState(false);
+  // Set right after a successful save so the toast can offer "View" without
+  // re-fetching — cleared on dismiss/view-tap. Saving/error UI itself lives
+  // inside SaveToSheet now (see its own saving/saveError state).
+  const [toast, setToast] = useState<{ recipe: Recipe; categoryKey: string; categoryLabel: string } | null>(null);
 
   useEffect(() => {
-    let ignore = false;
-    (async () => {
-      const result = await getCookPost(postId);
-      if (!ignore) setDetail(result);
-    })();
-    return () => {
-      ignore = true;
-    };
+    ensureLoaded(postId);
   }, [postId]);
 
   if (detail === undefined) {
@@ -491,49 +486,33 @@ export function CookPostDetailScreen({
   // poster could tap on their own post.
   const isOwnPost = currentUserId === null || currentUserId === detail.poster_id;
 
-  const handlePickCategory = async (
-    catKey: string,
-    catLabel: string,
-    menuInfo?: { menuId: string; section: MenuSection }
-  ) => {
-    setTrayOpen(false);
-    setSaving(true);
-    setSaveError(false);
+  // Errors here propagate up to SaveToSheet's own handleSave, which is what
+  // shows the TRY AGAIN state and keeps the sheet open — this function does
+  // not catch.
+  const handleSaveToCategory = async (catKey: string, catLabel: string) => {
+    const result = await saveFeedRecipe(postId, detail.photo_url, catKey);
 
-    try {
-      const result = await saveFeedRecipe(postId, detail.photo_url, catKey);
+    const savedRecipe: Recipe = {
+      title: snapshot.title,
+      description: snapshot.description,
+      color: "linear-gradient(135deg, #C5DCF4 0%, #85B7EB 100%)",
+      category: catLabel.toLowerCase(),
+      ingredients: recipe.ingredients,
+      steps: snapshot.steps,
+      savedId: result.recipeId,
+      categoryKey: catKey,
+      // Only set when the photo copy succeeded — a photoless post or a
+      // failed copy both leave this undefined, same convention as the
+      // received/discovered save flows.
+      photo_url: result.photoCopied ? result.photoUrl : undefined,
+      photo_version: result.photoCopied ? result.photoVersion : undefined,
+    };
 
-      if (menuInfo) {
-        await addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, result.recipeId);
-      }
-
-      setSaved(true);
-
-      const savedRecipe: Recipe = {
-        title: snapshot.title,
-        description: snapshot.description,
-        color: "linear-gradient(135deg, #C5DCF4 0%, #85B7EB 100%)",
-        category: catLabel.toLowerCase(),
-        ingredients: recipe.ingredients,
-        steps: snapshot.steps,
-        savedId: result.recipeId,
-        categoryKey: catKey,
-        // Only set when the photo copy succeeded — a photoless post or a
-        // failed copy both leave this undefined, same convention as the
-        // received/discovered save flows.
-        photo_url: result.photoCopied ? result.photoUrl : undefined,
-        photo_version: result.photoCopied ? result.photoVersion : undefined,
-      };
-
-      clearRecipeCache(catKey);
-      // recipe_saved — cook feed post saved to the library
-      logEvent("recipe_saved", { recipe_id: result.recipeId, source: "cook_feed" });
-      finishSaveRecipe(savedRecipe, catKey, catLabel);
-    } catch (error) {
-      console.error("Couldn't save this cook feed recipe:", error);
-      setSaving(false);
-      setSaveError(true);
-    }
+    onSaved(postId, result.groupingId);
+    clearRecipeCache(catKey);
+    // recipe_saved — cook feed post saved to the library
+    logEvent("recipe_saved", { recipe_id: result.recipeId, source: "cook_feed" });
+    setToast({ recipe: savedRecipe, categoryKey: catKey, categoryLabel: catLabel });
   };
 
   return (
@@ -545,15 +524,16 @@ export function CookPostDetailScreen({
         poster={{ name: detail.poster_display_name, date: formatCookedOn(detail.cooked_on) }}
         photoUrl={detail.photo_url ?? undefined}
         onBack={back}
-        onSave={isOwnPost ? undefined : saved ? () => {} : saving ? undefined : () => setTrayOpen(true)}
-        saveLabel={saved ? "Saved" : "Save"}
-        saveDisabled={saved}
+        onSave={isOwnPost ? undefined : savedGroupingId ? () => {} : () => setTrayOpen(true)}
+        saveLabel={savedGroupingId ? "Saved" : "Save"}
+        saveDisabled={!!savedGroupingId}
       />
 
       {trayOpen && (
-        <SaveRecipeFlow
+        <SaveToSheet
+          kind="recipe"
           onClose={() => setTrayOpen(false)}
-          onPick={handlePickCategory}
+          onSave={handleSaveToCategory}
           onNew={() => {
             setTrayOpen(false);
             push({ name: "newcategoryforcookpost", postId });
@@ -562,25 +542,16 @@ export function CookPostDetailScreen({
         />
       )}
 
-      {saveError && (
-        <div
-          style={{
-            position: "fixed",
-            left: 16,
-            right: 16,
-            bottom: 24,
-            zIndex: 60,
-            background: "#c0392b",
-            color: "#fff",
-            borderRadius: 10,
-            padding: "10px 14px",
-            fontFamily: fontSans,
-            fontSize: 13,
-            textAlign: "center",
+      {toast && (
+        <SaveToast
+          message={`Saved to ${toast.categoryLabel}.`}
+          onView={() => {
+            const target = toast;
+            setToast(null);
+            push({ name: "recipe", recipe: target.recipe, categoryLabel: target.categoryLabel, categoryKey: target.categoryKey });
           }}
-        >
-          Couldn't save this recipe — please try again.
-        </div>
+          onDismiss={() => setToast(null)}
+        />
       )}
     </div>
   );
@@ -735,7 +706,7 @@ function SaveToSheet({
   onSave,
   initialSelectedCategory,
 }: {
-  kind: "dish" | "menu";
+  kind: "dish" | "menu" | "recipe";
   onClose: () => void;
   onNew: () => void;
   onSave: (categoryKey: string, categoryLabel: string) => Promise<void>;
@@ -877,7 +848,7 @@ function SaveToSheet({
               Save to
             </div>
             <div style={{ fontFamily: FONT_SERIF_ITALIC, fontStyle: "italic", fontSize: 13, color: MUTED_TEXT, textAlign: "center", marginTop: 4, marginBottom: 4 }}>
-              {kind === "dish" ? "Recipes in this dish go here" : "Recipes in this menu go here"}
+              {kind === "dish" ? "Recipes in this dish go here" : kind === "menu" ? "Recipes in this menu go here" : "Pick a category for this recipe"}
             </div>
           </div>
 
@@ -1306,6 +1277,7 @@ export function DishMenuPostDetailScreen({
 
       {toast && (
         <SaveToast
+          message="Saved to Dishes & Menus."
           onView={() => {
             const target = toast;
             setToast(null);
@@ -1353,9 +1325,11 @@ export function DishMenuPostDetailScreen({
 // layer: createPortal straight to document.body, restating APP_MAX_WIDTH
 // to stay centered on wide screens.
 function SaveToast({
+  message,
   onView,
   onDismiss,
 }: {
+  message: string;
   onView: () => void;
   onDismiss: () => void;
 }) {
@@ -1405,7 +1379,7 @@ function SaveToast({
             animation: "tipsy-fade 0.22s ease",
           }}
         >
-          Saved to Dishes &amp; Menus.{" "}
+          {message}{" "}
           <span
             onClick={onView}
             style={{ fontFamily: FONT_SERIF_ITALIC, fontStyle: "italic", textDecoration: "underline", cursor: "pointer" }}

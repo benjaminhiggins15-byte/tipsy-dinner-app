@@ -4724,6 +4724,11 @@ export async function getCookPost(postId: string): Promise<CookPostDetail | null
 // ==================== SAVE FROM COOKING FEED ====================
 export type SaveFeedRecipeResult = {
   recipeId: string;
+  // The groupings row id this save produced/reused — exposed so callers can
+  // feed it into the same getSavedGroupingIdForPost-backed cache DishMenuPostDetailScreen
+  // uses, since save_grouping_from_post creates a groupings row for a
+  // recipe-kind post too (this function just resolves recipeId out of it).
+  groupingId: string;
   photoCopied: boolean;
   photoUrl?: string;
   photoVersion?: number;
@@ -4838,7 +4843,7 @@ export async function saveFeedRecipe(
     }
   }
 
-  return { recipeId, photoCopied, photoUrl: photoUrlOut, photoVersion: photoVersionOut };
+  return { recipeId, groupingId: groupingId as string, photoCopied, photoUrl: photoUrlOut, photoVersion: photoVersionOut };
 }
 
 // Dish/menu equivalent of saveFeedRecipe above — step 4c (SAVE TO sheet).

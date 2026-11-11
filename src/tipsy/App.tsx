@@ -454,6 +454,9 @@ function renderScreen(
   dishMenuPostDetailCache?: Record<string, { detail: CookPostDetail | null; savedGroupingId: string | null }>,
   ensureDishMenuPostDetailLoaded?: (postId: string) => Promise<void>,
   setDishMenuPostDetailSaved?: (postId: string, groupingId: string) => void,
+  cookPostDetailCache?: Record<string, { detail: CookPostDetail | null; savedGroupingId: string | null }>,
+  ensureCookPostDetailLoaded?: (postId: string) => Promise<void>,
+  setCookPostDetailSaved?: (postId: string, groupingId: string) => void,
 ) {
   switch (s.name) {
     case "cook": return (
@@ -659,8 +662,10 @@ function renderScreen(
         currentUserId={currentUserId ?? null}
         back={back}
         push={push}
-        finishSaveRecipe={(r, k, l) => finishSaveRecipe?.(r, k, l)}
         clearRecipeCache={clearRecipeCache || (() => {})}
+        cachedEntry={cookPostDetailCache?.[s.postId]}
+        ensureLoaded={ensureCookPostDetailLoaded ?? (async () => {})}
+        onSaved={setCookPostDetailSaved ?? (() => {})}
       />
     );
     case "newcategoryforcookpost": return (
@@ -1013,6 +1018,30 @@ export default function App() {
 
   const setDishMenuPostDetailSaved = (postId: string, groupingId: string) => {
     setDishMenuPostDetailCache(prev => {
+      const entry = prev[postId];
+      if (!entry) return prev;
+      return { ...prev, [postId]: { ...entry, savedGroupingId: groupingId } };
+    });
+  };
+
+  // Recipe-post equivalent of dishMenuPostDetailCache/ensureDishMenuPostDetailLoaded/
+  // setDishMenuPostDetailSaved above — same cache shape, same remount-flash
+  // reasoning, for CookPostDetailScreen. getSavedGroupingIdForPost works
+  // unchanged here too: save_grouping_from_post creates a groupings row for
+  // a recipe-kind post save as well (see saveFeedRecipe's groupingId note in
+  // data.ts), so the same dedup lookup pre-shows "Saved" on reopen.
+  const [cookPostDetailCache, setCookPostDetailCache] = useState<
+    Record<string, { detail: CookPostDetail | null; savedGroupingId: string | null }>
+  >({});
+
+  const ensureCookPostDetailLoaded = async (postId: string) => {
+    if (cookPostDetailCache[postId]) return;
+    const [result, existingGroupingId] = await Promise.all([getCookPost(postId), getSavedGroupingIdForPost(postId)]);
+    setCookPostDetailCache(prev => ({ ...prev, [postId]: { detail: result, savedGroupingId: existingGroupingId } }));
+  };
+
+  const setCookPostDetailSaved = (postId: string, groupingId: string) => {
+    setCookPostDetailCache(prev => {
       const entry = prev[postId];
       if (!entry) return prev;
       return { ...prev, [postId]: { ...entry, savedGroupingId: groupingId } };
@@ -1897,6 +1926,9 @@ export default function App() {
           dishMenuPostDetailCache={dishMenuPostDetailCache}
           ensureDishMenuPostDetailLoaded={ensureDishMenuPostDetailLoaded}
           setDishMenuPostDetailSaved={setDishMenuPostDetailSaved}
+          cookPostDetailCache={cookPostDetailCache}
+          ensureCookPostDetailLoaded={ensureCookPostDetailLoaded}
+          setCookPostDetailSaved={setCookPostDetailSaved}
         />
         <BottomTabBar activeTab={activeTab} onTabClick={switchToTab} />
       </div>
@@ -2085,6 +2117,9 @@ function ScreenStage({
   dishMenuPostDetailCache,
   ensureDishMenuPostDetailLoaded,
   setDishMenuPostDetailSaved,
+  cookPostDetailCache,
+  ensureCookPostDetailLoaded,
+  setCookPostDetailSaved,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back"; fromIsTabRoot?: boolean; toIsTabRoot?: boolean } | null;
@@ -2127,6 +2162,9 @@ function ScreenStage({
   dishMenuPostDetailCache: Record<string, { detail: CookPostDetail | null; savedGroupingId: string | null }>;
   ensureDishMenuPostDetailLoaded: (postId: string) => Promise<void>;
   setDishMenuPostDetailSaved: (postId: string, groupingId: string) => void;
+  cookPostDetailCache: Record<string, { detail: CookPostDetail | null; savedGroupingId: string | null }>;
+  ensureCookPostDetailLoaded: (postId: string) => Promise<void>;
+  setCookPostDetailSaved: (postId: string, groupingId: string) => void;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
@@ -2216,7 +2254,7 @@ function ScreenStage({
         pointerEvents: isTransitioning ? "none" : "auto",
         paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
       }}>
-        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState, finishCreateCategoryForCookPost, currentUserId, popChooseDishOrMenuWithToast, finishCreateCategoryForDishMenuPost, dishMenuPostDetailCache, ensureDishMenuPostDetailLoaded, setDishMenuPostDetailSaved)}
+        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState, finishCreateCategoryForCookPost, currentUserId, popChooseDishOrMenuWithToast, finishCreateCategoryForDishMenuPost, dishMenuPostDetailCache, ensureDishMenuPostDetailLoaded, setDishMenuPostDetailSaved, cookPostDetailCache, ensureCookPostDetailLoaded, setCookPostDetailSaved)}
       </div>
 
       {/* Overlay layer - only during transitions, renders from screen */}
@@ -2229,7 +2267,7 @@ function ScreenStage({
           pointerEvents: "none",
           paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
         }}>
-          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState, finishCreateCategoryForCookPost, currentUserId, popChooseDishOrMenuWithToast, finishCreateCategoryForDishMenuPost, dishMenuPostDetailCache, ensureDishMenuPostDetailLoaded, setDishMenuPostDetailSaved)}
+          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState, finishCreateCategoryForCookPost, currentUserId, popChooseDishOrMenuWithToast, finishCreateCategoryForDishMenuPost, dishMenuPostDetailCache, ensureDishMenuPostDetailLoaded, setDishMenuPostDetailSaved, cookPostDetailCache, ensureCookPostDetailLoaded, setCookPostDetailSaved)}
         </div>
       )}
     </div>
