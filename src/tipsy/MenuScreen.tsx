@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
 import { IconBook, IconChevronRight, IconLayoutList, IconX } from "@tabler/icons-react";
 import {
   createGrouping,
@@ -17,7 +16,6 @@ import {
   NameField,
   SaveLogFooter,
   SavedToast,
-  PlanKeyframes,
   ScreenTitleHeader,
   FONT_SANS,
   FONT_SERIF_ITALIC,
@@ -26,15 +24,15 @@ import {
   CARD_BORDER,
   MUTED_TEXT,
   BODY_BG,
-  APP_MAX_WIDTH,
 } from "./DishScreen";
+import { BottomSheet, SheetKeyframes } from "./BottomSheet";
 import { DishIcon } from "./LogCookTypePicker";
 import LogGroupingCookSheet from "./LogGroupingCookSheet";
 
 // Dishes & Menus v1.5 step 3b — the real Menu screen, replacing the
 // "placeholder" slot for kind="menu" (step 2b wired the handoff). Reuses
 // DishScreen's exported pieces (constants, NameField, SaveLogFooter,
-// SavedToast, ScreenTitleHeader, PlanKeyframes, AddPartSheet) rather than
+// SavedToast, ScreenTitleHeader, AddPartSheet) rather than
 // re-implementing them.
 type Screen = { name: "placeholder"; title: string; kind?: "dish" | "menu"; groupingId?: string };
 
@@ -448,7 +446,7 @@ export default function MenuScreen({
         />
       )}
 
-      <PlanKeyframes />
+      <SheetKeyframes />
     </div>
   );
 }
@@ -488,74 +486,32 @@ function WhichCourseSheet({
   onClose: () => void;
   onPick: (course: MenuSection) => void;
 }) {
-  return createPortal(
-    <div
-      onClick={onClose}
-      style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 200, display: "flex", justifyContent: "center" }}
-    >
-      <div style={{ position: "relative", width: "100%", maxWidth: APP_MAX_WIDTH, height: "100%", display: "flex", alignItems: "flex-end" }}>
-        <div style={{ position: "absolute", inset: 0, background: "rgba(35, 60, 0, 0.08)", animation: "tipsy-fade 0.22s ease" }} />
+  return (
+    <BottomSheet onClose={onClose} portal zIndex={200} bottomInset={0} sizing="auto" showClose closeOnBackdrop>
+      <div style={{ padding: "22px 20px 28px" }}>
+        <div style={{ fontFamily: FONT_SANS, fontSize: 15, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: FOREST, textAlign: "center" }}>
+          Which course?
+        </div>
         <div
-          onClick={(e) => e.stopPropagation()}
           style={{
-            position: "relative",
-            background: BODY_BG,
-            borderRadius: "28px 28px 0 0",
-            width: "100%",
-            maxWidth: APP_MAX_WIDTH,
-            display: "flex",
-            flexDirection: "column",
-            padding: "22px 20px 28px",
-            animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
+            fontFamily: FONT_SERIF_ITALIC,
+            fontStyle: "italic",
+            fontSize: 13,
+            color: MUTED_TEXT,
+            textAlign: "center",
+            marginTop: 4,
+            marginBottom: 20,
           }}
         >
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            style={{
-              position: "absolute",
-              top: 14,
-              right: 16,
-              width: 32,
-              height: 32,
-              minWidth: 32,
-              borderRadius: "50%",
-              background: "rgba(35,60,0,0.06)",
-              border: "none",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-              zIndex: 1,
-            }}
-          >
-            <IconX size={16} stroke={1.75} color={MUTED_TEXT} />
-          </button>
-          <div style={{ fontFamily: FONT_SANS, fontSize: 15, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: FOREST, textAlign: "center" }}>
-            Which course?
-          </div>
-          <div
-            style={{
-              fontFamily: FONT_SERIF_ITALIC,
-              fontStyle: "italic",
-              fontSize: 13,
-              color: MUTED_TEXT,
-              textAlign: "center",
-              marginTop: 4,
-              marginBottom: 20,
-            }}
-          >
-            Where does {recipeTitle} go?
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
-            {COURSES.map((c) => (
-              <CourseChip key={c.key} label={c.label} onClick={() => onPick(c.key)} />
-            ))}
-          </div>
+          Where does {recipeTitle} go?
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+          {COURSES.map((c) => (
+            <CourseChip key={c.key} label={c.label} onClick={() => onPick(c.key)} />
+          ))}
         </div>
       </div>
-    </div>,
-    document.body,
+    </BottomSheet>
   );
 }
 

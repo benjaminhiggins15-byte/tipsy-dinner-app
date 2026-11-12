@@ -20,6 +20,7 @@ import ChooseDishOrMenu from "./ChooseDishOrMenu";
 import DishScreen from "./DishScreen";
 import MenuScreen from "./MenuScreen";
 import { CookFeedScreen, CookPostDetailScreen, DishMenuPostDetailScreen, type CookFeedState } from "./CookFeed";
+import { Toast } from "./BottomSheet";
 import { supabase } from "../lib/supabase";
 import { logEvent, isAccountDeletionInFlight } from "../lib/events";
 import type { Session } from "@supabase/supabase-js";
@@ -679,7 +680,6 @@ function renderScreen(
     case "dishMenuPostDetail": return (
       <DishMenuPostDetailScreen
         postId={s.postId}
-        newCategory={s.newCategory}
         currentUserId={currentUserId ?? null}
         back={back}
         push={push}
@@ -6323,26 +6323,19 @@ function RecipeCard({
       )}
 
       {/* Cook-logged toast, carried in from ChooseDishOrMenu */}
-      {incomingToast && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: "80px",
-            left: "50%",
-            transform: "translateX(-50%)",
-            background: "#233C00",
-            color: "#FEE7C0",
-            padding: "8px 16px",
-            borderRadius: "8px",
-            fontSize: "12px",
-            fontFamily: "Inter, sans-serif",
-            fontWeight: 500,
-            zIndex: 1000,
-          }}
-        >
-          {incomingToast}
-        </div>
-      )}
+      <Toast
+        show={!!incomingToast}
+        message={incomingToast}
+        portal={false}
+        placement="bottom"
+        offset={80}
+        background="#233C00"
+        color="#FEE7C0"
+        borderRadius={8}
+        padding="8px 16px"
+        fontSize={12}
+        fontWeight={500}
+      />
 
       {/* Sent confirmation toast */}
       {sentConfirm && (

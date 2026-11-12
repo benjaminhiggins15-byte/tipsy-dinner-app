@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { IconCamera, IconX } from "@tabler/icons-react";
+import { IconCamera } from "@tabler/icons-react";
 import { logGroupingCook } from "./data";
 import { compressImageFile, UnsupportedImageError } from "./image";
 import { logEvent } from "../lib/events";
-import { FONT_SANS, FONT_SERIF_ITALIC, FOREST, CARD_BG, CARD_BORDER, MUTED_TEXT, BODY_BG, APP_MAX_WIDTH, PlanKeyframes } from "./DishScreen";
+import { FONT_SANS, FONT_SERIF_ITALIC, FOREST, CARD_BG, CARD_BORDER, MUTED_TEXT, BODY_BG } from "./DishScreen";
+import { BottomSheet, DragHandle } from "./BottomSheet";
 
 // Dishes & Menus v1.5 step 3c — the real "LOG THIS COOK" sheet for a saved
 // dish/menu, replacing the "placeholder" slot step 3a/3b routed to.
@@ -49,7 +49,6 @@ export default function LogGroupingCookSheet({
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const dragStartY = useRef<number | null>(null);
 
   useEffect(() => {
     return () => {
@@ -142,72 +141,10 @@ export default function LogGroupingCookSheet({
     onLogged(isPosted ? "Posted" : "Cook logged");
   }
 
-  return createPortal(
-    <div
-      onClick={handleClose}
-      style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 200, display: "flex", justifyContent: "center" }}
-    >
-      <div style={{ position: "relative", width: "100%", maxWidth: APP_MAX_WIDTH, height: "100%", display: "flex", alignItems: "flex-end" }}>
-        <div style={{ position: "absolute", inset: 0, background: "rgba(35, 60, 0, 0.08)", animation: "tipsy-fade 0.22s ease" }} />
-        <div
-          onClick={(e) => e.stopPropagation()}
-          style={{
-            position: "relative",
-            background: BODY_BG,
-            borderRadius: "28px 28px 0 0",
-            width: "100%",
-            maxWidth: APP_MAX_WIDTH,
-            height: "100%",
-            display: "flex",
-            flexDirection: "column",
-            animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
-          }}
-        >
-          <button
-            onClick={handleClose}
-            aria-label="Close"
-            style={{
-              position: "absolute",
-              top: 14,
-              right: 16,
-              width: 32,
-              height: 32,
-              minWidth: 32,
-              borderRadius: "50%",
-              background: "rgba(35,60,0,0.06)",
-              border: "none",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-              zIndex: 1,
-            }}
-          >
-            <IconX size={16} stroke={1.75} color={MUTED_TEXT} />
-          </button>
-
+  return (
+    <BottomSheet onClose={handleClose} portal zIndex={200} bottomInset={0} sizing="full" showClose closeOnBackdrop>
           <div style={{ flexShrink: 0, padding: "14px 20px 0" }}>
-            <div
-              onPointerDown={(e) => {
-                dragStartY.current = e.clientY;
-              }}
-              onPointerMove={(e) => {
-                if (dragStartY.current == null) return;
-                if (e.clientY - dragStartY.current > 60) {
-                  dragStartY.current = null;
-                  handleClose();
-                }
-              }}
-              onPointerUp={() => {
-                dragStartY.current = null;
-              }}
-              onPointerCancel={() => {
-                dragStartY.current = null;
-              }}
-              style={{ width: 60, padding: "10px 0", margin: "-10px auto 8px", display: "flex", justifyContent: "center", cursor: "grab", touchAction: "none" }}
-            >
-              <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(35,60,0,0.15)" }} />
-            </div>
+            <DragHandle onDismiss={handleClose} />
             <div style={{ fontFamily: FONT_SANS, fontSize: 15, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: FOREST, textAlign: "center" }}>
               Log this cook
             </div>
@@ -448,11 +385,6 @@ export default function LogGroupingCookSheet({
               </button>
             </div>
           </div>
-        </div>
-      </div>
-
-      <PlanKeyframes />
-    </div>,
-    document.body
+    </BottomSheet>
   );
 }

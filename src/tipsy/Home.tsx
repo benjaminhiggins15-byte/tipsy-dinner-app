@@ -30,6 +30,7 @@ import watermarkCircle from "../Logos/watermark_circle.png";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
 import LogCookTypePicker from "./LogCookTypePicker";
+import { Toast } from "./BottomSheet";
 
 // ScreenStage renders the outgoing screen in a separate overlay-layer JSX
 // position during transitions (App.tsx), which mounts a fresh
@@ -615,26 +616,19 @@ export default function Home({
         </div>
       </div>
 
-      {incomingToast && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: "80px",
-            left: "50%",
-            transform: "translateX(-50%)",
-            background: "#233C00",
-            color: "#FEE7C0",
-            padding: "8px 16px",
-            borderRadius: "8px",
-            fontSize: "12px",
-            fontFamily: "Inter, sans-serif",
-            fontWeight: 500,
-            zIndex: 1000,
-          }}
-        >
-          {incomingToast}
-        </div>
-      )}
+      <Toast
+        show={!!incomingToast}
+        message={incomingToast}
+        portal={false}
+        placement="bottom"
+        offset={80}
+        background="#233C00"
+        color="#FEE7C0"
+        borderRadius={8}
+        padding="8px 16px"
+        fontSize={12}
+        fontWeight={500}
+      />
     </div>
   );
 }

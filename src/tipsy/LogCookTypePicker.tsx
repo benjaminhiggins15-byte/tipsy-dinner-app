@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactElement } from "react";
 import { listMyPlans } from "./data";
+import { BottomSheet } from "./BottomSheet";
 
 const FONT_SANS = "'Inter', sans-serif";
 const FONT_SERIF_ITALIC = "'Fraunces', serif";
@@ -130,39 +131,10 @@ export default function LogCookTypePicker({
   ];
 
   return (
-    <>
-      <style>{`
-        @keyframes tipsy-fade { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes tipsy-slideup { from { transform: translateY(100%); } to { transform: translateY(0); } }
-      `}</style>
-      <div
-        onClick={onClose}
-        style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 64, // nav-bar clearance — anchor to the real viewport, not the padded screen layer (see ScreenStage)
-          background: "rgba(35, 60, 0, 0.08)",
-          zIndex: 80,
-          display: "flex",
-          alignItems: "flex-end",
-          justifyContent: "center",
-          animation: "tipsy-fade 0.22s ease",
-        }}
-      >
-        <div
-          onClick={(e) => e.stopPropagation()}
-          style={{
-            background: "#FAF7F2",
-            borderRadius: "28px 28px 0 0",
-            width: "100%",
-            maxHeight: "85vh",
-            display: "flex",
-            flexDirection: "column",
-            animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
-          }}
-        >
+    // bottomInset=64 is nav-bar clearance — anchor to the real viewport, not
+    // the padded screen layer (see ScreenStage). portal={false}: unchanged
+    // from this sheet's pre-refactor shape (see BottomSheet.tsx's own doc).
+    <BottomSheet onClose={onClose} portal={false} zIndex={80} bottomInset={64} sizing="auto" maxHeight="85vh" showClose={false} closeOnBackdrop>
           <div style={{ overflowY: "auto", minHeight: 0, flex: "1 1 auto", padding: "16px 20px 24px" }}>
             {/* Handle */}
             <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(35,60,0,0.15)", margin: "0 auto 20px" }} />
@@ -285,8 +257,6 @@ export default function LogCookTypePicker({
               </button>
             )}
           </div>
-        </div>
-      </div>
-    </>
+    </BottomSheet>
   );
 }

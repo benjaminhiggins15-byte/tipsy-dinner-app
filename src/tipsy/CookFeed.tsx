@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { createPortal } from "react-dom";
-import { IconRefresh, IconBook, IconLayoutList, IconChevronRight, IconPlus, IconCheck, IconX } from "@tabler/icons-react";
+import { IconRefresh, IconBook, IconLayoutList, IconChevronRight, IconPlus, IconCheck } from "@tabler/icons-react";
 import {
   getCookFeed,
   getCookPost,
@@ -20,6 +19,7 @@ import { logEvent } from "../lib/events";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
 import { DishIcon } from "./LogCookTypePicker";
 import { FONT_SANS, FONT_SERIF_ITALIC, FOREST, CARD_BG, CARD_BORDER, MUTED_TEXT, BODY_BG, APP_MAX_WIDTH, PosterRow } from "./DishScreen";
+import { BottomSheet, DragHandle, Toast } from "./BottomSheet";
 
 // Cook Feed — Step 2b (the screen itself). Reads ONLY through get_cook_feed/
 // get_cook_post (see CLAUDE.md's Cooking Feed — Step 2a entry); this file
@@ -716,7 +716,6 @@ function SaveToSheet({
   const [selected, setSelected] = useState<{ key: string; label: string } | null>(initialSelectedCategory ?? null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
-  const dragStartY = useRef<number | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -768,72 +767,10 @@ function SaveToSheet({
     onClose();
   }
 
-  return createPortal(
-    <div
-      onClick={handleClose}
-      style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 200, display: "flex", justifyContent: "center" }}
-    >
-      <div style={{ position: "relative", width: "100%", maxWidth: APP_MAX_WIDTH, height: "100%", display: "flex", alignItems: "flex-end" }}>
-        <div style={{ position: "absolute", inset: 0, background: "rgba(35, 60, 0, 0.08)", animation: "tipsy-fade 0.22s ease" }} />
-        <div
-          onClick={(e) => e.stopPropagation()}
-          style={{
-            position: "relative",
-            background: BODY_BG,
-            borderRadius: "28px 28px 0 0",
-            width: "100%",
-            maxWidth: APP_MAX_WIDTH,
-            maxHeight: "85%",
-            display: "flex",
-            flexDirection: "column",
-            animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
-          }}
-        >
-          <button
-            onClick={handleClose}
-            aria-label="Close"
-            style={{
-              position: "absolute",
-              top: 14,
-              right: 16,
-              width: 32,
-              height: 32,
-              minWidth: 32,
-              borderRadius: "50%",
-              background: "rgba(35,60,0,0.06)",
-              border: "none",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-              zIndex: 1,
-            }}
-          >
-            <IconX size={16} stroke={1.75} color={MUTED_TEXT} />
-          </button>
-
+  return (
+    <BottomSheet onClose={handleClose} portal zIndex={200} bottomInset={0} sizing="auto" maxHeight="85%" showClose closeOnBackdrop>
           <div style={{ flexShrink: 0, padding: "14px 20px 0" }}>
-            <div
-              onPointerDown={(e) => {
-                dragStartY.current = e.clientY;
-              }}
-              onPointerMove={(e) => {
-                if (dragStartY.current == null) return;
-                if (e.clientY - dragStartY.current > 60) {
-                  dragStartY.current = null;
-                  handleClose();
-                }
-              }}
-              onPointerUp={() => {
-                dragStartY.current = null;
-              }}
-              onPointerCancel={() => {
-                dragStartY.current = null;
-              }}
-              style={{ width: 60, padding: "10px 0", margin: "-10px auto 8px", display: "flex", justifyContent: "center", cursor: "grab", touchAction: "none" }}
-            >
-              <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(35,60,0,0.15)" }} />
-            </div>
+            <DragHandle onDismiss={handleClose} />
             <div
               style={{
                 fontFamily: FONT_SANS,
@@ -926,10 +863,7 @@ function SaveToSheet({
               {saving ? "Saving…" : saveError ? "Try again" : "Save"}
             </button>
           </div>
-        </div>
-      </div>
-    </div>,
-    document.body
+    </BottomSheet>
   );
 }
 
@@ -944,7 +878,6 @@ function SaveToSheet({
 // convention as this file's own card vs. RecipeCard.
 export function DishMenuPostDetailScreen({
   postId,
-  newCategory,
   currentUserId,
   back,
   push,
@@ -953,11 +886,6 @@ export function DishMenuPostDetailScreen({
   onSaved,
 }: {
   postId: string;
-  // Unused since step 4e (dish/menu saves no longer go through a category
-  // sheet) — kept on the prop type and still threaded in from App.tsx so
-  // step 5's "Add to my recipes" (reusing SaveToSheet below) can wire it
-  // back up without a signature change.
-  newCategory?: { key: string; label: string };
   // Null is a valid, expected state (not yet resolved) — treated the same as
   // "not the poster" so the Save button never shows before identity is known,
   // same convention as CookPostDetailScreen above.
@@ -1333,62 +1261,19 @@ function SaveToast({
   onView: () => void;
   onDismiss: () => void;
 }) {
-  useEffect(() => {
-    const timer = setTimeout(onDismiss, 4200);
-    return () => clearTimeout(timer);
-  }, [onDismiss]);
-
-  return createPortal(
-    <div
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        zIndex: 210,
-        display: "flex",
-        justifyContent: "center",
-        pointerEvents: "none",
-      }}
-    >
-      <div
-        style={{
-          position: "relative",
-          width: "100%",
-          maxWidth: APP_MAX_WIDTH,
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "flex-end",
-          paddingBottom: 80,
-        }}
-      >
-        <div
-          style={{
-            pointerEvents: "auto",
-            background: FOREST,
-            color: "#FAF7F2",
-            borderRadius: 14,
-            padding: "12px 16px",
-            fontFamily: FONT_SANS,
-            fontSize: 13,
-            textAlign: "center",
-            maxWidth: APP_MAX_WIDTH - 32,
-            animation: "tipsy-fade 0.22s ease",
-          }}
-        >
-          {message}{" "}
-          <span
-            onClick={onView}
-            style={{ fontFamily: FONT_SERIF_ITALIC, fontStyle: "italic", textDecoration: "underline", cursor: "pointer" }}
-          >
-            View
-          </span>
-        </div>
-      </div>
-    </div>,
-    document.body
+  return (
+    <Toast
+      show
+      message={message}
+      onDismiss={onDismiss}
+      durationMs={4200}
+      portal
+      placement="bottom"
+      offset={80}
+      zIndex={210}
+      maxWidth={APP_MAX_WIDTH - 32}
+      actionLabel="View"
+      onAction={onView}
+    />
   );
 }

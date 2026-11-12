@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import { IconBook, IconCheck, IconLayoutList, IconPencil, IconPlus, IconSearch, IconX } from "@tabler/icons-react";
 import { createGrouping, updateGrouping, getPlan, type Recipe, type GroupingPartInput, type PlanSummary } from "./data";
 import LogGroupingCookSheet from "./LogGroupingCookSheet";
 import { Avatar } from "./Profile";
+import { BottomSheet, DragHandle, Toast, SheetKeyframes } from "./BottomSheet";
 
 // Dishes & Menus v1.5 step 3a/3b — the real Dish and Menu screens, replacing
 // the "placeholder" slot for kind="dish"/"menu" (step 2a/2b wired the
 // handoff). Several pieces below (constants, NameField, SaveLogFooter,
-// SavedToast, ScreenTitleHeader, PlanKeyframes, AddPartSheet) are exported
+// SavedToast, ScreenTitleHeader, AddPartSheet) are exported
 // so MenuScreen.tsx (step 3b) can reuse them rather than re-implementing —
 // the placeholder itself stays in place only for the still-unbuilt Log Cook
 // sheet (step 3c).
@@ -46,19 +46,6 @@ export function PosterRow({ name, date, right, style }: { name: string; date: st
       </div>
       {right}
     </div>
-  );
-}
-
-// Shared @keyframes for the "Saved" toast fade and the Add-a-part sheet's
-// slide-up — a <style> tag's rules are only live while that component
-// instance is mounted, so every screen that renders SavedToast/AddPartSheet
-// must render this too (cheap: a handful of CSS keyframe rules).
-export function PlanKeyframes() {
-  return (
-    <style>{`
-      @keyframes tipsy-fade { from { opacity: 0; } to { opacity: 1; } }
-      @keyframes tipsy-slideup { from { transform: translateY(100%); } to { transform: translateY(0); } }
-    `}</style>
   );
 }
 
@@ -200,29 +187,20 @@ export function SaveLogFooter({
 
 // "Saved" pill toast — shared by the dish/menu screens.
 export function SavedToast({ show, message = "Saved" }: { show: boolean; message?: string }) {
-  if (!show) return null;
   return (
-    <div
-      style={{
-        position: "absolute",
-        top: 12,
-        left: "50%",
-        transform: "translateX(-50%)",
-        background: FOREST,
-        color: "#FAF7F2",
-        padding: "8px 16px",
-        borderRadius: 999,
-        fontFamily: FONT_SANS,
-        fontSize: 12,
-        fontWeight: 700,
-        letterSpacing: "0.05em",
-        textTransform: "uppercase",
-        zIndex: 95,
-        animation: "tipsy-fade 0.2s ease",
-      }}
-    >
-      {message}
-    </div>
+    <Toast
+      show={show}
+      message={message}
+      portal={false}
+      placement="top"
+      zIndex={95}
+      borderRadius={999}
+      padding="8px 16px"
+      fontSize={12}
+      fontWeight={700}
+      uppercase
+      letterSpacing="0.05em"
+    />
   );
 }
 
@@ -549,7 +527,7 @@ export default function DishScreen({
         />
       )}
 
-      <PlanKeyframes />
+      <SheetKeyframes />
     </div>
   );
 }
@@ -586,7 +564,6 @@ export function AddPartSheet({
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const dragStartY = useRef<number | null>(null);
   const allRecipes = recipesByCategory["__all__"];
 
   useEffect(() => {
@@ -624,99 +601,10 @@ export function AddPartSheet({
     return list.filter((d) => (d.title || "").toLowerCase().includes(q));
   }, [dishes, trimmed]);
 
-  // Rendered via a portal straight onto document.body: ScreenStage applies an
-  // inline `transform` to every screen layer (even a no-op translateX(0) when
-  // idle), which per the CSS spec makes that layer a new containing block for
-  // `position: fixed` descendants. Nested inside that tree, "fixed" no longer
-  // means "relative to the viewport" — it was resolving against the
-  // transformed layer instead, which is what let the bottom nav visibly shift
-  // during the sheet's slide animation. A portal escapes that tree entirely so
-  // the sheet is truly viewport-fixed and can paint above the nav bar
-  // (zIndex 100) without touching its layout.
-  return createPortal(
-    <div
-      onClick={handleClose}
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        zIndex: 200,
-        display: "flex",
-        justifyContent: "center",
-      }}
-    >
-      {/* Constrains the dim layer to the app column's width (matching
-          APP_MAX_WIDTH below) and stacks it under the sheet within that same
-          column, instead of dimming the full browser viewport. */}
-      <div style={{ position: "relative", width: "100%", maxWidth: APP_MAX_WIDTH, height: "100%", display: "flex", alignItems: "flex-end" }}>
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            background: "rgba(35, 60, 0, 0.08)",
-            animation: "tipsy-fade 0.22s ease",
-          }}
-        />
-        <div
-          onClick={(e) => e.stopPropagation()}
-          style={{
-            position: "relative",
-            background: BODY_BG,
-            borderRadius: "28px 28px 0 0",
-            width: "100%",
-            maxWidth: APP_MAX_WIDTH,
-            height: "100%",
-            display: "flex",
-            flexDirection: "column",
-            animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
-          }}
-        >
-        <button
-          onClick={handleClose}
-          aria-label="Close"
-          style={{
-            position: "absolute",
-            top: 14,
-            right: 16,
-            width: 32,
-            height: 32,
-            minWidth: 32,
-            borderRadius: "50%",
-            background: "rgba(35,60,0,0.06)",
-            border: "none",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            zIndex: 1,
-          }}
-        >
-          <IconX size={16} stroke={1.75} color={MUTED_TEXT} />
-        </button>
+  return (
+    <BottomSheet onClose={handleClose} portal zIndex={200} bottomInset={0} sizing="full" showClose closeOnBackdrop>
         <div style={{ flexShrink: 0, padding: "14px 20px 0" }}>
-          <div
-            onPointerDown={(e) => {
-              dragStartY.current = e.clientY;
-            }}
-            onPointerMove={(e) => {
-              if (dragStartY.current == null) return;
-              if (e.clientY - dragStartY.current > 60) {
-                dragStartY.current = null;
-                handleClose();
-              }
-            }}
-            onPointerUp={() => {
-              dragStartY.current = null;
-            }}
-            onPointerCancel={() => {
-              dragStartY.current = null;
-            }}
-            style={{ width: 60, padding: "10px 0", margin: "-10px auto 8px", display: "flex", justifyContent: "center", cursor: "grab", touchAction: "none" }}
-          >
-            <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(35,60,0,0.15)" }} />
-          </div>
+          <DragHandle onDismiss={handleClose} />
           <div
             style={{
               fontFamily: FONT_SANS,
@@ -1016,9 +904,6 @@ export function AddPartSheet({
             )}
           </button>
         </div>
-        </div>
-      </div>
-    </div>,
-    document.body,
+    </BottomSheet>
   );
 }
