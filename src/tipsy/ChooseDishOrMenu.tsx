@@ -30,6 +30,87 @@ function subtitleFor(plan: PlanSummary): string {
   return "Not cooked yet";
 }
 
+// Shared plan row — also used by DishesMenusList.tsx (step 5a). Keep this
+// the one definition; don't fork a second copy elsewhere.
+export function PlanRow({ plan, onClick }: { plan: PlanSummary; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 14,
+        width: "100%",
+        textAlign: "left",
+        padding: 16,
+        borderRadius: 20,
+        background: CARD_BG,
+        border: `1px solid ${CARD_BORDER}`,
+        marginBottom: 10,
+        cursor: "pointer",
+      }}
+    >
+      <div
+        style={{
+          width: 44,
+          height: 44,
+          minWidth: 44,
+          borderRadius: 14,
+          background: "rgba(35,60,0,0.08)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        {plan.kind === "dish" ? <DishIcon /> : <MenuIcon />}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontFamily: FONT_SANS,
+            fontWeight: 700,
+            fontSize: 15,
+            color: FOREST,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {plan.title || (plan.kind === "dish" ? "Untitled dish" : "Untitled menu")}
+        </div>
+        <div
+          style={{
+            fontFamily: FONT_SANS,
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+            color: MUTED_TEXT,
+            marginTop: 3,
+          }}
+        >
+          {plan.kind === "dish" ? "DISH" : "MENU"} · {plan.partCount} {plan.partCount === 1 ? "PART" : "PARTS"}
+        </div>
+        <div
+          style={{
+            fontFamily: FONT_SERIF_ITALIC,
+            fontStyle: "italic",
+            fontSize: 13,
+            color: MUTED_TEXT,
+            marginTop: 3,
+          }}
+        >
+          {subtitleFor(plan)}
+        </div>
+      </div>
+      <div style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
+        <ChevronIcon />
+      </div>
+    </button>
+  );
+}
+
 export default function ChooseDishOrMenu({
   back,
   onLogged,
@@ -153,81 +234,7 @@ export default function ChooseDishOrMenu({
           </div>
         ) : (
           filteredPlans.map((plan) => (
-            <button
-              key={plan.id}
-              onClick={() => setOpenPlan(plan)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 14,
-                width: "100%",
-                textAlign: "left",
-                padding: 16,
-                borderRadius: 20,
-                background: CARD_BG,
-                border: `1px solid ${CARD_BORDER}`,
-                marginBottom: 10,
-                cursor: "pointer",
-              }}
-            >
-              <div
-                style={{
-                  width: 44,
-                  height: 44,
-                  minWidth: 44,
-                  borderRadius: 14,
-                  background: "rgba(35,60,0,0.08)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}
-              >
-                {plan.kind === "dish" ? <DishIcon /> : <MenuIcon />}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontFamily: FONT_SANS,
-                    fontWeight: 700,
-                    fontSize: 15,
-                    color: FOREST,
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {plan.title || (plan.kind === "dish" ? "Untitled dish" : "Untitled menu")}
-                </div>
-                <div
-                  style={{
-                    fontFamily: FONT_SANS,
-                    fontSize: 10,
-                    fontWeight: 700,
-                    letterSpacing: "0.06em",
-                    textTransform: "uppercase",
-                    color: MUTED_TEXT,
-                    marginTop: 3,
-                  }}
-                >
-                  {plan.kind === "dish" ? "DISH" : "MENU"} · {plan.partCount} {plan.partCount === 1 ? "PART" : "PARTS"}
-                </div>
-                <div
-                  style={{
-                    fontFamily: FONT_SERIF_ITALIC,
-                    fontStyle: "italic",
-                    fontSize: 13,
-                    color: MUTED_TEXT,
-                    marginTop: 3,
-                  }}
-                >
-                  {subtitleFor(plan)}
-                </div>
-              </div>
-              <div style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
-                <ChevronIcon />
-              </div>
-            </button>
+            <PlanRow key={plan.id} plan={plan} onClick={() => setOpenPlan(plan)} />
           ))
         )}
       </div>

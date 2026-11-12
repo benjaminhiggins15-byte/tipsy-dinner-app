@@ -15,10 +15,11 @@ import AuthFlow from "./AuthFlow";
 import SharedRecipeView from "./SharedRecipeView";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
 import Home, { ReceivedPending, ReceivedRecipeView, SuggestionDetailView, DiscoveredDetailView } from "./Home";
-import LogCookTypePicker from "./LogCookTypePicker";
+import LogCookTypePicker, { DishIcon } from "./LogCookTypePicker";
 import ChooseDishOrMenu from "./ChooseDishOrMenu";
 import DishScreen from "./DishScreen";
 import MenuScreen from "./MenuScreen";
+import DishesMenusList from "./DishesMenusList";
 import { CookFeedScreen, CookPostDetailScreen, DishMenuPostDetailScreen, type CookFeedState } from "./CookFeed";
 import { Toast } from "./BottomSheet";
 import { supabase } from "../lib/supabase";
@@ -335,6 +336,7 @@ type Screen =
   | { name: "chooseDishOrMenu" }
   | { name: "dishScreen"; groupingId?: string; recipe?: Recipe }
   | { name: "menuScreen"; groupingId?: string; recipe?: Recipe }
+  | { name: "dishesMenusList" }
   | { name: "home"; toastMessage?: string }
   | { name: "receivedPending"; items: PendingReceivedRecipe[] }
   | { name: "receivedRecipe"; item: PendingReceivedRecipe; newCategory?: { key: string; label: string } }
@@ -398,6 +400,7 @@ function screenKey(s: Screen): string {
     case "chooseDishOrMenu": return "chooseDishOrMenu";
     case "dishScreen": return s.groupingId ? `dishScreen:${s.groupingId}` : `dishScreen:new:${s.recipe?.savedId ?? ""}`;
     case "menuScreen": return s.groupingId ? `menuScreen:${s.groupingId}` : `menuScreen:new:${s.recipe?.savedId ?? ""}`;
+    case "dishesMenusList": return "dishesMenusList";
     case "home": return "home";
     case "receivedPending": return "receivedPending";
     case "receivedRecipe": return `receivedRecipe:${s.item.sendId}`;
@@ -589,6 +592,7 @@ function renderScreen(
     case "chooseDishOrMenu": return <ChooseDishOrMenu back={back} onLogged={(msg) => popChooseDishOrMenuWithToast?.(msg)} />;
     case "dishScreen": return <DishScreen back={back} push={push} groupingId={s.groupingId} seedRecipe={s.recipe} recipesByCategory={recipesByCategory ?? {}} ensureRecipesLoaded={ensureRecipesLoaded} />;
     case "menuScreen": return <MenuScreen back={back} push={push} groupingId={s.groupingId} seedRecipe={s.recipe} recipesByCategory={recipesByCategory ?? {}} ensureRecipesLoaded={ensureRecipesLoaded} />;
+    case "dishesMenusList": return <DishesMenusList back={back} push={push} />;
     case "home": return <Home profile={profile || null} push={push} seedBuildFromChip={seedBuildFromChip || (() => {})} goToReceivedShelf={goToReceivedShelf || (() => {})} switchToTab={switchToTab || (() => {})} toastMessage={s.toastMessage} />;
     case "receivedPending": return <ReceivedPending items={s.items} back={back} push={push} />;
     case "receivedRecipe": return (
@@ -2429,6 +2433,30 @@ function Categories({ push, back, isTabRoot, ensureRecipesLoaded }: { push: (s: 
             }}
           >
             View all
+          </button>
+          <button
+            onClick={() => push({ name: "dishesMenusList" })}
+            aria-label="Dishes & Menus"
+            style={{
+              height: 32,
+              padding: "0 14px",
+              borderRadius: 16,
+              border: "1px solid rgba(35,60,0,0.25)",
+              background: "transparent",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              gap: 6,
+              cursor: "pointer",
+              fontFamily: "Inter, sans-serif",
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.05em",
+              textTransform: "uppercase",
+              color: "#233C00",
+              whiteSpace: "nowrap",
+            }}
+          >
+            <DishIcon />
+            Dishes & Menus
           </button>
           <button
             onClick={() => push({ name: "occasions" })}

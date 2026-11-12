@@ -5133,10 +5133,10 @@ export async function listMyPlans(): Promise<PlanSummary[]> {
   try {
     const { data: groupings, error: groupingsError } = await supabase
       .from('groupings')
-      .select('id, kind, title, source_post_id, created_at')
+      .select('id, kind, title, source_post_id, updated_at')
       .eq('user_id', userId)
       .in('kind', ['dish', 'menu'])
-      .order('created_at', { ascending: false });
+      .order('updated_at', { ascending: false });
     if (groupingsError) throw groupingsError;
     if (!groupings || groupings.length === 0) return [];
 
