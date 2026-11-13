@@ -6,10 +6,6 @@ import AddYourOwn from "./AddYourOwn";
 import NewCategory from "./NewCategory";
 import Onboarding from "./Onboarding";
 import Profile, { ProfileEdit, AccountPrivacy, DeleteAccountConfirm } from "./Profile";
-import Occasions from "./Occasions";
-import Menus from "./Menus";
-import MenuInterior from "./MenuInterior";
-import RecipePicker from "./RecipePicker";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 import AuthFlow from "./AuthFlow";
 import SharedRecipeView from "./SharedRecipeView";
@@ -325,10 +321,6 @@ type Screen =
   | { name: "allrecipes"; pickForLog?: boolean }
   | { name: "recipe"; recipe: Recipe; categoryLabel: string; categoryKey: string; autoOpenLog?: boolean; toastMessage?: string }
   | { name: "grocerylist" }
-  | { name: "occasions" }
-  | { name: "menus"; occasionId: string; occasionName: string }
-  | { name: "menuinterior"; menuId: string }
-  | { name: "recipepicker"; menuId: string; section: MenuSection }
   | { name: "profile" }
   | { name: "profileedit"; fieldKey: "email" | "palate" | "inspiration" | "table" | "constraints" | "identity" | "drinks" }
   | { name: "accountPrivacy" }
@@ -398,10 +390,6 @@ function screenKey(s: Screen): string {
     case "allrecipes": return "allrecipes";
     case "recipe": return `recipe:${s.categoryLabel}:${s.recipe.title}`;
     case "grocerylist": return "grocerylist";
-    case "occasions": return "occasions";
-    case "menus": return `menus:${s.occasionId}`;
-    case "menuinterior": return `menuinterior:${s.menuId}`;
-    case "recipepicker": return `recipepicker:${s.menuId}:${s.section}`;
     case "profile": return "profile";
     case "profileedit": return `profileedit:${s.fieldKey}`;
     case "accountPrivacy": return "accountPrivacy";
@@ -568,37 +556,6 @@ function renderScreen(
       />
     );
     case "grocerylist": return <GroceryList push={push} back={back} />;
-    case "occasions": return (
-      <Occasions
-        back={back}
-        push={(occasion) => push({ name: "menus", occasionId: occasion.id, occasionName: occasion.name })}
-        isTabRoot={isTabRoot}
-      />
-    );
-    case "menus": return (
-      <Menus
-        occasionId={s.occasionId}
-        occasionName={s.occasionName}
-        back={back}
-        push={(menu) => push({ name: "menuinterior", menuId: menu.id })}
-      />
-    );
-    case "menuinterior": return (
-      <MenuInterior
-        menuId={s.menuId}
-        back={back}
-        push={push}
-      />
-    );
-    case "recipepicker": return (
-      <RecipePicker
-        menuId={s.menuId}
-        section={s.section}
-        onClose={back}
-        recipesByCategory={recipesByCategory ?? {}}
-        ensureRecipesLoaded={ensureRecipesLoaded}
-      />
-    );
     case "profile": return <Profile back={back} openEdit={(k) => push({ name: "profileedit", fieldKey: k })} isTabRoot={isTabRoot} onSignOut={onSignOut!} profile={profile || null} onUpdate={onUpdate || (async () => {})} openAccountPrivacy={() => push({ name: "accountPrivacy" })} />;
     case "profileedit": return <ProfileEdit fieldKey={s.fieldKey} back={back} profile={profile || null} onUpdate={onUpdate || (async () => {})} />;
     case "accountPrivacy": return <AccountPrivacy back={back} openDeleteAccount={() => push({ name: "deleteAccountConfirm" })} />;
@@ -2560,29 +2517,6 @@ function Categories({ push, back, isTabRoot, ensureRecipesLoaded }: { push: (s: 
           >
             <DishIcon />
             Dishes & Menus
-          </button>
-          <button
-            onClick={() => push({ name: "occasions" })}
-            aria-label="Menus"
-            style={{
-              height: 32,
-              padding: "0 14px",
-              borderRadius: 16,
-              border: "1px solid rgba(35,60,0,0.25)",
-              background: "transparent",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              gap: 6,
-              cursor: "pointer",
-              fontFamily: "Inter, sans-serif",
-              fontSize: 12,
-              fontWeight: 500,
-              letterSpacing: "0.04em",
-              color: "#233C00",
-              whiteSpace: "nowrap",
-            }}
-          >
-            <IconLayoutList size={16} stroke={1.5} color="rgba(35,60,0,0.7)" />
-            Menus
           </button>
         </div>
       </div>
