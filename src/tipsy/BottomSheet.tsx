@@ -1,4 +1,4 @@
-import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { IconX } from "@tabler/icons-react";
 
@@ -21,6 +21,59 @@ const FONT_SERIF_ITALIC = "'Fraunces', serif";
 // which also means it escapes the phone frame's own width constraint and
 // must restate it here to stay lined up on wide screens.
 const APP_MAX_WIDTH = 480;
+
+// iOS Safari keeps `position: fixed` anchored to the LAYOUT viewport, not the
+// visible area the keyboard leaves behind — a fixed-height ("100%") sheet
+// gets dragged off-screen when the keyboard opens and the page scrolls the
+// focused input into view. `window.visualViewport` reports the actually-
+// visible box (shrinks with the keyboard; `offsetTop`/`offsetLeft` report how
+// far that visible box has scrolled from the fixed layer's origin), so every
+// BottomSheet instance re-sizes/re-positions itself off it live. Returns null
+// (callers fall back to the old 100%/top:0 behavior) where unsupported.
+function useVisualViewportBox() {
+  const [box, setBox] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+
+  useEffect(() => {
+    const vv = typeof window !== "undefined" ? window.visualViewport : null;
+    if (!vv) return;
+    const update = () => setBox({ top: vv.offsetTop, left: vv.offsetLeft, width: vv.width, height: vv.height });
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, []);
+
+  return box;
+}
+
+// Locks page scroll for as long as any BottomSheet is mounted (module-level
+// counter so a second sheet opening while one is already open — or closing
+// while one is still open — doesn't clobber the lock/restore). Without this,
+// iOS's focus-scroll-into-view can still scroll the underlying document even
+// though the sheet itself is a fixed overlay, which is what drags the overlay
+// along with it.
+let openSheetCount = 0;
+let bodyOverflowBeforeLock = "";
+
+function useBodyScrollLock() {
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (openSheetCount === 0) {
+      bodyOverflowBeforeLock = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+    }
+    openSheetCount += 1;
+    return () => {
+      openSheetCount -= 1;
+      if (openSheetCount === 0) {
+        document.body.style.overflow = bodyOverflowBeforeLock;
+      }
+    };
+  }, []);
+}
 
 // A <style> tag's rules are only live while that component instance is
 // mounted, so BottomSheet/Toast each render this themselves rather than
@@ -107,15 +160,21 @@ export function BottomSheet({
   showClose?: boolean;
   closeOnBackdrop?: boolean;
 }) {
+  useBodyScrollLock();
+  const viewportBox = useVisualViewportBox();
+  const overlayHeight = viewportBox ? viewportBox.height - bottomInset : undefined;
+
   const overlay = (
     <div
       onClick={closeOnBackdrop ? onClose : undefined}
       style={{
         position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: bottomInset,
+        top: viewportBox ? viewportBox.top : 0,
+        left: viewportBox ? viewportBox.left : 0,
+        width: viewportBox ? viewportBox.width : undefined,
+        right: viewportBox ? undefined : 0,
+        height: overlayHeight,
+        bottom: viewportBox ? undefined : bottomInset,
         zIndex,
         display: "flex",
         justifyContent: "center",
@@ -134,9 +193,10 @@ export function BottomSheet({
             borderRadius: "28px 28px 0 0",
             width: "100%",
             maxWidth: APP_MAX_WIDTH,
-            ...(sizing === "full" ? { height: "100%" } : maxHeight ? { maxHeight } : {}),
+            ...(sizing === "full" ? { height: "100%" } : maxHeight ? { maxHeight: viewportBox ? `min(${maxHeight}, 100%)` : maxHeight } : {}),
             display: "flex",
             flexDirection: "column",
+            overflow: "hidden",
             animation: "tipsy-slideup 0.32s cubic-bezier(0.32, 0.72, 0, 1)",
           }}
         >

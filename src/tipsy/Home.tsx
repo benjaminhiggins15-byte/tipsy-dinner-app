@@ -24,7 +24,6 @@ import { selectDailyChips, getRecentlyShownChipIds, recordShownChipIds } from ".
 import { getCuisineLabel } from "./cuisineLabels";
 import { logEvent } from "../lib/events";
 import watermarkSquare from "../Logos/watermark_square.png";
-import watermarkCircle from "../Logos/watermark_circle.png";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
 import LogCookTypePicker from "./LogCookTypePicker";
@@ -282,7 +281,6 @@ export default function Home({
             </svg>
             Log cook
           </button>
-          <img src={watermarkCircle} alt="Tipsy Dinner" style={{ height: 36, width: "auto", display: "block" }} />
         </div>
       </div>
 

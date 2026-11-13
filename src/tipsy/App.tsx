@@ -7154,6 +7154,30 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
   const [bottomBarHeight, setBottomBarHeight] = useState(0);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // iOS Safari doesn't shrink window.innerHeight (the layout viewport) when
+  // the keyboard opens or pans the visual viewport to keep a focused input
+  // visible — this screen's height:"100%" column (already correctly reserves
+  // space for the overlaid BottomTabBar, see ScreenStage's paddingBottom:64)
+  // doesn't account for either, so content behind the keyboard/pan gets
+  // hidden. `keyboardGap` is the delta between the layout viewport and
+  // window.visualViewport — ~0 with no keyboard (preserving the existing
+  // height:"100%" sizing exactly), and the keyboard's height once it opens —
+  // shrinking the column by exactly that amount keeps the input pinned just
+  // above the keyboard instead of relying on native scroll compensation.
+  const [keyboardGap, setKeyboardGap] = useState(0);
+  useEffect(() => {
+    const vv = typeof window !== "undefined" ? window.visualViewport : null;
+    if (!vv) return;
+    const update = () => setKeyboardGap(Math.max(0, window.innerHeight - vv.height));
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, []);
+
   // Moment-aware daily chips (same selection Home uses). Deterministic per
   // (userId, local date) so it's stable all day but recomputes across
   // days/users instead of freezing at first mount.
@@ -7191,7 +7215,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, typing, miniBarVisible]);
+  }, [messages, typing, miniBarVisible, keyboardGap]);
 
   useEffect(() => {
     if (recipePulse) {
@@ -7577,7 +7601,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative", background: "#FAF7F2" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: keyboardGap > 0 ? `calc(100% - ${keyboardGap}px)` : "100%", position: "relative", background: "#FAF7F2" }}>
       {/* Header - Logo (and Write your own button when empty) */}
       {!expanded && (
         <div style={{ height: 52, display: "flex", alignItems: "center", justifyContent: "flex-end", padding: "20px 24px 0 24px", flexShrink: 0, position: "relative", zIndex: 1 }}>

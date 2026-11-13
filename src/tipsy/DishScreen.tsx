@@ -569,6 +569,17 @@ export function AddPartSheet({
     if (!allRecipes) ensureRecipesLoaded?.("__all__", "All Recipes");
   }, [allRecipes, ensureRecipesLoaded]);
 
+  // Focusing on mount races the sheet's own 0.32s slide-up (BottomSheet's
+  // `tipsy-slideup` animation) — iOS can start its focus-scroll-into-view
+  // heuristic mid-animation, which is part of what dragged the sheet
+  // off-screen. Delaying focus until just after the animation settles avoids
+  // that race (the visualViewport/body-scroll-lock fix in BottomSheet.tsx
+  // covers the rest).
+  useEffect(() => {
+    const t = setTimeout(() => inputRef.current?.focus(), 340);
+    return () => clearTimeout(t);
+  }, []);
+
   // Always clears the search box, regardless of which of the three dismiss
   // paths (backdrop tap, handle drag, X button) triggered it.
   function handleClose() {
@@ -631,7 +642,11 @@ export function AddPartSheet({
             {subtitle}
           </div>
 
-          <div
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleAddFreeform();
+            }}
             style={{
               display: "flex",
               alignItems: "center",
@@ -645,22 +660,17 @@ export function AddPartSheet({
             <IconSearch size={18} stroke={1.5} color={MUTED_TEXT} />
             <input
               ref={inputRef}
-              autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  handleAddFreeform();
-                }
-              }}
+              enterKeyHint="done"
               placeholder="Search your recipes, or name something else"
               style={{ flex: 1, minWidth: 0, background: "transparent", border: "none", outline: "none", fontFamily: FONT_SANS, fontSize: 15, color: FOREST }}
             />
             {query && (
               <button
+                type="button"
                 onClick={() => {
                   setQuery("");
                   inputRef.current?.focus();
@@ -671,7 +681,7 @@ export function AddPartSheet({
                 <IconX size={16} stroke={1.75} color={MUTED_TEXT} />
               </button>
             )}
-          </div>
+          </form>
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px 24px" }}>
