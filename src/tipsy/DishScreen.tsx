@@ -574,9 +574,12 @@ export function AddPartSheet({
   // heuristic mid-animation, which is part of what dragged the sheet
   // off-screen. Delaying focus until just after the animation settles avoids
   // that race (the visualViewport/body-scroll-lock fix in BottomSheet.tsx
-  // covers the rest).
+  // covers the rest). `preventScroll` stops the browser from also trying to
+  // scroll this programmatic focus into view, which is unnecessary here (the
+  // input is already on-screen inside the sheet) and was fighting the
+  // scroll-lock.
   useEffect(() => {
-    const t = setTimeout(() => inputRef.current?.focus(), 340);
+    const t = setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 340);
     return () => clearTimeout(t);
   }, []);
 
@@ -673,7 +676,7 @@ export function AddPartSheet({
                 type="button"
                 onClick={() => {
                   setQuery("");
-                  inputRef.current?.focus();
+                  inputRef.current?.focus({ preventScroll: true });
                 }}
                 aria-label="Clear search"
                 style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", flexShrink: 0 }}

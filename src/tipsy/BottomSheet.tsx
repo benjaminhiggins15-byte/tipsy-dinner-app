@@ -30,19 +30,34 @@ const APP_MAX_WIDTH = 480;
 // far that visible box has scrolled from the fixed layer's origin), so every
 // BottomSheet instance re-sizes/re-positions itself off it live. Returns null
 // (callers fall back to the old 100%/top:0 behavior) where unsupported.
+//
+// While the keyboard animates open/closed, iOS fires several `resize`/`scroll`
+// events in quick succession with intermediate (not-yet-settled) values —
+// applying each one directly as it arrives is what caused the sheet to visibly
+// jerk (looked like it started closing, then snapped back). Coalescing to at
+// most one state update per animation frame, combined with a CSS transition on
+// the consuming styles, turns that into a single smooth glide instead.
 function useVisualViewportBox() {
   const [box, setBox] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
     const vv = typeof window !== "undefined" ? window.visualViewport : null;
     if (!vv) return;
-    const update = () => setBox({ top: vv.offsetTop, left: vv.offsetLeft, width: vv.width, height: vv.height });
+    const update = () => {
+      if (rafRef.current != null) return;
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        setBox({ top: vv.offsetTop, left: vv.offsetLeft, width: vv.width, height: vv.height });
+      });
+    };
     update();
     vv.addEventListener("resize", update);
     vv.addEventListener("scroll", update);
     return () => {
       vv.removeEventListener("resize", update);
       vv.removeEventListener("scroll", update);
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
   }, []);
 
@@ -51,25 +66,52 @@ function useVisualViewportBox() {
 
 // Locks page scroll for as long as any BottomSheet is mounted (module-level
 // counter so a second sheet opening while one is already open — or closing
-// while one is still open — doesn't clobber the lock/restore). Without this,
-// iOS's focus-scroll-into-view can still scroll the underlying document even
-// though the sheet itself is a fixed overlay, which is what drags the overlay
-// along with it.
+// while one is still open — doesn't clobber the lock/restore). A plain
+// `overflow: hidden` on body does NOT stop iOS's focus-scroll-into-view from
+// moving the underlying document — that's what dragged the overlay along with
+// it (and, worse, could leave the page scrolled horizontally after close,
+// clipping content at the left edge). Pinning body with `position: fixed` at
+// its negative current scroll offset makes it visually immovable regardless of
+// what the browser's scroll-into-view heuristic does underneath, and restoring
+// the exact saved x/y (via `window.scrollTo`, not just resetting the inline
+// styles) on last-unlock is what guarantees the page lands back exactly where
+// it started — including horizontally.
 let openSheetCount = 0;
-let bodyOverflowBeforeLock = "";
+let savedScrollX = 0;
+let savedScrollY = 0;
+let savedBodyStyle: { position: string; top: string; left: string; width: string; overflow: string } | null = null;
 
 function useBodyScrollLock() {
   useEffect(() => {
     if (typeof document === "undefined") return;
     if (openSheetCount === 0) {
-      bodyOverflowBeforeLock = document.body.style.overflow;
+      savedScrollX = window.scrollX;
+      savedScrollY = window.scrollY;
+      savedBodyStyle = {
+        position: document.body.style.position,
+        top: document.body.style.top,
+        left: document.body.style.left,
+        width: document.body.style.width,
+        overflow: document.body.style.overflow,
+      };
+      document.body.style.position = "fixed";
+      document.body.style.top = `-${savedScrollY}px`;
+      document.body.style.left = `-${savedScrollX}px`;
+      document.body.style.width = "100%";
       document.body.style.overflow = "hidden";
     }
     openSheetCount += 1;
     return () => {
       openSheetCount -= 1;
-      if (openSheetCount === 0) {
-        document.body.style.overflow = bodyOverflowBeforeLock;
+      if (openSheetCount === 0 && savedBodyStyle) {
+        const restore = savedBodyStyle;
+        document.body.style.position = restore.position;
+        document.body.style.top = restore.top;
+        document.body.style.left = restore.left;
+        document.body.style.width = restore.width;
+        document.body.style.overflow = restore.overflow;
+        savedBodyStyle = null;
+        window.scrollTo(savedScrollX, savedScrollY);
       }
     };
   }, []);
@@ -175,6 +217,11 @@ export function BottomSheet({
         right: viewportBox ? undefined : 0,
         height: overlayHeight,
         bottom: viewportBox ? undefined : bottomInset,
+        // visualViewport reports several intermediate sizes while the iOS
+        // keyboard animates open/closed; rAF-batching (above) caps how often
+        // those land as state updates, and this transition turns each landed
+        // update into a smooth glide toward it instead of a visible snap.
+        transition: "top 0.22s ease, left 0.22s ease, width 0.22s ease, height 0.22s ease",
         zIndex,
         display: "flex",
         justifyContent: "center",
