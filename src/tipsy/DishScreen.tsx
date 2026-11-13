@@ -223,6 +223,7 @@ export default function DishScreen({
   seedRecipe,
   recipesByCategory,
   ensureRecipesLoaded,
+  onSaved,
 }: {
   back: () => void;
   push: (s: Screen) => void;
@@ -232,6 +233,11 @@ export default function DishScreen({
   seedRecipe?: Recipe;
   recipesByCategory: Record<string, Recipe[]>;
   ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void>;
+  // Step 5b: both SAVE and a successfully logged cook now route to the
+  // dish's Plan Detail screen instead of staying here — toastMessage is
+  // shown there (Plan Detail owns the "Saved"/"Cook logged"/"Posted" toast),
+  // not on this screen.
+  onSaved: (groupingId: string, kind: "dish" | "menu", toastMessage?: string) => void;
 }) {
   const [loading, setLoading] = useState(!!groupingId);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -245,9 +251,7 @@ export default function DishScreen({
   const [addSheetOpen, setAddSheetOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [justSaved, setJustSaved] = useState(false);
   const [logCookOpen, setLogCookOpen] = useState(false);
-  const [logCookToast, setLogCookToast] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -329,12 +333,7 @@ export default function DishScreen({
   async function handleSaveClick() {
     const id = await doSave();
     if (!id) return;
-    // Step 3a: stay on this screen and become the edit view for the saved
-    // dish, rather than navigating back. Step 5 will route SAVE to the
-    // dish's detail screen instead.
-    setActiveGroupingId(id);
-    setJustSaved(true);
-    setTimeout(() => setJustSaved(false), 1800);
+    onSaved(id, "dish", "Saved");
   }
 
   async function handleLogCookClick() {
@@ -346,8 +345,7 @@ export default function DishScreen({
 
   function handleCookLogged(message: string) {
     setLogCookOpen(false);
-    setLogCookToast(message);
-    setTimeout(() => setLogCookToast(null), 1800);
+    if (activeGroupingId) onSaved(activeGroupingId, "dish", message);
   }
 
   return (
@@ -502,9 +500,6 @@ export default function DishScreen({
           <SaveLogFooter canSave={canSave} saving={saving} onSave={handleSaveClick} onLogCook={handleLogCookClick} />
         </>
       )}
-
-      <SavedToast show={justSaved} />
-      <SavedToast show={!!logCookToast} message={logCookToast ?? undefined} />
 
       {addSheetOpen && (
         <AddPartSheet

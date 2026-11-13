@@ -5262,7 +5262,13 @@ export type PlanPart = {
   id: string;
   section: string | null;
   position: number;
-  recipe: { id: string; title: string } | null;
+  // inLibrary/inspiredByName added for step 5b's plan detail screen: a
+  // recipe that arrived with a saved dish/menu (save_grouping_from_post)
+  // starts in_library=false and is invisible to the library until promoted
+  // via add_recipe_to_library — plan detail needs both flags to decide
+  // whether tapping this row opens the normal recipe screen or a read-only
+  // preview with an "add to my recipes" action.
+  recipe: { id: string; title: string; inLibrary: boolean; inspiredByName: string | null } | null;
   freeformText: string | null;
   childDish: { id: string; title: string | null; parts: PlanPart[] } | null;
 };
@@ -5280,6 +5286,10 @@ export type PlanDetail = {
   title: string | null;
   parts: PlanPart[];
   cooks: PlanCook[];
+  // Resolved the same way as listMyPlans' own inspiredByName (recipe-level
+  // credit stamped by save_grouping_from_post), but computed here directly
+  // from the already-fetched parts tree rather than a second set of queries.
+  inspiredByName: string | null;
 };
 
 // One level of dish expansion only — menu -> dish -> recipe/freeform is the
@@ -5289,7 +5299,7 @@ export type PlanDetail = {
 async function getGroupingPartsExpanded(groupingId: string, userId: string): Promise<PlanPart[]> {
   const { data: rows, error } = await supabase
     .from('grouping_parts')
-    .select('id, section, position, recipe_id, freeform_text, child_grouping_id, recipes(id, title)')
+    .select('id, section, position, recipe_id, freeform_text, child_grouping_id, recipes(id, title, in_library, inspired_by_name)')
     .eq('grouping_id', groupingId)
     .order('position');
   if (error) throw error;
@@ -5310,12 +5320,14 @@ async function getGroupingPartsExpanded(groupingId: string, userId: string): Pro
         childDish = { id: dish.id, title: dish.title, parts: dishParts };
       }
     }
-    const recipeRow = row.recipes as unknown as { id: string; title: string } | null;
+    const recipeRow = row.recipes as unknown as { id: string; title: string; in_library: boolean; inspired_by_name: string | null } | null;
     parts.push({
       id: row.id,
       section: row.section,
       position: row.position,
-      recipe: recipeRow ? { id: recipeRow.id, title: recipeRow.title } : null,
+      recipe: recipeRow
+        ? { id: recipeRow.id, title: recipeRow.title, inLibrary: recipeRow.in_library, inspiredByName: recipeRow.inspired_by_name }
+        : null,
       freeformText: row.freeform_text,
       childDish,
     });
@@ -5334,7 +5346,7 @@ export async function getPlan(groupingId: string): Promise<PlanDetail | null> {
   try {
     const { data: grouping, error: groupingError } = await supabase
       .from('groupings')
-      .select('id, kind, title')
+      .select('id, kind, title, source_post_id')
       .eq('id', groupingId)
       .eq('user_id', userId)
       .maybeSingle();
@@ -5358,10 +5370,180 @@ export async function getPlan(groupingId: string): Promise<PlanDetail | null> {
       isPosted: row.is_posted,
     }));
 
-    return { id: grouping.id, kind: grouping.kind as GroupingKind, title: grouping.title, parts, cooks };
+    // Same credit source as listMyPlans (recipe-level inspired_by_name, only
+    // meaningful when this grouping itself was saved from a feed post) — but
+    // read directly off the parts tree already fetched above instead of a
+    // second round of queries: check this plan's own direct recipe parts
+    // first, then one level into any embedded dish's parts.
+    let inspiredByName: string | null = null;
+    if (grouping.source_post_id) {
+      for (const part of parts) {
+        if (part.recipe?.inspiredByName) { inspiredByName = part.recipe.inspiredByName; break; }
+      }
+      if (!inspiredByName) {
+        outer: for (const part of parts) {
+          for (const nested of part.childDish?.parts ?? []) {
+            if (nested.recipe?.inspiredByName) { inspiredByName = nested.recipe.inspiredByName; break outer; }
+          }
+        }
+      }
+    }
+
+    return { id: grouping.id, kind: grouping.kind as GroupingKind, title: grouping.title, parts, cooks, inspiredByName };
   } catch (error) {
     console.error('Error loading plan:', error);
     throw error;
+  }
+}
+
+// ---------- Plan Detail actions (step 5b) ----------
+
+// Promotes a dish/menu-sourced recipe (in_library=false) into the caller's
+// library: flips recipes.in_library to true and files it into the chosen
+// category, via the add_recipe_to_library(uuid, uuid) RPC (migration
+// 20261111000001_saved_recipes_in_library.sql) rather than two separate
+// client writes, since recipe_categories_insert_own alone can't verify the
+// category belongs to the caller — the RPC closes that gap server-side.
+export async function addRecipeToLibrary(recipeId: string, categoryId: string): Promise<void> {
+  const { error } = await supabase.rpc('add_recipe_to_library', {
+    p_recipe_id: recipeId,
+    p_category_id: categoryId,
+  });
+  if (error) throw error;
+}
+
+export type RecipePreview = {
+  title: string;
+  description: string;
+  ingredients: { name: string; qty: string }[];
+  steps: RecipeStep[];
+  cookTime: string | null;
+  serves: string | null;
+};
+
+// Read-only fetch for a dish/menu-sourced recipe that hasn't been promoted
+// into the library yet (in_library=false) — Plan Detail shows this via
+// ExpandedRecipeOverlay instead of routing into the normal recipe screen,
+// which only knows how to open in-library recipes.
+export async function getRecipePreview(recipeId: string): Promise<RecipePreview | null> {
+  const userId = await getCurrentUserId();
+  if (!userId) return null;
+
+  try {
+    const { data: recipe, error } = await supabase
+      .from('recipes')
+      .select('title, description, steps, cook_time, serves, ingredients (name, quantity, sort_order)')
+      .eq('id', recipeId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!recipe) return null;
+
+    return {
+      title: recipe.title,
+      description: recipe.description,
+      ingredients: (recipe.ingredients || [])
+        .sort((a: any, b: any) => a.sort_order - b.sort_order)
+        .map((ing: any) => ({ name: ing.name, qty: ing.quantity })),
+      steps: recipe.steps || [],
+      cookTime: recipe.cook_time ?? null,
+      serves: recipe.serves ?? null,
+    };
+  } catch (error) {
+    console.error('Error loading recipe preview:', error);
+    return null;
+  }
+}
+
+// Resolves an in-library recipe row tapped from Plan Detail into the shape
+// the normal recipe screen needs to navigate there — same query shape as
+// getSavedRecipesAll (above), filtered to one recipe instead of the whole
+// library.
+export async function getRecipeForLibraryNav(
+  recipeId: string
+): Promise<{ recipe: Recipe; categoryKey: string; categoryLabel: string } | null> {
+  const userId = await getCurrentUserId();
+  if (!userId) return null;
+
+  try {
+    const { data: recipeCategories, error } = await supabase
+      .from('recipe_categories')
+      .select(`
+        category_id,
+        categories (
+          name
+        ),
+        recipes!inner (
+          id,
+          title,
+          description,
+          steps,
+          created_at,
+          source,
+          photo_url,
+          photo_version,
+          inspired_by_name,
+          ingredients (
+            name,
+            quantity,
+            sort_order
+          ),
+          cook_events (
+            id,
+            recipe_id,
+            cooked_on,
+            score,
+            note,
+            created_at,
+            photo_url,
+            photo_version,
+            cook_posts (
+              id,
+              is_posted
+            )
+          )
+        )
+      `)
+      .eq('recipes.id', recipeId)
+      .eq('recipes.in_library', true)
+      .eq('user_id', userId)
+      .order('cooked_on', { ascending: false, foreignTable: 'recipes.cook_events' })
+      .limit(1);
+    if (error) throw error;
+
+    const rc = (recipeCategories ?? [])[0] as any;
+    if (!rc) return null;
+
+    const recipe = rc.recipes;
+    const categoryId = rc.category_id as string;
+    const categoryLabel = rc.categories?.name ?? "";
+    const cookEvents = (recipe.cook_events || []).map(mapCookEventRow);
+
+    return {
+      recipe: {
+        title: recipe.title,
+        description: recipe.description,
+        color: generateGradientFromUUID(categoryId),
+        category: categoryLabel.toLowerCase(),
+        ingredients: (recipe.ingredients || [])
+          .sort((a: any, b: any) => a.sort_order - b.sort_order)
+          .map((ing: any) => ({ name: ing.name, qty: ing.quantity })),
+        steps: recipe.steps || [],
+        savedId: recipe.id,
+        categoryKey: categoryId,
+        cookEvents,
+        headlineRating: headlineRatingFromEvents(cookEvents),
+        photo_url: recipe.photo_url ?? null,
+        photo_version: recipe.photo_version ?? 0,
+        created_at: recipe.created_at,
+        inspired_by_name: recipe.inspired_by_name ?? null,
+      },
+      categoryKey: categoryId,
+      categoryLabel,
+    };
+  } catch (error) {
+    console.error('Error loading recipe for library nav:', error);
+    return null;
   }
 }
 
@@ -5552,6 +5734,18 @@ export async function logGroupingCook(
       cooked_on: input.cookedOn,
     });
     if (insertError) throw insertError;
+
+    // Item 6 (Dishes & Menus v1.5 step 5b): bump the grouping's updated_at so
+    // listMyPlans' "most recently updated first" sort surfaces a just-cooked
+    // plan — best-effort only, the cook itself is already logged above.
+    const { error: touchError } = await supabase
+      .from('groupings')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', groupingId)
+      .eq('user_id', userId);
+    if (touchError) {
+      console.error('Logged cook but failed to bump groupings.updated_at (list ordering may lag):', touchError);
+    }
 
     return { postId };
   } catch (error) {

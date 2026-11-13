@@ -20,6 +20,7 @@ import ChooseDishOrMenu from "./ChooseDishOrMenu";
 import DishScreen from "./DishScreen";
 import MenuScreen from "./MenuScreen";
 import DishesMenusList from "./DishesMenusList";
+import PlanDetail from "./PlanDetail";
 import { CookFeedScreen, CookPostDetailScreen, DishMenuPostDetailScreen, type CookFeedState } from "./CookFeed";
 import { Toast } from "./BottomSheet";
 import { supabase } from "../lib/supabase";
@@ -336,7 +337,16 @@ type Screen =
   | { name: "chooseDishOrMenu" }
   | { name: "dishScreen"; groupingId?: string; recipe?: Recipe }
   | { name: "menuScreen"; groupingId?: string; recipe?: Recipe }
-  | { name: "dishesMenusList" }
+  | { name: "dishesMenusList"; toastMessage?: string }
+  | {
+      name: "planDetail";
+      groupingId: string;
+      kind: "dish" | "menu";
+      toastMessage?: string;
+      newCategory?: { key: string; label: string };
+      pendingRecipeId?: string;
+    }
+  | { name: "newcategoryforplandetail"; groupingId: string; kind: "dish" | "menu"; recipeId: string }
   | { name: "home"; toastMessage?: string }
   | { name: "receivedPending"; items: PendingReceivedRecipe[] }
   | { name: "receivedRecipe"; item: PendingReceivedRecipe; newCategory?: { key: string; label: string } }
@@ -401,6 +411,8 @@ function screenKey(s: Screen): string {
     case "dishScreen": return s.groupingId ? `dishScreen:${s.groupingId}` : `dishScreen:new:${s.recipe?.savedId ?? ""}`;
     case "menuScreen": return s.groupingId ? `menuScreen:${s.groupingId}` : `menuScreen:new:${s.recipe?.savedId ?? ""}`;
     case "dishesMenusList": return "dishesMenusList";
+    case "planDetail": return `planDetail:${s.groupingId}`;
+    case "newcategoryforplandetail": return `newcategoryforplandetail:${s.groupingId}:${s.recipeId}`;
     case "home": return "home";
     case "receivedPending": return "receivedPending";
     case "receivedRecipe": return `receivedRecipe:${s.item.sendId}`;
@@ -461,6 +473,9 @@ function renderScreen(
   cookPostDetailCache?: Record<string, { detail: CookPostDetail | null; savedGroupingId: string | null }>,
   ensureCookPostDetailLoaded?: (postId: string) => Promise<void>,
   setCookPostDetailSaved?: (postId: string, groupingId: string) => void,
+  finishDishOrMenuSaved?: (groupingId: string, kind: "dish" | "menu", toastMessage?: string) => void,
+  popPlanDetailWithToast?: (message: string) => void,
+  finishCreateCategoryForPlanDetail?: (catKey: string, catLabel: string, groupingId: string, kind: "dish" | "menu", recipeId: string) => void,
 ) {
   switch (s.name) {
     case "cook": return (
@@ -590,9 +605,29 @@ function renderScreen(
     case "deleteAccountConfirm": return <DeleteAccountConfirm back={back} onSignOut={onSignOut!} profile={profile || null} />;
     case "placeholder": return <Placeholder title={s.title} back={back} kind={s.kind} recipeId={s.recipeId} groupingId={s.groupingId} postId={s.postId} />;
     case "chooseDishOrMenu": return <ChooseDishOrMenu back={back} onLogged={(msg) => popChooseDishOrMenuWithToast?.(msg)} />;
-    case "dishScreen": return <DishScreen back={back} push={push} groupingId={s.groupingId} seedRecipe={s.recipe} recipesByCategory={recipesByCategory ?? {}} ensureRecipesLoaded={ensureRecipesLoaded} />;
-    case "menuScreen": return <MenuScreen back={back} push={push} groupingId={s.groupingId} seedRecipe={s.recipe} recipesByCategory={recipesByCategory ?? {}} ensureRecipesLoaded={ensureRecipesLoaded} />;
-    case "dishesMenusList": return <DishesMenusList back={back} push={push} />;
+    case "dishScreen": return <DishScreen back={back} push={push} groupingId={s.groupingId} seedRecipe={s.recipe} recipesByCategory={recipesByCategory ?? {}} ensureRecipesLoaded={ensureRecipesLoaded} onSaved={finishDishOrMenuSaved ?? (() => {})} />;
+    case "menuScreen": return <MenuScreen back={back} push={push} groupingId={s.groupingId} seedRecipe={s.recipe} recipesByCategory={recipesByCategory ?? {}} ensureRecipesLoaded={ensureRecipesLoaded} onSaved={finishDishOrMenuSaved ?? (() => {})} />;
+    case "dishesMenusList": return <DishesMenusList back={back} push={push} toastMessage={s.toastMessage} />;
+    case "planDetail": return (
+      <PlanDetail
+        groupingId={s.groupingId}
+        kind={s.kind}
+        toastMessage={s.toastMessage}
+        newCategory={s.newCategory}
+        pendingRecipeId={s.pendingRecipeId}
+        back={back}
+        push={push}
+        onDeleted={(msg) => popPlanDetailWithToast?.(msg)}
+      />
+    );
+    case "newcategoryforplandetail": return (
+      <NewCategory
+        back={back}
+        onSaved={(cat) => {
+          if (cat) finishCreateCategoryForPlanDetail?.(cat.key, cat.label, s.groupingId, s.kind, s.recipeId);
+        }}
+      />
+    );
     case "home": return <Home profile={profile || null} push={push} seedBuildFromChip={seedBuildFromChip || (() => {})} goToReceivedShelf={goToReceivedShelf || (() => {})} switchToTab={switchToTab || (() => {})} toastMessage={s.toastMessage} />;
     case "receivedPending": return <ReceivedPending items={s.items} back={back} push={push} />;
     case "receivedRecipe": return (
@@ -1485,6 +1520,53 @@ export default function App() {
     });
   };
 
+  // Plan Detail's onDeleted — same pop-and-rewrite shape as
+  // popChooseDishOrMenuWithToast above, but the only screen below Plan
+  // Detail that owns a toastMessage slot is dishesMenusList (step 5a/5b); any
+  // other screen below (e.g. CookFeed's dishMenuPostDetail) just gets a plain
+  // back() with no toast.
+  const popPlanDetailWithToast = (message: string) => {
+    if (transition) return;
+    if (currentStack.length < 2) return;
+    const prev = currentStack[currentStack.length - 2];
+    if (prev.name !== "dishesMenusList") {
+      back();
+      return;
+    }
+    const newPrev: Screen = { ...prev, toastMessage: message };
+    const prevIsTabRoot = currentStack.length === 2;
+    setTransition({ from: current, to: newPrev, direction: "back", fromIsTabRoot: isTabRoot, toIsTabRoot: prevIsTabRoot });
+    updateCurrentTabStack((st) => {
+      const next = st.slice(0, -1);
+      next[next.length - 1] = newPrev;
+      return next;
+    });
+  };
+
+  // DishScreen/MenuScreen's onSaved — a save (or a cook logged from the edit
+  // screen) now lands on Plan Detail instead of staying on the editor.
+  // Replaces the editor at the top of the stack (not a push, not a pop) so
+  // back navigation from Plan Detail goes to wherever the editor itself was
+  // opened from, same depth, forward-direction transition.
+  const finishDishOrMenuSaved = (groupingId: string, kind: "dish" | "menu", toastMessage?: string) => {
+    if (transition) return;
+    const target: Screen = { name: "planDetail", groupingId, kind, toastMessage };
+    setTransition({ from: current, to: target, direction: "forward", fromIsTabRoot: isTabRoot, toIsTabRoot: isTabRoot });
+    updateCurrentTabStack((st) => {
+      const next = st.slice(0, -1); // remove the editor screen
+      // If the editor was opened via Plan Detail's own Edit button, the same
+      // grouping's Plan Detail is still sitting right below it — drop that
+      // stale copy too so Save doesn't leave two Plan Detail entries back to
+      // back (which would need an extra Back tap to actually leave it).
+      const below = next[next.length - 1];
+      if (below && below.name === "planDetail" && below.groupingId === groupingId) {
+        next.pop();
+      }
+      next.push(target);
+      return next;
+    });
+  };
+
   // Pop the editcategory screen and replace the recipes screen below with the
   // new label, animating back to it.
   const finishEditCategory = (newLabel: string) => {
@@ -1625,6 +1707,18 @@ export default function App() {
     updateCurrentTabStack((prev) => {
       const newStack = prev.slice(0, -1); // Remove newcategoryfordishmenupost screen
       return [...newStack, { name: "dishMenuPostDetail", postId, newCategory: { key: catKey, label: catLabel } }];
+    });
+  };
+
+  // Mirrors finishCreateCategoryForDishMenuPost — Plan Detail's own
+  // create-category return target. Carries recipeId (not just the grouping)
+  // since Plan Detail's save target is the embedded recipe mid-promotion,
+  // not the grouping identity itself — see PlanDetail.tsx's pendingRecipeId.
+  const finishCreateCategoryForPlanDetail = (catKey: string, catLabel: string, groupingId: string, kind: "dish" | "menu", recipeId: string) => {
+    if (transition) return;
+    updateCurrentTabStack((prev) => {
+      const newStack = prev.slice(0, -1); // Remove newcategoryforplandetail screen
+      return [...newStack, { name: "planDetail", groupingId, kind, newCategory: { key: catKey, label: catLabel }, pendingRecipeId: recipeId }];
     });
   };
 
@@ -1933,6 +2027,9 @@ export default function App() {
           cookPostDetailCache={cookPostDetailCache}
           ensureCookPostDetailLoaded={ensureCookPostDetailLoaded}
           setCookPostDetailSaved={setCookPostDetailSaved}
+          finishDishOrMenuSaved={finishDishOrMenuSaved}
+          popPlanDetailWithToast={popPlanDetailWithToast}
+          finishCreateCategoryForPlanDetail={finishCreateCategoryForPlanDetail}
         />
         <BottomTabBar activeTab={activeTab} onTabClick={switchToTab} />
       </div>
@@ -2124,6 +2221,9 @@ function ScreenStage({
   cookPostDetailCache,
   ensureCookPostDetailLoaded,
   setCookPostDetailSaved,
+  finishDishOrMenuSaved,
+  popPlanDetailWithToast,
+  finishCreateCategoryForPlanDetail,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back"; fromIsTabRoot?: boolean; toIsTabRoot?: boolean } | null;
@@ -2169,6 +2269,9 @@ function ScreenStage({
   cookPostDetailCache: Record<string, { detail: CookPostDetail | null; savedGroupingId: string | null }>;
   ensureCookPostDetailLoaded: (postId: string) => Promise<void>;
   setCookPostDetailSaved: (postId: string, groupingId: string) => void;
+  finishDishOrMenuSaved: (groupingId: string, kind: "dish" | "menu", toastMessage?: string) => void;
+  popPlanDetailWithToast: (message: string) => void;
+  finishCreateCategoryForPlanDetail: (catKey: string, catLabel: string, groupingId: string, kind: "dish" | "menu", recipeId: string) => void;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
@@ -2258,7 +2361,7 @@ function ScreenStage({
         pointerEvents: isTransitioning ? "none" : "auto",
         paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
       }}>
-        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState, finishCreateCategoryForCookPost, currentUserId, popChooseDishOrMenuWithToast, finishCreateCategoryForDishMenuPost, dishMenuPostDetailCache, ensureDishMenuPostDetailLoaded, setDishMenuPostDetailSaved, cookPostDetailCache, ensureCookPostDetailLoaded, setCookPostDetailSaved)}
+        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState, finishCreateCategoryForCookPost, currentUserId, popChooseDishOrMenuWithToast, finishCreateCategoryForDishMenuPost, dishMenuPostDetailCache, ensureDishMenuPostDetailLoaded, setDishMenuPostDetailSaved, cookPostDetailCache, ensureCookPostDetailLoaded, setCookPostDetailSaved, finishDishOrMenuSaved, popPlanDetailWithToast, finishCreateCategoryForPlanDetail)}
       </div>
 
       {/* Overlay layer - only during transitions, renders from screen */}
@@ -2271,7 +2374,7 @@ function ScreenStage({
           pointerEvents: "none",
           paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
         }}>
-          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState, finishCreateCategoryForCookPost, currentUserId, popChooseDishOrMenuWithToast, finishCreateCategoryForDishMenuPost, dishMenuPostDetailCache, ensureDishMenuPostDetailLoaded, setDishMenuPostDetailSaved, cookPostDetailCache, ensureCookPostDetailLoaded, setCookPostDetailSaved)}
+          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState, finishCreateCategoryForCookPost, currentUserId, popChooseDishOrMenuWithToast, finishCreateCategoryForDishMenuPost, dishMenuPostDetailCache, ensureDishMenuPostDetailLoaded, setDishMenuPostDetailSaved, cookPostDetailCache, ensureCookPostDetailLoaded, setCookPostDetailSaved, finishDishOrMenuSaved, popPlanDetailWithToast, finishCreateCategoryForPlanDetail)}
         </div>
       )}
     </div>

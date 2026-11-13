@@ -66,9 +66,8 @@ type Screen =
   | { name: "newcategoryforcookpost"; postId: string }
   | { name: "dishMenuPostDetail"; postId: string; newCategory?: { key: string; label: string } }
   | { name: "newcategoryfordishmenupost"; postId: string }
-  | { name: "dishScreen"; groupingId?: string; recipe?: Recipe }
-  | { name: "menuScreen"; groupingId?: string; recipe?: Recipe }
   | { name: "recipe"; recipe: Recipe; categoryLabel: string; categoryKey: string }
+  | { name: "planDetail"; groupingId: string; kind: "dish" | "menu" }
   | { name: "placeholder"; title: string; kind?: "dish" | "menu"; recipeId?: string; groupingId?: string; postId?: string };
 
 const COURSES: { key: MenuSection; label: string }[] = [
@@ -699,7 +698,7 @@ function SnapshotPartRow({
 // — the parent's onSave is only responsible for the RPC call and its own
 // success side effects (closing the sheet on success is this component's
 // job: it closes itself once onSave resolves without throwing).
-function SaveToSheet({
+export function SaveToSheet({
   kind,
   onClose,
   onNew,
@@ -1209,7 +1208,7 @@ export function DishMenuPostDetailScreen({
           onView={() => {
             const target = toast;
             setToast(null);
-            push(target.kind === "dish" ? { name: "dishScreen", groupingId: target.groupingId } : { name: "menuScreen", groupingId: target.groupingId });
+            push({ name: "planDetail", groupingId: target.groupingId, kind: target.kind });
           }}
           onDismiss={() => setToast(null)}
         />
@@ -1252,7 +1251,7 @@ export function DishMenuPostDetailScreen({
 // stacking context. Fixed the same way SaveToSheet above escapes the same
 // layer: createPortal straight to document.body, restating APP_MAX_WIDTH
 // to stay centered on wide screens.
-function SaveToast({
+export function SaveToast({
   message,
   onView,
   onDismiss,

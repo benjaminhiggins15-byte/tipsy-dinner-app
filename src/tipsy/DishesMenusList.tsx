@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import { listMyPlans, type PlanSummary } from "./data";
 import { DishIcon, MenuIcon } from "./LogCookTypePicker";
 import { PlanRow } from "./ChooseDishOrMenu";
-import { BottomSheet } from "./BottomSheet";
+import { BottomSheet, Toast } from "./BottomSheet";
 
-// Dishes & Menus v1.5 step 5a — the DISHES & MENUS list screen, reached from
-// the Recipes tab header pill. Row tap goes to a dev-only placeholder
-// carrying the grouping id; the real plan detail screen is step 5b.
+// Dishes & Menus v1.5 step 5a/5b — the DISHES & MENUS list screen, reached
+// from the Recipes tab header pill. Row tap goes to the real Plan Detail
+// screen (step 5b); `toastMessage` carries a message in from there after a
+// delete (mirrors Home.tsx's own incomingToast pattern).
 
 const FONT_SANS = "'Inter', sans-serif";
 const FONT_SERIF_ITALIC = "'Fraunces', serif";
@@ -19,19 +20,30 @@ const MUTED_TEXT = "rgba(35,60,0,0.6)";
 // Minimal local Screen type — same convention as DishScreen.tsx/MenuScreen.tsx:
 // each screen file states only the push targets it actually uses.
 type Screen =
-  | { name: "placeholder"; title: string; kind?: "dish" | "menu"; groupingId?: string }
   | { name: "dishScreen" }
-  | { name: "menuScreen" };
+  | { name: "menuScreen" }
+  | { name: "planDetail"; groupingId: string; kind: "dish" | "menu" };
 
 export default function DishesMenusList({
   back,
   push,
+  toastMessage,
 }: {
   back: () => void;
   push: (s: Screen) => void;
+  toastMessage?: string;
 }) {
   const [state, setState] = useState<{ loaded: boolean; plans: PlanSummary[] }>({ loaded: false, plans: [] });
   const [typeSheetOpen, setTypeSheetOpen] = useState(false);
+  const [incomingToast, setIncomingToast] = useState<string | null>(toastMessage ?? null);
+
+  useEffect(() => {
+    if (!toastMessage) return;
+    setIncomingToast(toastMessage);
+    const t = setTimeout(() => setIncomingToast(null), 1800);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toastMessage]);
 
   useEffect(() => {
     let ignore = false;
@@ -50,12 +62,7 @@ export default function DishesMenusList({
   }, []);
 
   function openRow(plan: PlanSummary) {
-    push({
-      name: "placeholder",
-      title: plan.kind === "dish" ? "Dish Detail" : "Menu Detail",
-      kind: plan.kind,
-      groupingId: plan.id,
-    });
+    push({ name: "planDetail", groupingId: plan.id, kind: plan.kind });
   }
 
   return (
@@ -124,6 +131,20 @@ export default function DishesMenusList({
           }}
         />
       )}
+
+      <Toast
+        show={!!incomingToast}
+        message={incomingToast}
+        portal={false}
+        placement="bottom"
+        offset={80}
+        background="#233C00"
+        color="#FEE7C0"
+        borderRadius={8}
+        padding="8px 16px"
+        fontSize={12}
+        fontWeight={500}
+      />
     </div>
   );
 }

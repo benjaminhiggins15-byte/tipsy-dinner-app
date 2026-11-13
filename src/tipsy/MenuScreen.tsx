@@ -15,7 +15,6 @@ import {
   AddPartSheet,
   NameField,
   SaveLogFooter,
-  SavedToast,
   ScreenTitleHeader,
   FONT_SANS,
   FONT_SERIF_ITALIC,
@@ -32,8 +31,9 @@ import LogGroupingCookSheet from "./LogGroupingCookSheet";
 // Dishes & Menus v1.5 step 3b — the real Menu screen, replacing the
 // "placeholder" slot for kind="menu" (step 2b wired the handoff). Reuses
 // DishScreen's exported pieces (constants, NameField, SaveLogFooter,
-// SavedToast, ScreenTitleHeader, AddPartSheet) rather than
-// re-implementing them.
+// ScreenTitleHeader, AddPartSheet) rather than re-implementing them. Step
+// 5b: SAVE and a successfully logged cook now route to Plan Detail (via
+// onSaved) instead of showing a local "Saved" toast here.
 type Screen = { name: "placeholder"; title: string; kind?: "dish" | "menu"; groupingId?: string };
 
 const COURSES: { key: MenuSection; label: string }[] = [
@@ -66,6 +66,7 @@ export default function MenuScreen({
   seedRecipe,
   recipesByCategory,
   ensureRecipesLoaded,
+  onSaved,
 }: {
   back: () => void;
   push: (s: Screen) => void;
@@ -75,6 +76,10 @@ export default function MenuScreen({
   seedRecipe?: Recipe;
   recipesByCategory: Record<string, Recipe[]>;
   ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void>;
+  // Step 5b: both SAVE and a successfully logged cook now route to the
+  // menu's Plan Detail screen instead of staying here — same contract as
+  // DishScreen's own onSaved prop.
+  onSaved: (groupingId: string, kind: "dish" | "menu", toastMessage?: string) => void;
 }) {
   const [loading, setLoading] = useState(!!groupingId);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -91,10 +96,8 @@ export default function MenuScreen({
   const [seedCoursePickerOpen, setSeedCoursePickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [justSaved, setJustSaved] = useState(false);
   const [allDishes, setAllDishes] = useState<PlanSummary[] | null>(null);
   const [logCookOpen, setLogCookOpen] = useState(false);
-  const [logCookToast, setLogCookToast] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -263,9 +266,7 @@ export default function MenuScreen({
   async function handleSaveClick() {
     const id = await doSave();
     if (!id) return;
-    setActiveGroupingId(id);
-    setJustSaved(true);
-    setTimeout(() => setJustSaved(false), 1800);
+    onSaved(id, "menu", "Saved");
   }
 
   async function handleLogCookClick() {
@@ -277,8 +278,7 @@ export default function MenuScreen({
 
   function handleCookLogged(message: string) {
     setLogCookOpen(false);
-    setLogCookToast(message);
-    setTimeout(() => setLogCookToast(null), 1800);
+    if (activeGroupingId) onSaved(activeGroupingId, "menu", message);
   }
 
   const visibleCourses = COURSES.filter((c) => parts.some((p) => p.course === c.key));
@@ -408,9 +408,6 @@ export default function MenuScreen({
           <SaveLogFooter canSave={canSave} saving={saving} onSave={handleSaveClick} onLogCook={handleLogCookClick} />
         </>
       )}
-
-      <SavedToast show={justSaved} />
-      <SavedToast show={!!logCookToast} message={logCookToast ?? undefined} />
 
       {addSheetCourse && (
         <AddPartSheet
