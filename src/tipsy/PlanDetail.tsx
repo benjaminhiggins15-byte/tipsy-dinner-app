@@ -17,7 +17,7 @@ import {
 import { logEvent } from "../lib/events";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
 import { DishIcon } from "./LogCookTypePicker";
-import { SaveToSheet } from "./CookFeed";
+import { SaveToSheet, SaveToast } from "./CookFeed";
 import LogGroupingCookSheet from "./LogGroupingCookSheet";
 import {
   FONT_SANS,
@@ -27,6 +27,7 @@ import {
   CARD_BORDER,
   MUTED_TEXT,
   BODY_BG,
+  ERROR_RED,
   ScreenTitleHeader,
   SavedToast,
 } from "./DishScreen";
@@ -105,7 +106,10 @@ export default function PlanDetail({
   const [promotedIds, setPromotedIds] = useState<Set<string>>(new Set());
   const [promotingRecipeId, setPromotingRecipeId] = useState<string | null>(pendingRecipeId ?? null);
   const [trayOpen, setTrayOpen] = useState(!!newCategory);
-  const [justAdded, setJustAdded] = useState(false);
+  const [addedToast, setAddedToast] = useState<{
+    categoryLabel: string;
+    nav: { recipe: Recipe; categoryKey: string; categoryLabel: string } | null;
+  } | null>(null);
 
   const [logCookOpen, setLogCookOpen] = useState(false);
   const [logCookToast, setLogCookToast] = useState<string | null>(null);
@@ -198,7 +202,7 @@ export default function PlanDetail({
   // call (see CookFeed.tsx's SaveToSheet) — this just does the RPC and
   // updates local state on success; a thrown error surfaces there as
   // "Try again", not here.
-  async function handleAddToLibrary(categoryKey: string): Promise<void> {
+  async function handleAddToLibrary(categoryKey: string, categoryLabel: string): Promise<void> {
     if (!promotingRecipeId) return;
     await addRecipeToLibrary(promotingRecipeId, categoryKey);
     const addedId = promotingRecipeId;
@@ -208,8 +212,11 @@ export default function PlanDetail({
       return next;
     });
     setPreviewOpen(false);
-    setJustAdded(true);
-    setTimeout(() => setJustAdded(false), 1800);
+    // Same resolution openRecipeTap uses for an in-library recipe tap — reused
+    // here so the toast's "View" action opens the normal recipe screen
+    // instead of the read-only preview this recipe just left.
+    const nav = await getRecipeForLibraryNav(addedId);
+    setAddedToast({ categoryLabel, nav });
     // recipe_saved — reuses the closest existing event type, same convention
     // as DishMenuPostDetailScreen's own grouping-save call (no
     // promote-to-library-specific event exists yet).
@@ -241,11 +248,18 @@ export default function PlanDetail({
   }
 
   function deleteBodyText(): string {
-    if (kind === "menu" || menusUsingDish.length === 0) return "This can't be undone.";
-    if (menusUsingDish.length === 1) {
-      return `This dish is used in "${menusUsingDish[0].title || "Untitled menu"}". Deleting it will remove it from that menu too. This can't be undone.`;
+    if (kind === "menu" || menusUsingDish.length === 0) {
+      return "Posts you've already made stay in the feed.";
     }
-    return `This dish is used in ${menusUsingDish.length} menus. Deleting it will remove it from those menus too. This can't be undone.`;
+    const names = menusUsingDish.map((m) => m.title || "Untitled menu");
+    if (names.length === 1) {
+      return `It's in 1 menu, ${names[0]}. It will be removed from it. Posts you've already made stay in the feed.`;
+    }
+    if (names.length === 2) {
+      return `It's in 2 menus, ${names[0]} and ${names[1]}. It will be removed from both. Posts you've already made stay in the feed.`;
+    }
+    const more = names.length - 2;
+    return `It's in ${names.length} menus, ${names[0]}, ${names[1]} and ${more} more. It will be removed from all of them. Posts you've already made stay in the feed.`;
   }
 
   const parts = plan?.parts ?? [];
@@ -375,23 +389,21 @@ export default function PlanDetail({
                     >
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <span style={{ fontFamily: FONT_SANS, fontSize: 13, fontWeight: 600, color: FOREST }}>{formatCookedOn(cook.cookedOn)}</span>
-                        {cook.isPosted && (
-                          <span
-                            style={{
-                              fontFamily: FONT_SANS,
-                              fontSize: 9,
-                              fontWeight: 600,
-                              letterSpacing: "0.08em",
-                              textTransform: "uppercase",
-                              color: "#233C00",
-                              background: "rgba(35,60,0,0.08)",
-                              padding: "3px 6px",
-                              borderRadius: 6,
-                            }}
-                          >
-                            Posted
-                          </span>
-                        )}
+                        <span
+                          style={{
+                            fontFamily: FONT_SANS,
+                            fontSize: 9,
+                            fontWeight: 600,
+                            letterSpacing: "0.08em",
+                            textTransform: "uppercase",
+                            color: "#233C00",
+                            background: "rgba(35,60,0,0.08)",
+                            padding: "3px 6px",
+                            borderRadius: 6,
+                          }}
+                        >
+                          {cook.isPosted ? "Posted" : "Private"}
+                        </span>
                       </div>
                       {cook.score != null && (
                         <div style={{ fontFamily: FONT_SANS, fontSize: 14, fontWeight: 700, color: FOREST }}>
@@ -468,9 +480,20 @@ export default function PlanDetail({
         </>
       )}
 
-      <SavedToast show={justAdded} message="Added to your recipes" />
       <SavedToast show={!!logCookToast} message={logCookToast ?? undefined} />
       <SavedToast show={!!incomingToast} message={incomingToast ?? undefined} />
+
+      {addedToast && (
+        <SaveToast
+          message={`Added to ${addedToast.categoryLabel}.`}
+          onView={() => {
+            const nav = addedToast.nav;
+            setAddedToast(null);
+            if (nav) push({ name: "recipe", recipe: nav.recipe, categoryLabel: nav.categoryLabel, categoryKey: nav.categoryKey });
+          }}
+          onDismiss={() => setAddedToast(null)}
+        />
+      )}
 
       {confirmDeleteOpen && (
         <div
@@ -482,7 +505,7 @@ export default function PlanDetail({
             style={{ background: "#FAF7F2", borderRadius: 16, padding: "24px 20px", width: "100%", maxWidth: 280, display: "flex", flexDirection: "column", gap: 8, border: "0.5px solid rgba(35,60,0,0.1)" }}
           >
             <div style={{ fontFamily: FONT_SANS, fontSize: 16, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: FOREST, textAlign: "center" }}>
-              Delete this {kind}?
+              Delete {plan?.title || (kind === "dish" ? "Untitled dish" : "Untitled menu")}?
             </div>
             <div style={{ fontFamily: FONT_SANS, fontSize: 13, color: FOREST, textAlign: "center", marginBottom: 12 }}>{deleteBodyText()}</div>
             {deleteError && (
@@ -503,7 +526,7 @@ export default function PlanDetail({
             <button
               onClick={handleDelete}
               disabled={deleting}
-              style={{ width: "100%", padding: "12px", borderRadius: 10, background: "#B85C5C", border: "none", color: "#FAF7F2", fontFamily: FONT_SANS, fontSize: 13, fontWeight: 500, cursor: deleting ? "default" : "pointer" }}
+              style={{ width: "100%", padding: "12px", borderRadius: 10, background: ERROR_RED, border: "none", color: "#FAF7F2", fontFamily: FONT_SANS, fontSize: 13, fontWeight: 500, cursor: deleting ? "default" : "pointer" }}
             >
               {deleting ? "Deleting…" : "Delete"}
             </button>

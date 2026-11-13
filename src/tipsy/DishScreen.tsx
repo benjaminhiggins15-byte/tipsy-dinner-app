@@ -21,6 +21,10 @@ export const CARD_BG = "rgba(35,60,0,0.05)";
 export const CARD_BORDER = "rgba(35,60,0,0.1)";
 export const MUTED_TEXT = "rgba(35,60,0,0.6)";
 export const BODY_BG = "#FAF7F2";
+// The app's error/danger color — same value every "Couldn't save…" message
+// uses inline as "#B85C5C"; named here so new error-state UI can reference a
+// token instead of repeating the hex.
+export const ERROR_RED = "#B85C5C";
 // Matches App.tsx's S.phone maxWidth — AddPartSheet portals to document.body
 // (see its render below) to escape ScreenStage's transformed layer, which
 // also means it escapes the phone frame's own width constraint and must
