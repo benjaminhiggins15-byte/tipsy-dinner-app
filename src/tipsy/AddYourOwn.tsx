@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type CSSProperties, type KeyboardEvent } from "react";
-import { saveRecipe, updateSavedRecipe, deleteSavedRecipe, countMenusContainingRecipe, loadCustomCategories, addRecipeToMenuSection, type Recipe, type MenuSection, type RecipeStep, normalizeStep } from "./data";
+import { saveRecipe, updateSavedRecipe, deleteSavedRecipe, loadCustomCategories, type Recipe, type RecipeStep, normalizeStep } from "./data";
 import { logEvent } from "../lib/events";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 
@@ -86,7 +86,6 @@ const trayEmoji: Record<string, string> = {
 export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, editCategoryLabel, onSaveEdit, onDeleted, clearRecipeCache, onCreateCategoryForRecipe, initialDraft }: Props) {
   const isEdit = !!(editRecipe && editRecipe.savedId);
   const [showDelete, setShowDelete] = useState(false);
-  const [deleteMenuCount, setDeleteMenuCount] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteErr, setDeleteErr] = useState(false);
   const [step, setStep] = useState<Step>(initialDraft?.step ?? 1);
@@ -109,7 +108,6 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
   const [trayOpen, setTrayOpen] = useState(!!initialDraft?.trayOpen);
   const [newCategorySelection, setNewCategorySelection] = useState<{ key: string; label: string } | null>((initialDraft as any)?.newCategory || null);
   const [savedCategory, setSavedCategory] = useState<{ key: string; label: string } | null>(null);
-  const [menuAddErr, setMenuAddErr] = useState(false);
 
   // Inline edit state
   const [editing, setEditing] = useState<
@@ -212,7 +210,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
     setStep(4);
   };
 
-  const onPickCategory = async (key: string, label: string, menuInfo?: { menuId: number; section: MenuSection }) => {
+  const onPickCategory = async (key: string, label: string) => {
     const id = Date.now();
     const recipeId = await saveRecipe({
       id,
@@ -223,14 +221,6 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
       steps,
       createdAt: new Date().toISOString(),
     }, 'manual', key); // Manual recipe from Write Your Own with category association
-
-    if (menuInfo) {
-      const result = await addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, id);
-      if (!result) {
-        setMenuAddErr(true);
-        setTimeout(() => setMenuAddErr(false), 2000);
-      }
-    }
 
     // Clear recipe cache for this category
     clearRecipeCache?.(key);
@@ -324,12 +314,8 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
               <PrimaryBtn onClick={tryAdvance1}>Continue to Ingredients →</PrimaryBtn>
               {isEdit && (
                 <button onClick={() => {
-                  setDeleteMenuCount(null);
                   setDeleteErr(false);
                   setShowDelete(true);
-                  if (editRecipe?.savedId) {
-                    countMenusContainingRecipe(editRecipe.savedId).then(setDeleteMenuCount);
-                  }
                 }} style={{
                   width: "100%", background: "transparent", color: C.error,
                   border: "none", padding: "12px",
@@ -747,9 +733,7 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
               Delete this recipe?
             </div>
             <div style={{ fontFamily: fontSans, fontSize: 13, color: C.textLight, textAlign: "center", marginBottom: 12 }}>
-              {deleteMenuCount !== null && deleteMenuCount > 0
-                ? `This recipe is in ${deleteMenuCount} menu${deleteMenuCount === 1 ? "" : "s"}. Delete anyway? This can't be undone.`
-                : "This can't be undone."}
+              This can't be undone.
             </div>
             {deleteErr && <ValMsg>Couldn't delete this recipe — please try again.</ValMsg>}
             <button
@@ -794,28 +778,6 @@ export default function AddYourOwn({ back, goCategories, goRecipe, editRecipe, e
               {deleting ? "Deleting…" : "Delete"}
             </button>
           </div>
-        </div>
-      )}
-
-      {/* Menu-add failure toast */}
-      {menuAddErr && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: "80px",
-            left: "50%",
-            transform: "translateX(-50%)",
-            background: "#233C00",
-            color: "#FEE7C0",
-            padding: "8px 16px",
-            borderRadius: "8px",
-            fontSize: "12px",
-            fontFamily: "Inter, sans-serif",
-            fontWeight: 500,
-            zIndex: 1000,
-          }}
-        >
-          Recipe saved, but couldn't add it to the menu — add it from the menu instead.
         </div>
       )}
     </div>

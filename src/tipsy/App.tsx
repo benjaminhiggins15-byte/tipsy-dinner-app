@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, cleanupMenusLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type Occasion, type Menu, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadOccasions, getMenusForOccasion, findMenu, type MenuSection, addRecipeToMenuSection, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, uploadCookPhoto, removeCookPhoto, getCookPhotoSignedUrl, postCook, unpostCook, getCookFeed, type CookFeedPost, COOK_FEED_PAGE_SIZE, deriveHandleFromName, sendRecipeToFriends, searchProfiles, getMyConnections, type ProfileSearchResult, type PendingReceivedRecipe, getPendingReceivedRecipes, type SuggestedRecipeDetail, getSuggestedRecipeDetail, type StructuredAllergies, getRecipeSnapshotByToken, type RecipeShareSnapshot, PENDING_SHARE_TOKEN_KEY, type DiscoveredRecipe, getAccessToken, getCookPost, getSavedGroupingIdForPost, type CookPostDetail } from "./data";
+import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, uploadCookPhoto, removeCookPhoto, getCookPhotoSignedUrl, postCook, unpostCook, getCookFeed, type CookFeedPost, COOK_FEED_PAGE_SIZE, deriveHandleFromName, sendRecipeToFriends, searchProfiles, getMyConnections, type ProfileSearchResult, type PendingReceivedRecipe, getPendingReceivedRecipes, type SuggestedRecipeDetail, getSuggestedRecipeDetail, type StructuredAllergies, getRecipeSnapshotByToken, type RecipeShareSnapshot, PENDING_SHARE_TOKEN_KEY, type DiscoveredRecipe, getAccessToken, getCookPost, getSavedGroupingIdForPost, type CookPostDetail } from "./data";
 import { type CropRect, compressImageFile } from "./image";
 import { type Big9Id, BIG9_DISPLAY_NAMES, effectiveAllergensForScan, scanIngredientsForBig9, scanFreeTextForBig9, type Big9Hit } from "./allergyMap";
 import AddYourOwn from "./AddYourOwn";
@@ -27,7 +27,6 @@ import watermarkCircle from "../Logos/watermark_circle.png";
 import {
   IconChefHat,
   IconBook,
-  IconLayoutList,
   IconShoppingCart,
   IconUser,
   IconHome,
@@ -1259,7 +1258,8 @@ export default function App() {
       // Remove old localStorage keys (categories, occasions, menus now in Supabase)
       try {
         localStorage.removeItem('tipsyDinnerCategories');
-        cleanupMenusLocalStorage();
+        localStorage.removeItem('tipsyDinnerOccasions');
+        localStorage.removeItem('tipsyDinnerMenus');
       } catch (err) {
         console.error('Error removing old localStorage keys:', err);
       }
@@ -7515,7 +7515,7 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
     }
   };
 
-  const onPickCategory = async (catKey: string, catLabel: string, menuInfo?: { menuId: string; section: MenuSection }) => {
+  const onPickCategory = async (catKey: string, catLabel: string) => {
     if (!currentRecipe) return;
 
     const recipeId = await saveRecipe({
@@ -7532,11 +7532,6 @@ function Cook({ back, push, finishSaveRecipe, screen, isTabRoot, profile, onUpda
     // This allows spinning off multiple siblings from one base in a single chat session.
     // currentRecipe.sourceId is intentionally NOT updated here (would re-anchor to new recipe).
     // To reverse behavior: add `setCurrentRecipe({ ...currentRecipe, sourceId: recipeId })` here.
-
-    // If menu info provided, add recipe to menu section
-    if (menuInfo) {
-      await addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, recipeId);
-    }
 
     const recipe: Recipe = {
       title: currentRecipe.title,

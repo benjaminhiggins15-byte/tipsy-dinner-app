@@ -4,7 +4,6 @@ import {
   normalizeStep,
   saveReceivedRecipe,
   dismissReceivedRecipe,
-  addRecipeToMenuSection,
   computeMySliceDeduped,
   getSuggestedRecipeDetail,
   saveRecipe,
@@ -16,7 +15,6 @@ import {
   type PendingReceivedRecipe,
   type Recipe,
   type RecipeSendSnapshot,
-  type MenuSection,
   type ComputeSliceResult,
   type SuggestedRecipeDetail,
   type SavedRecipe,
@@ -1067,7 +1065,6 @@ export function ReceivedRecipeView({
   const handlePickCategory = async (
     catKey: string,
     catLabel: string,
-    menuInfo?: { menuId: string; section: MenuSection }
   ) => {
     setTrayOpen(false);
     setSaving(true);
@@ -1082,10 +1079,6 @@ export function ReceivedRecipeView({
     };
 
     const result = await saveReceivedRecipe(item.sendId, snapshot, undefined, catKey);
-
-    if (menuInfo) {
-      await addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, result.recipeId);
-    }
 
     const recipe: Recipe = {
       title: item.title,
@@ -1611,7 +1604,6 @@ export function SuggestionDetailView({
   const handlePickCategory = async (
     catKey: string,
     catLabel: string,
-    menuInfo?: { menuId: string; section: MenuSection }
   ) => {
     setTrayOpen(false);
     setSaving(true);
@@ -1627,10 +1619,6 @@ export function SuggestionDetailView({
     };
 
     const savedId = await saveRecipe(toSave, "ai", catKey);
-
-    if (menuInfo) {
-      await addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, savedId);
-    }
 
     const saved: Recipe = {
       title: recipe.title,
@@ -2100,7 +2088,6 @@ export function DiscoveredDetailView({
   const handlePickCategory = async (
     catKey: string,
     catLabel: string,
-    menuInfo?: { menuId: string; section: MenuSection }
   ) => {
     setTrayOpen(false);
     setSaving(true);
@@ -2112,10 +2099,6 @@ export function DiscoveredDetailView({
       { title: recipe.title, description: recipe.description, ingredients: recipe.ingredients, steps: recipe.steps },
       catKey,
     );
-
-    if (menuInfo) {
-      await addRecipeToMenuSection(menuInfo.menuId, menuInfo.section, result.recipeId);
-    }
 
     const saved: Recipe = {
       title: recipe.title,

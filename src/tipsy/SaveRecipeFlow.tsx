@@ -1,30 +1,5 @@
 import { useState, useEffect, type CSSProperties } from "react";
-import {
-  loadCustomCategories,
-  loadOccasions,
-  getMenusForOccasion,
-  findMenu,
-  type MenuSection,
-  type Occasion,
-  type Menu,
-} from "./data";
-import {
-  IconChefHat,
-  IconCandle,
-  IconGrill,
-  IconCake,
-  IconGlassFull,
-  IconHeart,
-  IconStar,
-  IconSun,
-  IconMoon,
-  IconSnowflake,
-  IconFlame,
-  IconLeaf,
-  IconToolsKitchen2,
-  IconBowlSpoon,
-  IconPizza,
-} from "@tabler/icons-react";
+import { loadCustomCategories } from "./data";
 
 const C = {
   bg: "#FAF7F2",
@@ -37,8 +12,6 @@ const C = {
   chipSelected: "rgba(35,60,0,0.1)",
   chipBorderSelected: "rgba(35,60,0,0.35)",
   divider: "rgba(35,60,0,0.08)",
-  menuBtnBg: "rgba(35,60,0,0.04)",
-  menuBtnBorder: "rgba(35,60,0,0.1)",
   ctaBg: "#233C00",
   ctaText: "#FAF7F2",
   handle: "rgba(35,60,0,0.15)",
@@ -47,45 +20,18 @@ const C = {
 const fontSerif = "'Fraunces', serif";
 const fontSans = "'Inter', sans-serif";
 
-// Helper to get icon component by name
-function getIconComponentByName(iconName: string) {
-  const ICON_MAP: Record<string, any> = {
-    IconChefHat,
-    IconCandle,
-    IconGrill,
-    IconCake,
-    IconGlassFull,
-    IconHeart,
-    IconStar,
-    IconSun,
-    IconMoon,
-    IconSnowflake,
-    IconFlame,
-    IconLeaf,
-    IconToolsKitchen2,
-    IconBowlSpoon,
-    IconPizza,
-  };
-  return ICON_MAP[iconName] || IconChefHat;
-}
-
 type Props = {
   onClose: () => void;
-  onPick: (key: string, label: string, menuInfo?: { menuId: string; section: MenuSection }) => void;
+  onPick: (key: string, label: string) => void;
   onNew: () => void;
   initialSelectedCategory?: { key: string; label: string } | null;
 };
 
 export default function SaveRecipeFlow({ onClose, onPick, onNew, initialSelectedCategory }: Props) {
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<1 | 2>(1);
   const [slideDirection, setSlideDirection] = useState<"forward" | "back" | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<{ key: string; label: string } | null>(initialSelectedCategory || null);
-  const [addToMenu, setAddToMenu] = useState(false);
-  const [selectedOccasion, setSelectedOccasion] = useState<string | null>(null);
-  const [selectedMenu, setSelectedMenu] = useState<string | null>(null);
-  const [selectedSection, setSelectedSection] = useState<MenuSection | null>(null);
   const [allCats, setAllCats] = useState<any[]>([]);
-  const [occasions, setOccasions] = useState<Occasion[]>([]);
 
   // Load categories on mount
   useEffect(() => {
@@ -94,15 +40,6 @@ export default function SaveRecipeFlow({ onClose, onPick, onNew, initialSelected
       setAllCats(cats);
     };
     loadCategories();
-  }, []);
-
-  // Load occasions on mount
-  useEffect(() => {
-    let ignore = false;
-    loadOccasions().then(loaded => {
-      if (!ignore) setOccasions(loaded);
-    });
-    return () => { ignore = true; };
   }, []);
 
   // Reorder categories so the initially selected one appears first
@@ -117,46 +54,11 @@ export default function SaveRecipeFlow({ onClose, onPick, onNew, initialSelected
     setSelectedCategory({ key, label });
   };
 
-  const handleYes = () => {
+  const handleSave = () => {
     if (!selectedCategory) return;
-    setAddToMenu(true);
+    onPick(selectedCategory.key, selectedCategory.label);
     setSlideDirection("forward");
     setTimeout(() => setStep(2), 0);
-  };
-
-  const handleSkip = () => {
-    if (!selectedCategory) return;
-    onPick(selectedCategory.key, selectedCategory.label);
-    setSlideDirection("forward");
-    setTimeout(() => setStep(3), 0);
-  };
-
-  const handleSaveWithoutMenu = () => {
-    if (!selectedCategory) return;
-    onPick(selectedCategory.key, selectedCategory.label);
-    setSlideDirection("forward");
-    setTimeout(() => setStep(3), 0);
-  };
-
-  const handleSaveWithMenu = () => {
-    if (!selectedCategory || !selectedMenu || !selectedSection) return;
-    onPick(selectedCategory.key, selectedCategory.label, {
-      menuId: selectedMenu,
-      section: selectedSection,
-    });
-    setSlideDirection("forward");
-    setTimeout(() => setStep(3), 0);
-  };
-
-  const handleBackToStep1 = () => {
-    setSlideDirection("back");
-    setTimeout(() => {
-      setStep(1);
-      setAddToMenu(false);
-      setSelectedOccasion(null);
-      setSelectedMenu(null);
-      setSelectedSection(null);
-    }, 0);
   };
 
   // Container style for slide animation
@@ -213,9 +115,7 @@ export default function SaveRecipeFlow({ onClose, onPick, onNew, initialSelected
               selectedCategory={selectedCategory}
               onSelectCategory={handleCategorySelect}
               onNew={onNew}
-              onYes={handleYes}
-              onSkip={handleSkip}
-              onSave={handleSaveWithoutMenu}
+              onSave={handleSave}
             />
           )}
         </div>
@@ -223,26 +123,7 @@ export default function SaveRecipeFlow({ onClose, onPick, onNew, initialSelected
         <div style={getStepStyle(2)}>
           {step === 2 && (
             <SaveStep2
-              occasions={occasions}
-              selectedCategory={selectedCategory}
-              selectedOccasion={selectedOccasion}
-              setSelectedOccasion={setSelectedOccasion}
-              selectedMenu={selectedMenu}
-              setSelectedMenu={setSelectedMenu}
-              selectedSection={selectedSection}
-              setSelectedSection={setSelectedSection}
-              onBack={handleBackToStep1}
-              onSave={handleSaveWithMenu}
-            />
-          )}
-        </div>
-
-        <div style={getStepStyle(3)}>
-          {step === 3 && (
-            <SaveStep3
               categoryLabel={selectedCategory?.label || ""}
-              menuName={selectedMenu ? findMenu(selectedMenu)?.title : null}
-              sectionLabel={selectedSection}
               onDone={onClose}
             />
           )}
@@ -259,13 +140,11 @@ export default function SaveRecipeFlow({ onClose, onPick, onNew, initialSelected
   );
 }
 
-function SaveStep1({ cats, selectedCategory, onSelectCategory, onNew, onYes, onSkip, onSave }: {
+function SaveStep1({ cats, selectedCategory, onSelectCategory, onNew, onSave }: {
   cats: any[];
   selectedCategory: { key: string; label: string } | null;
   onSelectCategory: (key: string, label: string) => void;
   onNew: () => void;
-  onYes: () => void;
-  onSkip: () => void;
   onSave: () => void;
 }) {
   return (
@@ -340,45 +219,12 @@ function SaveStep1({ cats, selectedCategory, onSelectCategory, onNew, onYes, onS
         })}
       </div>
 
-      {/* Add to menu question */}
-      <div style={{ padding: "20px 18px 8px" }}>
-        <button
-          onClick={onYes}
-          disabled={!selectedCategory}
-          style={{
-            width: "100%",
-            padding: "12px 16px",
-            background: C.menuBtnBg,
-            border: `1px solid ${C.menuBtnBorder}`,
-            borderRadius: 12,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            cursor: selectedCategory ? "pointer" : "not-allowed",
-            opacity: selectedCategory ? 1 : 0.4,
-          }}
-        >
-          <span style={{ fontFamily: fontSans, fontSize: 14, fontWeight: 500, color: C.textMedium }}>
-            Add to a menu
-          </span>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: C.textLight }}>
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
-        </button>
-      </div>
-
-      <div style={{ padding: "0 18px", margin: "12px 0", display: "flex", alignItems: "center", gap: 12 }}>
-        <div style={{ flex: 1, height: 1, background: C.divider }} />
-        <span style={{ fontFamily: fontSans, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: C.textMuted }}>or</span>
-        <div style={{ flex: 1, height: 1, background: C.divider }} />
-      </div>
-
       {/* Save button */}
       <button
         onClick={selectedCategory ? onSave : undefined}
         style={{
           width: "calc(100% - 36px)",
-          margin: "0 18px",
+          margin: "20px 18px 0",
           padding: "14px",
           background: "#233C00",
           border: "none",
@@ -400,263 +246,10 @@ function SaveStep1({ cats, selectedCategory, onSelectCategory, onNew, onYes, onS
   );
 }
 
-function SaveStep2({ occasions, selectedOccasion, setSelectedOccasion, selectedMenu, setSelectedMenu, selectedSection, setSelectedSection, onBack, onSave }: {
-  occasions: Occasion[];
-  selectedOccasion: string | null;
-  setSelectedOccasion: (id: string | null) => void;
-  selectedMenu: string | null;
-  setSelectedMenu: (id: string | null) => void;
-  selectedSection: MenuSection | null;
-  setSelectedSection: (section: MenuSection | null) => void;
-  onBack: () => void;
-  onSave: () => void;
-}) {
-  const [menus, setMenus] = useState<Menu[]>([]);
-  const [selectedMenuData, setSelectedMenuData] = useState<Menu | null>(null);
-
-  useEffect(() => {
-    if (!selectedOccasion) {
-      setMenus([]);
-      return;
-    }
-    let ignore = false;
-    getMenusForOccasion(selectedOccasion).then(loaded => {
-      if (!ignore) setMenus(loaded);
-    });
-    return () => { ignore = true; };
-  }, [selectedOccasion]);
-
-  useEffect(() => {
-    if (!selectedMenu) {
-      setSelectedMenuData(null);
-      return;
-    }
-    let ignore = false;
-    findMenu(selectedMenu).then(loaded => {
-      if (!ignore) setSelectedMenuData(loaded);
-    });
-    return () => { ignore = true; };
-  }, [selectedMenu]);
-
-  const SECTION_LABELS: Record<string, string> = {
-    apps: "Apps",
-    mains: "Mains",
-    sides: "Sides",
-    desserts: "Desserts",
-    drinks: "Drinks",
-  };
-
-  return (
-    <>
-      {/* Step indicator */}
-      <div style={{ display: "flex", gap: 6, justifyContent: "center", marginBottom: 12 }}>
-        <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.text }} />
-        <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.text }} />
-      </div>
-
-      <div style={{ padding: "0 18px 14px", borderBottom: `1px solid ${C.divider}` }}>
-        <div style={{ fontFamily: fontSans, fontSize: 11, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", color: C.textMuted, marginBottom: 6 }}>Add to a menu</div>
-        <div style={{ fontFamily: fontSerif, fontStyle: "italic", fontSize: 13, color: C.text }}>pick an occasion and course</div>
-      </div>
-
-      <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px", maxHeight: "50vh" }}>
-        {/* Occasions list */}
-        <div style={{ marginBottom: 20 }}>
-          {occasions.map((occasion) => {
-            const IconComponent = getIconComponentByName(occasion.icon);
-            const isSelected = selectedOccasion === occasion.id;
-            return (
-              <button
-                key={occasion.id}
-                onClick={() => {
-                  setSelectedOccasion(occasion.id);
-                  setSelectedMenu(null);
-                  setSelectedSection(null);
-                }}
-                style={{
-                  width: "100%",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  padding: "12px",
-                  background: isSelected ? C.chipSelected : "transparent",
-                  border: `1px solid ${isSelected ? C.chipBorderSelected : "transparent"}`,
-                  borderRadius: 10,
-                  cursor: "pointer",
-                  marginBottom: 8,
-                  textAlign: "left",
-                }}
-              >
-                <div style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: "50%",
-                  background: C.chipBg,
-                  border: `1px solid ${C.chipBorder}`,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}>
-                  <IconComponent size={18} color={C.textLight} />
-                </div>
-                <span style={{
-                  fontFamily: fontSans,
-                  fontSize: 14,
-                  fontWeight: 500,
-                  color: C.text,
-                }}>
-                  {occasion.name}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Menus dropdown if occasion selected */}
-        {selectedOccasion && menus.length > 0 && (
-          <div style={{ marginBottom: 20 }}>
-            <div style={{
-              fontFamily: fontSans,
-              fontSize: 11,
-              fontWeight: 500,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              color: C.textMuted,
-              marginBottom: 8,
-            }}>
-              Menu
-            </div>
-            {menus.map((menu) => {
-              const isSelected = selectedMenu === menu.id;
-              return (
-                <button
-                  key={menu.id}
-                  onClick={() => {
-                    setSelectedMenu(menu.id);
-                    setSelectedSection(null);
-                  }}
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px",
-                    background: isSelected ? C.chipSelected : "transparent",
-                    border: `1px solid ${isSelected ? C.chipBorderSelected : C.chipBorder}`,
-                    borderRadius: 8,
-                    cursor: "pointer",
-                    marginBottom: 6,
-                    textAlign: "left",
-                    fontFamily: fontSans,
-                    fontSize: 13,
-                    color: C.text,
-                  }}
-                >
-                  {menu.title}
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Course selection */}
-        {selectedMenuData && (
-          <div>
-            <div style={{
-              fontFamily: fontSans,
-              fontSize: 11,
-              fontWeight: 500,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              color: C.textMuted,
-              marginBottom: 8,
-            }}>
-              Course
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {selectedMenuData.enabledSections.map((section) => {
-                const isSelected = selectedSection === section;
-                return (
-                  <button
-                    key={section}
-                    onClick={() => setSelectedSection(section)}
-                    style={{
-                      padding: "8px 14px",
-                      background: isSelected ? C.chipSelected : C.chipBg,
-                      color: isSelected ? C.text : C.textLight,
-                      border: `1px solid ${isSelected ? C.chipBorderSelected : C.chipBorder}`,
-                      borderRadius: 20,
-                      fontFamily: fontSans,
-                      fontSize: 11,
-                      fontWeight: 500,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.08em",
-                      cursor: "pointer",
-                    }}
-                  >
-                    {SECTION_LABELS[section]}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Bottom actions */}
-      <div style={{ padding: "12px 18px", display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `1px solid ${C.divider}` }}>
-        <button
-          onClick={onBack}
-          style={{
-            background: "transparent",
-            border: "none",
-            color: C.textLight,
-            fontFamily: fontSans,
-            fontSize: 12,
-            fontWeight: 500,
-            cursor: "pointer",
-            padding: 0,
-          }}
-        >
-          ← Back
-        </button>
-        <button
-          onClick={selectedSection ? onSave : undefined}
-          style={{
-            padding: "12px 24px",
-            background: "#233C00",
-            border: "none",
-            borderRadius: 14,
-            color: "#FAF7F2",
-            fontFamily: fontSans,
-            fontSize: 12,
-            fontWeight: 500,
-            textTransform: "none",
-            letterSpacing: "0.02em",
-            cursor: selectedSection ? "pointer" : "not-allowed",
-            opacity: selectedSection ? 1 : 0.4,
-            pointerEvents: selectedSection ? "auto" : "none",
-          }}
-        >
-          Save
-        </button>
-      </div>
-    </>
-  );
-}
-
-function SaveStep3({ categoryLabel, menuName, sectionLabel, onDone }: {
+function SaveStep2({ categoryLabel, onDone }: {
   categoryLabel: string;
-  menuName: string | null;
-  sectionLabel: string | null;
   onDone: () => void;
 }) {
-  const SECTION_LABELS: Record<string, string> = {
-    apps: "apps",
-    mains: "mains",
-    sides: "sides",
-    desserts: "desserts",
-    drinks: "drinks",
-  };
-
   return (
     <div style={{ padding: "40px 18px", display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
       {/* Checkmark */}
@@ -684,18 +277,8 @@ function SaveStep3({ categoryLabel, menuName, sectionLabel, onDone }: {
           color: C.text,
           marginBottom: 6,
         }}>
-          Saved to {categoryLabel}{menuName ? ` + ${menuName}` : ""}
+          Saved to {categoryLabel}
         </div>
-        {sectionLabel && (
-          <div style={{
-            fontFamily: fontSerif,
-            fontStyle: "italic",
-            fontSize: 14,
-            color: C.textLight,
-          }}>
-            added to {SECTION_LABELS[sectionLabel]}
-          </div>
-        )}
       </div>
 
       {/* Done button */}
