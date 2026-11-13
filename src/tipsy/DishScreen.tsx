@@ -669,7 +669,7 @@ export function AddPartSheet({
               onBlur={() => setFocused(false)}
               enterKeyHint="done"
               placeholder="Search your recipes, or name something else"
-              style={{ flex: 1, minWidth: 0, background: "transparent", border: "none", outline: "none", fontFamily: FONT_SANS, fontSize: 15, color: FOREST }}
+              style={{ flex: 1, minWidth: 0, background: "transparent", border: "none", outline: "none", fontFamily: FONT_SANS, fontSize: 16, color: FOREST }}
             />
             {query && (
               <button

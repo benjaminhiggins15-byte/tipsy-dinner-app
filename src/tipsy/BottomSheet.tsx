@@ -32,11 +32,13 @@ const APP_MAX_WIDTH = 480;
 // (callers fall back to the old 100%/top:0 behavior) where unsupported.
 //
 // While the keyboard animates open/closed, iOS fires several `resize`/`scroll`
-// events in quick succession with intermediate (not-yet-settled) values —
-// applying each one directly as it arrives is what caused the sheet to visibly
-// jerk (looked like it started closing, then snapped back). Coalescing to at
-// most one state update per animation frame, combined with a CSS transition on
-// the consuming styles, turns that into a single smooth glide instead.
+// events in quick succession with intermediate (not-yet-settled) values.
+// Coalescing to at most one state update per animation frame cuts down on
+// redundant re-renders during that burst. (A CSS transition on the consuming
+// styles was tried as an extra smoothing step and made the wiggle worse —
+// animating toward each intermediate value fought the next one arriving
+// mid-transition — so the overlay snaps directly to each rAF-batched value
+// instead.)
 function useVisualViewportBox() {
   const [box, setBox] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -64,57 +66,24 @@ function useVisualViewportBox() {
   return box;
 }
 
-// Locks page scroll for as long as any BottomSheet is mounted (module-level
-// counter so a second sheet opening while one is already open — or closing
-// while one is still open — doesn't clobber the lock/restore). A plain
-// `overflow: hidden` on body does NOT stop iOS's focus-scroll-into-view from
-// moving the underlying document — that's what dragged the overlay along with
-// it (and, worse, could leave the page scrolled horizontally after close,
-// clipping content at the left edge). Pinning body with `position: fixed` at
-// its negative current scroll offset makes it visually immovable regardless of
-// what the browser's scroll-into-view heuristic does underneath, and restoring
-// the exact saved x/y (via `window.scrollTo`, not just resetting the inline
-// styles) on last-unlock is what guarantees the page lands back exactly where
-// it started — including horizontally.
-let openSheetCount = 0;
-let savedScrollX = 0;
-let savedScrollY = 0;
-let savedBodyStyle: { position: string; top: string; left: string; width: string; overflow: string } | null = null;
-
-function useBodyScrollLock() {
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    if (openSheetCount === 0) {
-      savedScrollX = window.scrollX;
-      savedScrollY = window.scrollY;
-      savedBodyStyle = {
-        position: document.body.style.position,
-        top: document.body.style.top,
-        left: document.body.style.left,
-        width: document.body.style.width,
-        overflow: document.body.style.overflow,
-      };
-      document.body.style.position = "fixed";
-      document.body.style.top = `-${savedScrollY}px`;
-      document.body.style.left = `-${savedScrollX}px`;
-      document.body.style.width = "100%";
-      document.body.style.overflow = "hidden";
-    }
-    openSheetCount += 1;
-    return () => {
-      openSheetCount -= 1;
-      if (openSheetCount === 0 && savedBodyStyle) {
-        const restore = savedBodyStyle;
-        document.body.style.position = restore.position;
-        document.body.style.top = restore.top;
-        document.body.style.left = restore.left;
-        document.body.style.width = restore.width;
-        document.body.style.overflow = restore.overflow;
-        savedBodyStyle = null;
-        window.scrollTo(savedScrollX, savedScrollY);
-      }
-    };
-  }, []);
+// `html`/`body`/`#root` are permanently pinned at `overflow: hidden` (see
+// styles.css) — the app shell never intentionally scrolls the page itself
+// (it's a fixed-height column with its own internal `overflowY` regions), so
+// there is nothing to lock/restore per sheet open/close. An earlier version
+// of this file toggled a `position: fixed` lock on/off per sheet, but
+// toggling body's own positioning while iOS was mid-way through panning the
+// visual viewport for the keyboard made things worse (visible wiggle on
+// focus, and the page landing offset after close) — removed entirely in
+// favor of the permanent pin plus the explicit `resetPageScroll` below.
+//
+// iOS can still leave `window.scrollX`/`scrollY` nonzero as a side effect of
+// its focus-scroll-into-view heuristic even though the page can't actually
+// scroll (overflow: hidden) — that leftover offset is what showed up as the
+// page landing shifted after the sheet closed. Since this app never
+// legitimately scrolls the window, any nonzero scroll position is always
+// that leftover residue, so it's always safe to zero it out.
+function resetPageScroll() {
+  requestAnimationFrame(() => window.scrollTo(0, 0));
 }
 
 // A <style> tag's rules are only live while that component instance is
@@ -202,9 +171,21 @@ export function BottomSheet({
   showClose?: boolean;
   closeOnBackdrop?: boolean;
 }) {
-  useBodyScrollLock();
   const viewportBox = useVisualViewportBox();
   const overlayHeight = viewportBox ? viewportBox.height - bottomInset : undefined;
+
+  // Clears leftover keyboard-pan scroll once the keyboard closes while the
+  // sheet is still open (covers input blur indirectly — blurring closes the
+  // keyboard, which is what shrinks/regrows this height) and once more on
+  // close/unmount, since the keyboard may still be dismissing at that point.
+  useEffect(() => {
+    if (!viewportBox) return;
+    if (viewportBox.height >= window.innerHeight) resetPageScroll();
+  }, [viewportBox]);
+
+  useEffect(() => {
+    return () => resetPageScroll();
+  }, []);
 
   const overlay = (
     <div
@@ -217,11 +198,6 @@ export function BottomSheet({
         right: viewportBox ? undefined : 0,
         height: overlayHeight,
         bottom: viewportBox ? undefined : bottomInset,
-        // visualViewport reports several intermediate sizes while the iOS
-        // keyboard animates open/closed; rAF-batching (above) caps how often
-        // those land as state updates, and this transition turns each landed
-        // update into a smooth glide toward it instead of a visible snap.
-        transition: "top 0.22s ease, left 0.22s ease, width 0.22s ease, height 0.22s ease",
         zIndex,
         display: "flex",
         justifyContent: "center",

@@ -335,7 +335,7 @@ export default function LogGroupingCookSheet({
                 borderRadius: 10,
                 fontFamily: FONT_SERIF_ITALIC,
                 fontStyle: "italic",
-                fontSize: 14,
+                fontSize: 16,
                 color: FOREST,
                 outline: "none",
                 resize: "none",
