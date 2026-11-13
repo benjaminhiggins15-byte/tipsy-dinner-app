@@ -7099,16 +7099,6 @@ function Placeholder({ title, back, kind, recipeId, groupingId, postId }: { titl
         <div style={{ fontSize: 12, color: "#185FA5", letterSpacing: "0.04em" }}>
           we're still simmering this one.
         </div>
-        {/* dev-only: surfaces the handoff payload so steps 2a/2b can be
-            verified locally ahead of step 3 actually building this screen. */}
-        {(kind || recipeId || groupingId || postId) && (
-          <div style={{ fontSize: 11, color: "#185FA5", letterSpacing: "0.04em", fontFamily: "monospace" }}>
-            {kind ? `kind: ${kind}` : ""}{kind && (recipeId || groupingId || postId) ? " · " : ""}
-            {recipeId ? `recipeId: ${recipeId}` : ""}{recipeId && (groupingId || postId) ? " · " : ""}
-            {groupingId ? `groupingId: ${groupingId}` : ""}{groupingId && postId ? " · " : ""}
-            {postId ? `postId: ${postId}` : ""}
-          </div>
-        )}
       </div>
     </div>
   );
