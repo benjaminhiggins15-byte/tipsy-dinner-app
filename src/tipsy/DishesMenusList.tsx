@@ -208,7 +208,11 @@ function NewPlanTypeSheet({
 }) {
   return (
     <BottomSheet onClose={onClose} bottomInset={64} sizing="auto" maxHeight="85vh">
-      <div style={{ overflowY: "auto", minHeight: 0, flex: "1 1 auto", padding: "16px 20px 24px" }}>
+      {/* Same nav-bar clearance treatment as LogCookTypePicker's own content
+          padding — at least 24px plus the iPhone safe-area inset above the
+          64px bottomInset, so the Menu button's tap area never sits flush
+          against the tab bar. */}
+      <div style={{ overflowY: "auto", minHeight: 0, flex: "1 1 auto", padding: "16px 20px calc(24px + env(safe-area-inset-bottom, 0px))" }}>
         <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(35,60,0,0.15)", margin: "0 auto 20px" }} />
         <div
           style={{

@@ -110,6 +110,7 @@ export default function Home({
   goToReceivedShelf,
   switchToTab,
   toastMessage,
+  hasPlans,
 }: {
   profile: ProfileType | null;
   push: HomePush;
@@ -117,6 +118,7 @@ export default function Home({
   goToReceivedShelf: () => void;
   switchToTab: (tab: "build" | "recipes" | "grocery" | "profile" | "home") => void;
   toastMessage?: string;
+  hasPlans: boolean;
 }) {
   // Slim summary only (most recent title + sender + count) — the actual
   // shelf/list (full tile data) lives on the Recipes tab, which runs its own
@@ -287,6 +289,7 @@ export default function Home({
       <LogCookTypePicker
         open={showLogTypePicker}
         onClose={() => setShowLogTypePicker(false)}
+        hasPlans={hasPlans}
         onPickRecipe={() => {
           setShowLogTypePicker(false);
           push({ name: "allrecipes", pickForLog: true });

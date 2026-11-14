@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
-import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, uploadCookPhoto, removeCookPhoto, getCookPhotoSignedUrl, postCook, unpostCook, getCookFeed, type CookFeedPost, COOK_FEED_PAGE_SIZE, deriveHandleFromName, sendRecipeToFriends, searchProfiles, getMyConnections, type ProfileSearchResult, type PendingReceivedRecipe, getPendingReceivedRecipes, type SuggestedRecipeDetail, getSuggestedRecipeDetail, type StructuredAllergies, getRecipeSnapshotByToken, type RecipeShareSnapshot, PENDING_SHARE_TOKEN_KEY, type DiscoveredRecipe, getAccessToken, getCookPost, getSavedGroupingIdForPost, type CookPostDetail } from "./data";
+import { getAllCategories, getRecipesForCategory, getSavedRecipesAll, loadCustomCategories, saveRecipe, updateSavedRecipe, migrateRecipesFromLocalStorage, deleteCustomCategory, shareRecipeSnapshot, type Recipe, type SavedRecipe, type CookEvent, type RecipeStep, normalizeStep, loadGroceryItems, addGroceryItems, toggleGroceryItemChecked, clearGroceryItems, addManualGroceryItem, enrichGroceryItems, type GroceryItem, parseSSEStream, groupGroceryItems, type GroceryRow, GROCERY_AISLE_LABELS, GROCERY_ENRICHMENT_HOLD_MS, shareGroceryList, addCookEvent, updateCookEvent, deleteCookEvent, headlineRatingFromEvents, uploadRecipePhoto, removeRecipePhoto, uploadCookPhoto, removeCookPhoto, getCookPhotoSignedUrl, postCook, unpostCook, getCookFeed, type CookFeedPost, COOK_FEED_PAGE_SIZE, deriveHandleFromName, sendRecipeToFriends, searchProfiles, getMyConnections, type ProfileSearchResult, type PendingReceivedRecipe, getPendingReceivedRecipes, type SuggestedRecipeDetail, getSuggestedRecipeDetail, type StructuredAllergies, getRecipeSnapshotByToken, type RecipeShareSnapshot, PENDING_SHARE_TOKEN_KEY, type DiscoveredRecipe, getAccessToken, getCookPost, getSavedGroupingIdForPost, type CookPostDetail, listMyPlans } from "./data";
 import { type CropRect, compressImageFile } from "./image";
 import { type Big9Id, BIG9_DISPLAY_NAMES, effectiveAllergensForScan, scanIngredientsForBig9, scanFreeTextForBig9, type Big9Hit } from "./allergyMap";
 import AddYourOwn from "./AddYourOwn";
@@ -463,6 +463,7 @@ function renderScreen(
   finishDishOrMenuSaved?: (groupingId: string, kind: "dish" | "menu", toastMessage?: string) => void,
   popPlanDetailWithToast?: (message: string) => void,
   finishCreateCategoryForPlanDetail?: (catKey: string, catLabel: string, groupingId: string, kind: "dish" | "menu", recipeId: string) => void,
+  hasPlans?: boolean,
 ) {
   switch (s.name) {
     case "cook": return (
@@ -552,6 +553,7 @@ function renderScreen(
         onUpdate={onUpdate}
         autoOpenLog={s.autoOpenLog}
         toastMessage={s.toastMessage}
+        hasPlans={hasPlans ?? false}
       />
     );
     case "grocerylist": return <GroceryList push={push} back={back} />;
@@ -584,7 +586,7 @@ function renderScreen(
         }}
       />
     );
-    case "home": return <Home profile={profile || null} push={push} seedBuildFromChip={seedBuildFromChip || (() => {})} goToReceivedShelf={goToReceivedShelf || (() => {})} switchToTab={switchToTab || (() => {})} toastMessage={s.toastMessage} />;
+    case "home": return <Home profile={profile || null} push={push} seedBuildFromChip={seedBuildFromChip || (() => {})} goToReceivedShelf={goToReceivedShelf || (() => {})} switchToTab={switchToTab || (() => {})} toastMessage={s.toastMessage} hasPlans={hasPlans ?? false} />;
     case "receivedPending": return <ReceivedPending items={s.items} back={back} push={push} />;
     case "receivedRecipe": return (
       <ReceivedRecipeView
@@ -777,6 +779,13 @@ export default function App() {
   const [passwordRecoveryActive, setPasswordRecoveryActive] = useState(false);
   const [profile, setProfile] = useState<ProfileType | null>(null);
   const [recipesByCategory, setRecipesByCategory] = useState<Record<string, Recipe[]>>({});
+  // Whether the signed-in user has any saved dish/menu plan — gates
+  // LogCookTypePicker's "Start from a saved dish or menu" link. Loaded once
+  // at sign-in (runProfileInit) and refreshed after any plan create/save/
+  // delete, so the picker sheet always opens in its final layout (see
+  // refreshHasPlans below) instead of fetching on open and popping the link
+  // in late.
+  const [hasPlans, setHasPlans] = useState(false);
 
   // Logged-out arrival with ?share={token} (a stranger tapping "View in app"
   // from a public share page). undefined = not read yet, null = no token (or
@@ -931,6 +940,14 @@ export default function App() {
     });
   };
 
+  // hasPlans cache loader. Unlike recipesByCategory's lazy per-key cache,
+  // this is a single eager boolean — refetched in full each call since
+  // listMyPlans() is a cheap list-all query, not a per-key fetch.
+  const refreshHasPlans = async () => {
+    const plans = await listMyPlans();
+    setHasPlans(plans.length > 0);
+  };
+
   // Cook Feed cache — same App-level-state pattern as recipesByCategory
   // above, for the same reason: ScreenStage remounts the outgoing screen
   // during every transition, so caching here (not in CookFeedScreen's own
@@ -1012,6 +1029,7 @@ export default function App() {
   };
 
   const setDishMenuPostDetailSaved = (postId: string, groupingId: string) => {
+    void refreshHasPlans(); // saving a feed post into the library creates a new plan
     setDishMenuPostDetailCache(prev => {
       const entry = prev[postId];
       if (!entry) return prev;
@@ -1132,6 +1150,9 @@ export default function App() {
 
       const finalProfile = await loadProfile(session.user.id);
       setShowOnboarding(!finalProfile.onboarding_complete);
+      // Fire-and-forget: loads hasPlans once per sign-in, well before any
+      // LogCookTypePicker sheet could open, so it never fetches on open.
+      void refreshHasPlans();
     } catch (err) {
       console.error('Error initializing profile on sign in:', err);
       setShowOnboarding(false);
@@ -1484,6 +1505,7 @@ export default function App() {
   // back() with no toast.
   const popPlanDetailWithToast = (message: string) => {
     if (transition) return;
+    void refreshHasPlans(); // onDeleted — a plan delete just happened
     if (currentStack.length < 2) return;
     const prev = currentStack[currentStack.length - 2];
     if (prev.name !== "dishesMenusList") {
@@ -1507,6 +1529,7 @@ export default function App() {
   // opened from, same depth, forward-direction transition.
   const finishDishOrMenuSaved = (groupingId: string, kind: "dish" | "menu", toastMessage?: string) => {
     if (transition) return;
+    void refreshHasPlans(); // a create or update just happened — refresh the hasPlans cache
     const target: Screen = { name: "planDetail", groupingId, kind, toastMessage };
     setTransition({ from: current, to: target, direction: "forward", fromIsTabRoot: isTabRoot, toIsTabRoot: isTabRoot });
     updateCurrentTabStack((st) => {
@@ -1987,6 +2010,7 @@ export default function App() {
           finishDishOrMenuSaved={finishDishOrMenuSaved}
           popPlanDetailWithToast={popPlanDetailWithToast}
           finishCreateCategoryForPlanDetail={finishCreateCategoryForPlanDetail}
+          hasPlans={hasPlans}
         />
         <BottomTabBar activeTab={activeTab} onTabClick={switchToTab} />
       </div>
@@ -2181,6 +2205,7 @@ function ScreenStage({
   finishDishOrMenuSaved,
   popPlanDetailWithToast,
   finishCreateCategoryForPlanDetail,
+  hasPlans,
 }: {
   current: Screen;
   transition: { from: Screen; to: Screen; direction: "forward" | "back"; fromIsTabRoot?: boolean; toIsTabRoot?: boolean } | null;
@@ -2229,6 +2254,7 @@ function ScreenStage({
   finishDishOrMenuSaved: (groupingId: string, kind: "dish" | "menu", toastMessage?: string) => void;
   popPlanDetailWithToast: (message: string) => void;
   finishCreateCategoryForPlanDetail: (catKey: string, catLabel: string, groupingId: string, kind: "dish" | "menu", recipeId: string) => void;
+  hasPlans: boolean;
 }) {
   // Trigger animation on mount of incoming layer.
   // Phase is derived from state: when a new transition starts, phase begins as
@@ -2318,7 +2344,7 @@ function ScreenStage({
         pointerEvents: isTransitioning ? "none" : "auto",
         paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
       }}>
-        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState, finishCreateCategoryForCookPost, currentUserId, popChooseDishOrMenuWithToast, finishCreateCategoryForDishMenuPost, dishMenuPostDetailCache, ensureDishMenuPostDetailLoaded, setDishMenuPostDetailSaved, cookPostDetailCache, ensureCookPostDetailLoaded, setCookPostDetailSaved, finishDishOrMenuSaved, popPlanDetailWithToast, finishCreateCategoryForPlanDetail)}
+        {renderScreen(current, push, back, isTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState, finishCreateCategoryForCookPost, currentUserId, popChooseDishOrMenuWithToast, finishCreateCategoryForDishMenuPost, dishMenuPostDetailCache, ensureDishMenuPostDetailLoaded, setDishMenuPostDetailSaved, cookPostDetailCache, ensureCookPostDetailLoaded, setCookPostDetailSaved, finishDishOrMenuSaved, popPlanDetailWithToast, finishCreateCategoryForPlanDetail, hasPlans)}
       </div>
 
       {/* Overlay layer - only during transitions, renders from screen */}
@@ -2331,7 +2357,7 @@ function ScreenStage({
           pointerEvents: "none",
           paddingBottom: 64 // nav-bar clearance — may need tuning after device testing
         }}>
-          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState, finishCreateCategoryForCookPost, currentUserId, popChooseDishOrMenuWithToast, finishCreateCategoryForDishMenuPost, dishMenuPostDetailCache, ensureDishMenuPostDetailLoaded, setDishMenuPostDetailSaved, cookPostDetailCache, ensureCookPostDetailLoaded, setCookPostDetailSaved, finishDishOrMenuSaved, popPlanDetailWithToast, finishCreateCategoryForPlanDetail)}
+          {renderScreen(from, push, back, fromIsTabRoot, replaceRecipe, finishEditCategory, finishDeleteCategory, finishDeleteRecipe, finishCreateCategoryForRecipe, finishCreateCategoryForReceived, finishCreateCategoryForSuggestion, finishSaveRecipe, onSignOut, profile, updateProfile, recipesByCategory, ensureRecipesLoaded, clearRecipeCache, buildMessages, setBuildMessages, buildConversationHistory, setBuildConversationHistory, buildCurrentRecipe, setBuildCurrentRecipe, clearBuildConversation, buildMessageIdRef, transferToRecipeChat, buildSeedTick, seedBuildFromChip, goToReceivedShelf, switchToTab, finishCreateCategoryForDiscovered, cookFeedState, finishCreateCategoryForCookPost, currentUserId, popChooseDishOrMenuWithToast, finishCreateCategoryForDishMenuPost, dishMenuPostDetailCache, ensureDishMenuPostDetailLoaded, setDishMenuPostDetailSaved, cookPostDetailCache, ensureCookPostDetailLoaded, setCookPostDetailSaved, finishDishOrMenuSaved, popPlanDetailWithToast, finishCreateCategoryForPlanDetail, hasPlans)}
         </div>
       )}
     </div>
@@ -3331,6 +3357,7 @@ function RecipeCard({
   onUpdate,
   autoOpenLog,
   toastMessage,
+  hasPlans,
 }: {
   recipe: Recipe;
   categoryLabel: string;
@@ -3343,6 +3370,7 @@ function RecipeCard({
   onUpdate?: (updates: Partial<ProfileType>) => Promise<void>;
   autoOpenLog?: boolean;
   toastMessage?: string;
+  hasPlans?: boolean;
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps" | "history" | "pairings">("ingredients");
   const [shareConfirm, setShareConfirm] = useState(false);
@@ -5252,6 +5280,7 @@ function RecipeCard({
         open={showLogTypePicker}
         onClose={() => setShowLogTypePicker(false)}
         preselectedRecipeTitle={recipe.title}
+        hasPlans={hasPlans ?? false}
         onPickRecipe={() => {
           setShowLogTypePicker(false);
           openLogSheetForCreate();

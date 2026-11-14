@@ -1,5 +1,4 @@
-import { useEffect, useState, type ReactElement } from "react";
-import { listMyPlans } from "./data";
+import { type ReactElement } from "react";
 import { BottomSheet } from "./BottomSheet";
 
 const FONT_SANS = "'Inter', sans-serif";
@@ -64,6 +63,11 @@ type Props = {
   // Present only when opened from a recipe screen, where Recipe arrives
   // already selected for that specific recipe.
   preselectedRecipeTitle?: string;
+  // Known by the caller (App-level cache, refreshed on plan create/save/
+  // delete) BEFORE this sheet opens — never fetched here. Fetching on open
+  // made the "Start from a saved dish or menu" link appear a moment after
+  // the sheet, pushing the cards up into the nav-bar's tap area.
+  hasPlans: boolean;
   onPickRecipe: () => void;
   onPickDish: () => void;
   onPickMenu: () => void;
@@ -74,26 +78,12 @@ export default function LogCookTypePicker({
   open,
   onClose,
   preselectedRecipeTitle,
+  hasPlans,
   onPickRecipe,
   onPickDish,
   onPickMenu,
   onStartFromSaved,
 }: Props) {
-  const [hasPlans, setHasPlans] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    let ignore = false;
-    (async () => {
-      const plans = await listMyPlans();
-      if (ignore) return;
-      setHasPlans(plans.length > 0);
-    })();
-    return () => {
-      ignore = true;
-    };
-  }, [open]);
-
   if (!open) return null;
 
   const cards: {
@@ -135,7 +125,11 @@ export default function LogCookTypePicker({
     // the padded screen layer (see ScreenStage). portal={false}: unchanged
     // from this sheet's pre-refactor shape (see BottomSheet.tsx's own doc).
     <BottomSheet onClose={onClose} portal={false} zIndex={80} bottomInset={64} sizing="auto" maxHeight="85vh" showClose={false} closeOnBackdrop>
-          <div style={{ overflowY: "auto", minHeight: 0, flex: "1 1 auto", padding: "16px 20px 24px" }}>
+          {/* Bottom padding clears the nav bar by at least 24px plus the
+              iPhone home-indicator safe area, on top of the 64px bottomInset
+              above — the "Start from a saved dish or menu" link's tap area
+              must never sit flush against the tab bar. */}
+          <div style={{ overflowY: "auto", minHeight: 0, flex: "1 1 auto", padding: "16px 20px calc(24px + env(safe-area-inset-bottom, 0px))" }}>
             {/* Handle */}
             <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(35,60,0,0.15)", margin: "0 auto 20px" }} />
 
@@ -240,11 +234,12 @@ export default function LogCookTypePicker({
                   justifyContent: "center",
                   gap: 6,
                   width: "100%",
+                  minHeight: 44,
                   background: "transparent",
                   border: "none",
                   cursor: "pointer",
                   marginTop: 4,
-                  padding: "8px 0 4px",
+                  padding: "10px 0",
                   fontFamily: FONT_SERIF_ITALIC,
                   fontStyle: "italic",
                   fontSize: 14,
