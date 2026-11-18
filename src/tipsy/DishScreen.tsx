@@ -228,6 +228,8 @@ export default function DishScreen({
   recipesByCategory,
   ensureRecipesLoaded,
   onSaved,
+  fromFeed,
+  onCookLogged,
 }: {
   back: () => void;
   push: (s: Screen) => void;
@@ -242,6 +244,12 @@ export default function DishScreen({
   // shown there (Plan Detail owns the "Saved"/"Cook logged"/"Posted" toast),
   // not on this screen.
   onSaved: (groupingId: string, kind: "dish" | "menu", toastMessage?: string) => void;
+  // Present only when reached via Feed's Log Cook pill — a logged cook (NOT
+  // a plain Save) skips the Plan Detail redirect above and returns to Feed
+  // instead (nav-rework step 2, decision B). A plain Save still goes to Plan
+  // Detail even from Feed — this only branches the log-cook path.
+  fromFeed?: boolean;
+  onCookLogged?: (fromFeed: boolean) => void;
 }) {
   const [loading, setLoading] = useState(!!groupingId);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -349,7 +357,8 @@ export default function DishScreen({
 
   function handleCookLogged(message: string) {
     setLogCookOpen(false);
-    if (activeGroupingId) onSaved(activeGroupingId, "dish", message);
+    onCookLogged?.(!!fromFeed);
+    if (!fromFeed && activeGroupingId) onSaved(activeGroupingId, "dish", message);
   }
 
   return (

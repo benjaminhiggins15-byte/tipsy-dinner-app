@@ -317,17 +317,17 @@ type Screen =
   | { name: "editcategory"; categoryKey: string }
   | { name: "categories" }
   | { name: "recipes"; categoryKey: string; categoryLabel: string }
-  | { name: "allrecipes"; pickForLog?: boolean }
-  | { name: "recipe"; recipe: Recipe; categoryLabel: string; categoryKey: string; autoOpenLog?: boolean; toastMessage?: string }
+  | { name: "allrecipes"; pickForLog?: boolean; fromFeed?: boolean }
+  | { name: "recipe"; recipe: Recipe; categoryLabel: string; categoryKey: string; autoOpenLog?: boolean; toastMessage?: string; fromFeed?: boolean }
   | { name: "grocerylist" }
   | { name: "profile" }
   | { name: "profileedit"; fieldKey: "email" | "palate" | "inspiration" | "table" | "constraints" | "identity" | "drinks" }
   | { name: "accountPrivacy" }
   | { name: "deleteAccountConfirm" }
   | { name: "placeholder"; title: string; kind?: "dish" | "menu"; recipeId?: string; groupingId?: string; postId?: string }
-  | { name: "chooseDishOrMenu" }
-  | { name: "dishScreen"; groupingId?: string; recipe?: Recipe }
-  | { name: "menuScreen"; groupingId?: string; recipe?: Recipe }
+  | { name: "chooseDishOrMenu"; fromFeed?: boolean }
+  | { name: "dishScreen"; groupingId?: string; recipe?: Recipe; fromFeed?: boolean }
+  | { name: "menuScreen"; groupingId?: string; recipe?: Recipe; fromFeed?: boolean }
   | { name: "dishesMenusList"; toastMessage?: string }
   | {
       name: "planDetail";
@@ -465,6 +465,18 @@ function renderScreen(
   finishCreateCategoryForPlanDetail?: (catKey: string, catLabel: string, groupingId: string, kind: "dish" | "menu", recipeId: string) => void,
   hasPlans?: boolean,
 ) {
+  // Fires after ANY successful cook log, from any launch point — simplest
+  // correct mechanism for "the feed must show it next time it's viewed"
+  // (nav-rework step 2, decision C): always refresh the already-fetched Feed
+  // cache rather than special-casing posted-vs-not. When the log happened
+  // FROM Feed (decision B), also jump back to the Feed tab root — switchToTab
+  // resets a tab's stack to its root when it's already the active tab, which
+  // it always is here since every fromFeed launch point is pushed onto the
+  // feed tab's own stack.
+  const onCookLogged = (fromFeed: boolean) => {
+    cookFeedState?.refresh();
+    if (fromFeed) switchToTab?.("feed");
+  };
   switch (s.name) {
     case "cook": return (
       <Cook
@@ -538,6 +550,7 @@ function renderScreen(
         recipesByCategory={recipesByCategory ?? {}}
         ensureRecipesLoaded={ensureRecipesLoaded}
         pickForLog={s.pickForLog}
+        fromFeed={s.fromFeed}
       />
     );
     case "recipe": return (
@@ -554,6 +567,8 @@ function renderScreen(
         autoOpenLog={s.autoOpenLog}
         toastMessage={s.toastMessage}
         hasPlans={hasPlans ?? false}
+        fromFeed={s.fromFeed}
+        onCookLogged={onCookLogged}
       />
     );
     case "grocerylist": return <GroceryList push={push} back={back} />;
@@ -562,9 +577,9 @@ function renderScreen(
     case "accountPrivacy": return <AccountPrivacy back={back} openDeleteAccount={() => push({ name: "deleteAccountConfirm" })} />;
     case "deleteAccountConfirm": return <DeleteAccountConfirm back={back} onSignOut={onSignOut!} profile={profile || null} />;
     case "placeholder": return <Placeholder title={s.title} back={back} kind={s.kind} recipeId={s.recipeId} groupingId={s.groupingId} postId={s.postId} />;
-    case "chooseDishOrMenu": return <ChooseDishOrMenu back={back} onLogged={(msg) => popChooseDishOrMenuWithToast?.(msg)} />;
-    case "dishScreen": return <DishScreen back={back} push={push} groupingId={s.groupingId} seedRecipe={s.recipe} recipesByCategory={recipesByCategory ?? {}} ensureRecipesLoaded={ensureRecipesLoaded} onSaved={finishDishOrMenuSaved ?? (() => {})} />;
-    case "menuScreen": return <MenuScreen back={back} push={push} groupingId={s.groupingId} seedRecipe={s.recipe} recipesByCategory={recipesByCategory ?? {}} ensureRecipesLoaded={ensureRecipesLoaded} onSaved={finishDishOrMenuSaved ?? (() => {})} />;
+    case "chooseDishOrMenu": return <ChooseDishOrMenu back={back} onLogged={(msg) => popChooseDishOrMenuWithToast?.(msg)} fromFeed={s.fromFeed} onCookLogged={onCookLogged} />;
+    case "dishScreen": return <DishScreen back={back} push={push} groupingId={s.groupingId} seedRecipe={s.recipe} recipesByCategory={recipesByCategory ?? {}} ensureRecipesLoaded={ensureRecipesLoaded} onSaved={finishDishOrMenuSaved ?? (() => {})} fromFeed={s.fromFeed} onCookLogged={onCookLogged} />;
+    case "menuScreen": return <MenuScreen back={back} push={push} groupingId={s.groupingId} seedRecipe={s.recipe} recipesByCategory={recipesByCategory ?? {}} ensureRecipesLoaded={ensureRecipesLoaded} onSaved={finishDishOrMenuSaved ?? (() => {})} fromFeed={s.fromFeed} onCookLogged={onCookLogged} />;
     case "dishesMenusList": return <DishesMenusList back={back} push={push} toastMessage={s.toastMessage} />;
     case "planDetail": return (
       <PlanDetail
@@ -576,6 +591,7 @@ function renderScreen(
         back={back}
         push={push}
         onDeleted={(msg) => popPlanDetailWithToast?.(msg)}
+        onCookLogged={onCookLogged}
       />
     );
     case "newcategoryforplandetail": return (
@@ -586,7 +602,7 @@ function renderScreen(
         }}
       />
     );
-    case "home": return <Home profile={profile || null} push={push} seedBuildFromChip={seedBuildFromChip || (() => {})} goToReceivedShelf={goToReceivedShelf || (() => {})} switchToTab={switchToTab || (() => {})} toastMessage={s.toastMessage} hasPlans={hasPlans ?? false} />;
+    case "home": return <Home profile={profile || null} push={push} seedBuildFromChip={seedBuildFromChip || (() => {})} goToReceivedShelf={goToReceivedShelf || (() => {})} switchToTab={switchToTab || (() => {})} toastMessage={s.toastMessage} />;
     case "receivedPending": return <ReceivedPending items={s.items} back={back} push={push} />;
     case "receivedRecipe": return (
       <ReceivedRecipeView
@@ -651,6 +667,7 @@ function renderScreen(
         back={back}
         push={push}
         isTabRoot={isTabRoot}
+        hasPlans={hasPlans ?? false}
       />
     );
     case "cookPostDetail": return (
@@ -3001,12 +3018,14 @@ function AllRecipes({
   recipesByCategory,
   ensureRecipesLoaded,
   pickForLog,
+  fromFeed,
 }: {
   push: (s: Screen) => void;
   back: () => void;
   recipesByCategory: Record<string, Recipe[]>;
   ensureRecipesLoaded?: (categoryKey: string, categoryLabel: string) => Promise<void>;
   pickForLog?: boolean;
+  fromFeed?: boolean;
 }) {
   const recipes = recipesByCategory["__all__"] ?? [];
   // Resets to "Recently added" on every visit — deliberately not persisted.
@@ -3167,7 +3186,7 @@ function AllRecipes({
         {sortedRecipes.map((r) => (
           <div
             key={r.savedId}
-            onClick={() => push({ name: "recipe", recipe: r, categoryLabel: r.category, categoryKey: r.categoryKey ?? "", autoOpenLog: pickForLog })}
+            onClick={() => push({ name: "recipe", recipe: r, categoryLabel: r.category, categoryKey: r.categoryKey ?? "", autoOpenLog: pickForLog, fromFeed })}
             style={{
               height: 80,
               background: "rgba(35,60,0,0.06)",
@@ -3358,6 +3377,8 @@ function RecipeCard({
   autoOpenLog,
   toastMessage,
   hasPlans,
+  fromFeed,
+  onCookLogged,
 }: {
   recipe: Recipe;
   categoryLabel: string;
@@ -3371,6 +3392,13 @@ function RecipeCard({
   autoOpenLog?: boolean;
   toastMessage?: string;
   hasPlans?: boolean;
+  // Present only when this screen was reached via Feed's Log Cook pill —
+  // gates the post-log return-to-Feed behavior below (nav-rework step 2).
+  fromFeed?: boolean;
+  // Fires once a cook event is durably saved (see handleSaveLog) — always,
+  // regardless of fromFeed, so the Feed cache refreshes even when this
+  // screen was reached some other way (decision C).
+  onCookLogged?: (fromFeed: boolean) => void;
 }) {
   const [tab, setTab] = useState<"ingredients" | "steps" | "history" | "pairings">("ingredients");
   const [shareConfirm, setShareConfirm] = useState(false);
@@ -3873,6 +3901,7 @@ function RecipeCard({
       }
 
       closeLogSheet();
+      onCookLogged?.(!!fromFeed);
     } catch (err) {
       console.error("Failed to save cook event:", err);
     } finally {

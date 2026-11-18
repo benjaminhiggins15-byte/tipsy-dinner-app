@@ -114,9 +114,16 @@ export function PlanRow({ plan, onClick }: { plan: PlanSummary; onClick: () => v
 export default function ChooseDishOrMenu({
   back,
   onLogged,
+  fromFeed,
+  onCookLogged,
 }: {
   back: () => void;
   onLogged: (message: string) => void;
+  // Present only when reached via Feed's Log Cook pill — a successful log
+  // then returns to Feed directly instead of popping back to the usual
+  // Home/recipe-screen toast (nav-rework step 2, decision B).
+  fromFeed?: boolean;
+  onCookLogged?: (fromFeed: boolean) => void;
 }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [state, setState] = useState<{ loaded: boolean; plans: PlanSummary[] }>({ loaded: false, plans: [] });
@@ -247,7 +254,8 @@ export default function ChooseDishOrMenu({
           onClose={() => setOpenPlan(null)}
           onLogged={(msg) => {
             setOpenPlan(null);
-            onLogged(msg);
+            onCookLogged?.(!!fromFeed);
+            if (!fromFeed) onLogged(msg);
           }}
         />
       )}

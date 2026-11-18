@@ -73,6 +73,7 @@ export default function PlanDetail({
   back,
   push,
   onDeleted,
+  onCookLogged,
 }: {
   groupingId: string;
   kind: "dish" | "menu";
@@ -92,6 +93,10 @@ export default function PlanDetail({
   back: () => void;
   push: (s: Screen) => void;
   onDeleted: (message: string) => void;
+  // PlanDetail is never reached via Feed's Log Cook pill, so this is purely
+  // decision C's "feed cache refreshes on ANY successful log" — always fires
+  // with fromFeed=false, never changes this screen's own navigation.
+  onCookLogged?: (fromFeed: boolean) => void;
 }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -232,6 +237,7 @@ export default function PlanDetail({
     setLogCookToast(message);
     setTimeout(() => setLogCookToast(null), 1800);
     refreshCooks();
+    onCookLogged?.(false);
   }
 
   async function handleDelete() {

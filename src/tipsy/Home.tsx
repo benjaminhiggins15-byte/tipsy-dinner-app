@@ -26,7 +26,6 @@ import { logEvent } from "../lib/events";
 import watermarkSquare from "../Logos/watermark_square.png";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
-import LogCookTypePicker from "./LogCookTypePicker";
 import { Avatar } from "./Profile";
 import { Toast } from "./BottomSheet";
 
@@ -47,11 +46,7 @@ type HomePush = (
     | { name: "discoveredDetail"; recipe: DiscoveredRecipe; newCategory?: { key: string; label: string } }
     | { name: "newcategoryfordiscovered"; recipe: DiscoveredRecipe }
     | { name: "cookFeed" }
-    | { name: "allrecipes"; pickForLog?: boolean }
     | { name: "placeholder"; title: string; kind?: "dish" | "menu"; recipeId?: string }
-    | { name: "chooseDishOrMenu" }
-    | { name: "dishScreen" }
-    | { name: "menuScreen" }
     | { name: "profile" }
 ) => void;
 
@@ -112,7 +107,6 @@ export default function Home({
   goToReceivedShelf,
   switchToTab,
   toastMessage,
-  hasPlans,
 }: {
   profile: ProfileType | null;
   push: HomePush;
@@ -120,7 +114,6 @@ export default function Home({
   goToReceivedShelf: () => void;
   switchToTab: (tab: "build" | "recipes" | "grocery" | "feed" | "home") => void;
   toastMessage?: string;
-  hasPlans: boolean;
 }) {
   // Slim summary only (most recent title + sender + count) — the actual
   // shelf/list (full tile data) lives on the Recipes tab, which runs its own
@@ -128,7 +121,6 @@ export default function Home({
   // shared/lifted state; each fetch is separate on purpose. getPendingReceivedRecipes
   // already orders by created_at descending, so items[0] is the most recent.
   const [pendingSummary, setPendingSummary] = useState<{ title: string; senderName: string; count: number } | null>(null);
-  const [showLogTypePicker, setShowLogTypePicker] = useState(false);
   // Toast carried in from ChooseDishOrMenu (step 3c) via App.tsx's
   // popChooseDishOrMenuWithToast — "Cook logged"/"Posted" after logging a
   // cook for a saved dish/menu plan started from Home.
@@ -258,58 +250,9 @@ export default function Home({
           {greetingForNow()}{firstName ? `, ${firstName}` : ""}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button
-            onClick={() => setShowLogTypePicker(true)}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              height: 44,
-              padding: "0 16px",
-              borderRadius: 999,
-              background: "#233C00",
-              border: "none",
-              color: "#FEE7C0",
-              fontFamily: fontSans,
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              cursor: "pointer",
-              flexShrink: 0,
-            }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FEE7C0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            Log cook
-          </button>
           <Avatar size={36} name={profile?.display_name} onClick={() => push({ name: "profile" })} />
         </div>
       </div>
-
-      <LogCookTypePicker
-        open={showLogTypePicker}
-        onClose={() => setShowLogTypePicker(false)}
-        hasPlans={hasPlans}
-        onPickRecipe={() => {
-          setShowLogTypePicker(false);
-          push({ name: "allrecipes", pickForLog: true });
-        }}
-        onPickDish={() => {
-          setShowLogTypePicker(false);
-          push({ name: "dishScreen" });
-        }}
-        onPickMenu={() => {
-          setShowLogTypePicker(false);
-          push({ name: "menuScreen" });
-        }}
-        onStartFromSaved={() => {
-          setShowLogTypePicker(false);
-          push({ name: "chooseDishOrMenu" });
-        }}
-      />
 
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: 16 }}>
         <div

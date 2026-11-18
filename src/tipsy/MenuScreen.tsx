@@ -67,6 +67,8 @@ export default function MenuScreen({
   recipesByCategory,
   ensureRecipesLoaded,
   onSaved,
+  fromFeed,
+  onCookLogged,
 }: {
   back: () => void;
   push: (s: Screen) => void;
@@ -80,6 +82,11 @@ export default function MenuScreen({
   // menu's Plan Detail screen instead of staying here — same contract as
   // DishScreen's own onSaved prop.
   onSaved: (groupingId: string, kind: "dish" | "menu", toastMessage?: string) => void;
+  // Same Feed-aware contract as DishScreen's own fromFeed/onCookLogged props
+  // (nav-rework step 2, decision B/C) — a logged cook skips the Plan Detail
+  // redirect when reached via Feed's Log Cook pill; a plain Save never does.
+  fromFeed?: boolean;
+  onCookLogged?: (fromFeed: boolean) => void;
 }) {
   const [loading, setLoading] = useState(!!groupingId);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -278,7 +285,8 @@ export default function MenuScreen({
 
   function handleCookLogged(message: string) {
     setLogCookOpen(false);
-    if (activeGroupingId) onSaved(activeGroupingId, "menu", message);
+    onCookLogged?.(!!fromFeed);
+    if (!fromFeed && activeGroupingId) onSaved(activeGroupingId, "menu", message);
   }
 
   const visibleCourses = COURSES.filter((c) => parts.some((p) => p.course === c.key));

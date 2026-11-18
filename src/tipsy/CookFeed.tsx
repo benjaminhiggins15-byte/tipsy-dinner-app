@@ -17,7 +17,7 @@ import {
 } from "./data";
 import { logEvent } from "../lib/events";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
-import { DishIcon } from "./LogCookTypePicker";
+import LogCookTypePicker, { DishIcon } from "./LogCookTypePicker";
 import { FONT_SANS, FONT_SERIF_ITALIC, FOREST, CARD_BG, CARD_BORDER, MUTED_TEXT, BODY_BG, APP_MAX_WIDTH, PosterRow } from "./DishScreen";
 import { BottomSheet, DragHandle, Toast } from "./BottomSheet";
 
@@ -68,7 +68,14 @@ type Screen =
   | { name: "newcategoryfordishmenupost"; postId: string }
   | { name: "recipe"; recipe: Recipe; categoryLabel: string; categoryKey: string }
   | { name: "planDetail"; groupingId: string; kind: "dish" | "menu" }
-  | { name: "placeholder"; title: string; kind?: "dish" | "menu"; recipeId?: string; groupingId?: string; postId?: string };
+  | { name: "placeholder"; title: string; kind?: "dish" | "menu"; recipeId?: string; groupingId?: string; postId?: string }
+  // Log Cook pill targets (nav-rework step 2) — same four push shapes
+  // Home.tsx's own picker used before the pill moved here; fromFeed:true
+  // lets App.tsx branch post-log navigation back to this screen.
+  | { name: "allrecipes"; pickForLog?: boolean; fromFeed?: boolean }
+  | { name: "dishScreen"; fromFeed?: boolean }
+  | { name: "menuScreen"; fromFeed?: boolean }
+  | { name: "chooseDishOrMenu"; fromFeed?: boolean };
 
 const COURSES: { key: MenuSection; label: string }[] = [
   { key: "apps", label: "Apps" },
@@ -232,11 +239,16 @@ export function CookFeedScreen({
   back,
   push,
   isTabRoot,
+  hasPlans,
 }: {
   state: CookFeedState;
   back: () => void;
   push: (s: Screen) => void;
   isTabRoot: boolean;
+  // Drives LogCookTypePicker's "Start from a saved dish or menu" link —
+  // same known-before-open-sheet contract as Home.tsx's own hasPlans prop
+  // (never fetched here; see LogCookTypePicker.tsx's own doc comment).
+  hasPlans: boolean;
 }) {
   useEffect(() => {
     if (!state.loaded) {
@@ -246,6 +258,10 @@ export function CookFeedScreen({
   }, [state.loaded]);
 
   const [refreshing, setRefreshing] = useState(false);
+  // Log Cook pill (nav-rework step 2) — relocated from Home's header, same
+  // look/label, same LogCookTypePicker reuse; only the push targets differ
+  // (fromFeed:true so App.tsx's post-log navigation returns here).
+  const [showLogTypePicker, setShowLogTypePicker] = useState(false);
 
   const handleRefresh = async () => {
     if (refreshing) return;
@@ -274,14 +290,65 @@ export function CookFeedScreen({
             Cook Feed
           </div>
         </div>
-        <button
-          onClick={handleRefresh}
-          aria-label="Refresh feed"
-          style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
-        >
-          <IconRefresh size={18} stroke={1.5} color="rgba(35,60,0,0.5)" style={{ animation: refreshing ? "spin 800ms linear infinite" : undefined }} />
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <button
+            onClick={() => setShowLogTypePicker(true)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              height: 44,
+              padding: "0 16px",
+              borderRadius: 999,
+              background: "#233C00",
+              border: "none",
+              color: "#FEE7C0",
+              fontFamily: fontSans,
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              cursor: "pointer",
+              flexShrink: 0,
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FEE7C0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Log cook
+          </button>
+          <button
+            onClick={handleRefresh}
+            aria-label="Refresh feed"
+            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+          >
+            <IconRefresh size={18} stroke={1.5} color="rgba(35,60,0,0.5)" style={{ animation: refreshing ? "spin 800ms linear infinite" : undefined }} />
+          </button>
+        </div>
       </div>
+
+      <LogCookTypePicker
+        open={showLogTypePicker}
+        onClose={() => setShowLogTypePicker(false)}
+        hasPlans={hasPlans}
+        onPickRecipe={() => {
+          setShowLogTypePicker(false);
+          push({ name: "allrecipes", pickForLog: true, fromFeed: true });
+        }}
+        onPickDish={() => {
+          setShowLogTypePicker(false);
+          push({ name: "dishScreen", fromFeed: true });
+        }}
+        onPickMenu={() => {
+          setShowLogTypePicker(false);
+          push({ name: "menuScreen", fromFeed: true });
+        }}
+        onStartFromSaved={() => {
+          setShowLogTypePicker(false);
+          push({ name: "chooseDishOrMenu", fromFeed: true });
+        }}
+      />
 
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
