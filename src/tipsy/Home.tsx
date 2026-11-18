@@ -27,6 +27,7 @@ import watermarkSquare from "../Logos/watermark_square.png";
 import SaveRecipeFlow from "./SaveRecipeFlow";
 import ExpandedRecipeOverlay from "./ExpandedRecipeOverlay";
 import LogCookTypePicker from "./LogCookTypePicker";
+import { Avatar } from "./Profile";
 import { Toast } from "./BottomSheet";
 
 // ScreenStage renders the outgoing screen in a separate overlay-layer JSX
@@ -51,6 +52,7 @@ type HomePush = (
     | { name: "chooseDishOrMenu" }
     | { name: "dishScreen" }
     | { name: "menuScreen" }
+    | { name: "profile" }
 ) => void;
 
 type ProfileType = {
@@ -116,7 +118,7 @@ export default function Home({
   push: HomePush;
   seedBuildFromChip: (prompt: string) => void;
   goToReceivedShelf: () => void;
-  switchToTab: (tab: "build" | "recipes" | "grocery" | "profile" | "home") => void;
+  switchToTab: (tab: "build" | "recipes" | "grocery" | "feed" | "home") => void;
   toastMessage?: string;
   hasPlans: boolean;
 }) {
@@ -283,6 +285,7 @@ export default function Home({
             </svg>
             Log cook
           </button>
+          <Avatar size={36} name={profile?.display_name} onClick={() => push({ name: "profile" })} />
         </div>
       </div>
 
@@ -592,10 +595,8 @@ export default function Home({
               </svg>
             </div>
           ))}
-          {/* Temporary link for founder review only — Cooking Feed Step 2b.
-              Will be removed once the feed becomes the Home tab's root. */}
           <div
-            onClick={() => push({ name: "cookFeed" })}
+            onClick={() => switchToTab("feed")}
             style={{
               display: "flex",
               alignItems: "center",
@@ -606,7 +607,7 @@ export default function Home({
             }}
           >
             <div style={{ fontFamily: fontSans, fontSize: 14, color: C.textLight }}>
-              Cook feed (preview)
+              Cook feed
             </div>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.25)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
               <polyline points="9 18 15 12 9 6" />

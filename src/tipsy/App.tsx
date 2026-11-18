@@ -28,7 +28,7 @@ import {
   IconChefHat,
   IconBook,
   IconShoppingCart,
-  IconUser,
+  IconNews,
   IconHome,
   IconRefresh,
   IconMessageCircle,
@@ -352,7 +352,7 @@ type Screen =
   | { name: "dishMenuPostDetail"; postId: string; newCategory?: { key: string; label: string } }
   | { name: "newcategoryfordishmenupost"; postId: string };
 
-type TabId = "build" | "recipes" | "grocery" | "profile" | "home";
+type TabId = "build" | "recipes" | "grocery" | "feed" | "home";
 
 const S: Record<string, CSSProperties> = {
   page: {
@@ -696,7 +696,7 @@ function renderScreen(
   }
 }
 
-const TAB_ORDER: TabId[] = ["home", "build", "recipes", "grocery", "profile"];
+const TAB_ORDER: TabId[] = ["home", "build", "recipes", "grocery", "feed"];
 
 function getTabIndex(tab: TabId): number {
   return TAB_ORDER.indexOf(tab);
@@ -749,7 +749,7 @@ export default function App() {
     build: [{ name: "cook" }],
     recipes: [{ name: "categories" }],
     grocery: [{ name: "grocerylist" }],
-    profile: [{ name: "profile" }],
+    feed: [{ name: "cookFeed" }],
     home: [{ name: "home" }],
   });
 
@@ -1222,7 +1222,7 @@ export default function App() {
           build: [{ name: "cook" }],
           recipes: [{ name: "categories" }],
           grocery: [{ name: "grocerylist" }],
-          profile: [{ name: "profile" }],
+          feed: [{ name: "cookFeed" }],
           home: [{ name: "home" }],
         });
       }
@@ -2125,7 +2125,7 @@ export default function App() {
               build: [{ name: "cook" }],
               recipes: [{ name: "categories" }],
               grocery: [{ name: "grocerylist" }],
-              profile: [{ name: "profile" }],
+              feed: [{ name: "cookFeed" }],
               home: [{ name: "home" }],
             });
             setActiveTab("build");
@@ -2371,7 +2371,7 @@ function BottomTabBar({ activeTab, onTabClick }: { activeTab: TabId; onTabClick:
     { id: "build", icon: <IconChefHat size={22} stroke={1.5} />, label: "Build" },
     { id: "recipes", icon: <IconBook size={22} stroke={1.5} />, label: "Recipes" },
     { id: "grocery", icon: <IconShoppingCart size={22} stroke={1.5} />, label: "Grocery" },
-    { id: "profile", icon: <IconUser size={22} stroke={1.5} />, label: "Profile" },
+    { id: "feed", icon: <IconNews size={22} stroke={1.5} />, label: "Feed" },
   ];
 
   return (
