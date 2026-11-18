@@ -133,6 +133,16 @@ the file picker directly; photo present → tapping it opens a small dropdown
 Replace) opens the crop overlay next, before anything uploads — see "Crop step
 precedes compression" above.
 
+**(Relocated from CLAUDE.md Standing Cleanup, 2026-11-14 doc trim.)**
+**Deleting a saved recipe never removes its storage photo** — `deleteSavedRecipe`
+(and the five helpers above once fixed) deletes DB rows only; the corresponding
+`{userId}/{recipeId}.jpg` in `recipe-photos` is never swept, so every recipe delete
+leaves an orphaned photo object behind. Found during account-deletion wrap-up
+(2026-10-22); not fixed yet. (As of 2026-10-25, `deleteSavedRecipe` DOES sweep the
+newer cook-photo/cook-post objects before deleting a recipe — see the cook-posts
+entry above — this bullet covers only the recipe's own long-standing
+`{recipeId}.jpg`, still unswept.)
+
 ---
 
 ## Recipe Sharing
@@ -192,6 +202,36 @@ links minted before this change) keep resolving via the untouched legacy
 `shareRecipe`/`getPublicRecipeByToken` path — those live-pointer links still mutate
 if the underlying recipe is edited or deleted; only shares minted after this change
 are frozen. There is no plan to backfill old tokens into snapshots.
+
+**(Relocated from CLAUDE.md Architecture/SSR, 2026-11-14 doc trim.)**
+**Public sharing route.** `src/routes/r.$token.tsx` — standalone, outside the auth
+flow and outside the app frame. Shared recipe links are frozen snapshots, not live
+views — see "Recipe Sharing" in FEATURE_SPECS.md for the full model. Loader tries
+`getRecipeSnapshotByToken(token)` (reads `recipe_shares`) first; on null, falls back
+to the legacy `getPublicRecipeByToken(token)` (fetches recipe + ingredients live, no
+`user_id` filter, relies on RLS — two anon-read policies,
+`recipes_select_public`/`ingredients_select_public`, gated to `is_public = true`,
+OR'd with owner-only policies) so tokens minted before the frozen-snapshot model keep
+resolving. Component body is unchanged either way — both paths produce compatible
+field shapes. **Must stay chrome-free** (no in-app UI like the chat icon).
+
+**(Relocated from CLAUDE.md Standing Cleanup, 2026-11-14 doc trim.)**
+**Banked follow-up — legacy `is_public` path is token-free by design.** The legacy
+fallback policies `recipes_select_public`/`ingredients_select_public` (used by
+`getPublicRecipeByToken`, the `/r/$token` live-fallback for pre-snapshot links) are
+gated only on `is_public = true`, not on knowing a token — so anon can list every
+public recipe, not just one it holds a link for. Those `recipes` rows include
+`user_id` and `inspired_by_name`; `ingredients` rows include `user_id`. Lower risk
+than the now-fixed `recipe_shares`/`grocery_list_shares` issue since `is_public` is
+an explicit user opt-in, not an accidental default. Consider column-scoping these
+policies in a future pass.
+
+**(Relocated from CLAUDE.md Data Layer's public-share-reads note, 2026-11-14 doc
+trim, second pass.)** `recipe_shares`/`grocery_list_shares` previously had their
+own `qual = true` anon-read policies (`recipe_shares_select_anon`/
+`grocery_list_shares_select_anon`); these were dropped 2026-10-03 after confirming
+the `get_recipe_share_by_token`/`get_grocery_list_share_by_token`/
+`get_my_discovered_shares` function-based code paths were live in production.
 
 ---
 
@@ -785,6 +825,21 @@ called without a `name` prop). No current call site omits that prop, so the
 branch is dead in practice, but the constant and the fallback read were not
 deleted.
 
+**(Relocated from CLAUDE.md Data Layer, 2026-11-14 doc trim.)**
+**Legacy localStorage keys still in use:** `tipsyDinnerEmail`, `tipsyDinnerTable`.
+`tipsyDinnerName` is no longer a name source — `display_name` is authoritative (see
+"Account Identity" above) — but the `KEYS.name` constant pointing at it still
+exists in `Profile.tsx`, read only inside `Avatar`'s fallback branch. No current
+call site omits the `name` prop, so that branch is dead in practice; flagged as a
+loose end, not removed.
+
+**(Relocated from CLAUDE.md Data Layer's Schema-is-dashboard-only note, 2026-11-14
+doc trim, second pass.)** Grocery tables were added dashboard-only this way;
+`profiles.handle` plus its `profiles_handle_lower_idx` unique index is the seventh
+dashboard-only schema item added this way. This list keeps growing; treat any
+specific count as stale on sight rather than trusting a documented number, same
+caution as the TypeScript error count in CLAUDE.md's Standing Cleanup section.
+
 ---
 
 ## Account-to-Account Sharing — Build 2 (Data Model Foundation)
@@ -1205,6 +1260,23 @@ same convention as everything else in this section. See above for the full detai
 including the connection-forming (`finish_received_recipe_save`) and photo-copy
 (`copy-received-recipe-photo`) paths this build added on top of Build 2/3's data
 model.
+
+**(Relocated from CLAUDE.md Data Layer, 2026-11-14 doc trim.)**
+PARTIAL CAPTURE (2026-10-24): `cook_events` (columns, constraints, RLS policies) is
+now described in
+`supabase/migrations/20261024000001_baseline_capture_cook_events_and_finish_received_recipe_save.sql`
+as a read-only, not-yet-applied baseline — ahead of the public cooking-feed build.
+Most other dashboard-only tables remain uncaptured; this is one table, not a
+general fix.
+
+**(Relocated from CLAUDE.md Standing Cleanup, 2026-11-14 doc trim.)**
+**RESOLVED (2026-10-24) — `finish_received_recipe_save` is now captured in a
+migration file**,
+`supabase/migrations/20261024000001_baseline_capture_cook_events_and_finish_received_recipe_save.sql`
+(`CREATE OR REPLACE`, read-only capture of the live definition, not yet
+applied/pushed). It no longer exists only in the live database. Originally found
+during account-deletion wrap-up (2026-10-22); captured ahead of the public
+cooking-feed build since `cook_events` was in scope for the same pass.
 
 ## Account-to-Account Sharing — Send UI (Build 3, piece 3)
 
@@ -2478,6 +2550,29 @@ or a `compute-slice` change (out of scope here) closes this gap entirely.
 `normalizeStep()`, the Recipe List cache, account-to-account sharing, and the
 Profile edit screen.
 
+**(Relocated from CLAUDE.md Standing Cleanup, 2026-11-14 doc trim.)**
+**`onboarding_started` double-fires on every signup.** The outgoing
+`OnboardingChat` layer remounts during the step→Loader transition (same
+JSX-shape-swap class as `ScreenStage`/`RecipePicker`/`Loader`). Activation
+(`onboarding_completed`) is unaffected. Handle at read time (count distinct
+users); the deferred structural Onboarding transition fix would cure it.
+
+**(Relocated from CLAUDE.md Architecture/SSR, 2026-11-14 doc trim — "this
+section's `ScreenStage` case above" below refers to CLAUDE.md's Architecture/SSR
+section, where this paragraph originally sat directly under the `ScreenStage`
+tree writeup.)**
+**`Onboarding.tsx`'s `Loader` is a third known instance of the same JSX-shape-swap
+double-mount class** as this section's `ScreenStage` case above and `RecipePicker.tsx`'s
+still-open case: its transition also renders a "from"/"to" layer pair during the
+transition and collapses to a single fresh layer afterward, so `Loader` unmounts/
+remounts mid-transition despite an unchanged `key`. Worked around (not structurally
+fixed) via a shared in-flight promise owned by the parent `Onboarding` component
+(`onboardingHandoffPromiseRef`/`runHandoffOnce`) — the handoff body runs exactly once
+regardless of double-mounting, and each `Loader` instance awaits it via `.finally()`
+so whichever instance is alive when it settles is the one that advances the user.
+Someday cleanup: give Onboarding the same structural fix as `ScreenStage` (unify its
+transition into one stable base-layer position) so this workaround can be removed.
+
 ---
 
 ## Structured Hard-Allergy Capture & Gate (Builds 1–3 + fail-open fix)
@@ -2920,6 +3015,10 @@ project:
 Logged as a deferred future-maintenance item — **not a launch blocker.** No
 migration was written or applied this session; this was a read-only audit.
 
+**(Relocated from CLAUDE.md Standing Cleanup, 2026-11-14 doc trim.)**
+**Dual lockfile:** `package-lock.json` (Vercel's build source) and `bun.lockb`
+(local dev) are both committed. Reconciling to one is a known open item.
+
 ---
 
 ## Menus & Recipe-Delete Hardening (Session, 2026-09-19)
@@ -3052,6 +3151,33 @@ work:**
   `Occasions.tsx` and `Menus.tsx`. Both were kept in sync by hand this session
   (diffed line-for-line before each commit), but nothing structurally prevents a
   future edit to one file from silently drifting from its sibling.
+
+**(Relocated from CLAUDE.md Standing Cleanup, 2026-11-14 doc trim.)**
+**Five (was six) `data.ts` delete helpers don't check affected-row count**:
+`deleteCustomCategory`, `deleteOccasion`, `deleteMenu`,
+`removeRecipeFromMenuSection`'s delete, `clearGroceryItems`. Same
+unchecked-zero-rows-matched shape `deleteSavedRecipe` had before the fix
+documented in "Menus & Recipe-Delete Hardening" in FEATURE_SPECS.md (a `DELETE`
+whose `WHERE` clause matches 0 rows returns success with no thrown error) — none
+of these five return a boolean a caller can check. Found during account-deletion
+wrap-up (2026-10-22); not fixed yet. `deleteCookEvent` was the sixth — RESOLVED
+2026-10-25 as part of the cook-posts pre-delete storage sweep work below; it now
+returns `boolean` like `deleteSavedRecipe`.
+
+**(Relocated from CLAUDE.md Standing Cleanup's TypeScript-baseline note,
+2026-11-14 doc trim.)**
+**Baseline errors are not noise by default — one (`Occasions.tsx`'s un-awaited
+`saveOccasion` call, previously counted as harmless baseline) turned out to be a
+real launch-blocking bug** (first-tap create-menu silently failing; fixed
+2026-09-24, merge `d62b107`). Treat each baseline error as a possible real bug
+until checked, not a number to wave away.
+
+**(Relocated from CLAUDE.md Standing Cleanup's TypeScript-baseline note,
+2026-11-14 doc trim, second pass.)** The baseline count has drifted repeatedly
+across past sessions (31 → 40 → 29 → 12) before settling at 4 on `main` as of
+2026-11-14 (`bunx tsc --noEmit | grep -c "error TS"` on `main` HEAD `ba5e4ff`).
+Treat any documented count, including this one, as a snapshot only — re-run
+`bunx tsc --noEmit` yourself before trusting it.
 
 ---
 
@@ -3254,6 +3380,14 @@ it now reads "Your list is empty — add ingredients from a recipe, or jot down 
 own." (was "nothing here yet — pour something open.", flagged as confusing rather
 than charming and replaced with plain, direct wording). See "First-Impression
 Polish" in FEATURE_SPECS.md.
+
+**(Relocated from CLAUDE.md Standing Cleanup, 2026-11-14 doc trim.)**
+**`ai-chat` trusts a client-supplied `userId` for its `llm_usage` insert** instead
+of deriving identity from the verified JWT — even though `ai-chat` now requires a
+signed-in caller (see AI Layer in CLAUDE.md), the `llm_usage` insert still uses the
+request body's `user_id` field rather than the verified caller identity from
+`auth.getUser()`, so a client can still attribute usage-metering rows to any user
+id it sends. Found during account-deletion wrap-up (2026-10-22); not fixed yet.
 
 ---
 
@@ -3580,6 +3714,15 @@ line-number reference in this doc.
 - **The legacy-link "View in app" path (bare `/` href, no `?share=` token) was not
   device-tested** as part of this feature's verification — only the snapshot-share
   path (`?share={token}`) was exercised end-to-end on a real phone before merge.
+
+**(Relocated from CLAUDE.md Architecture/SSR, 2026-11-14 doc trim.)**
+**"View in app" and share-to-save.** "View in app" carries `?share={token}`
+(relative href) for snapshot shares; legacy links keep the bare link. A snapshot
+may carry `sharerName`/`showSharer`; when `showSharer` is `false` the name must
+never render or backfill from `profiles` — that fallback applies ONLY to legacy
+snapshots with no `showSharer` key, never an explicit opt-out. Share-to-save
+saves are deliberately separate from the A2A send system — no `recipe_sends`,
+`connections`, or `notifications` row.
 
 ---
 
@@ -4190,6 +4333,14 @@ feature ever saves a recipe without showing that preview first, it must add
 its own `scanRecipeDraftForBig9` call — do not assume the gate is enforced
 anywhere it isn't explicitly called.
 
+**(Relocated from CLAUDE.md Standing Cleanup, 2026-11-14 doc trim.)**
+**`handleChipClick` calls `runAllergyGatedGeneration` inside an un-awaited IIFE**
+(`(async () => { await runAllergyGatedGeneration(...) })()`, App.tsx) —
+pre-existing. The gate itself still runs to completion (its own internal
+try/catch is unaffected), but `handleChipClick` returns before that resolves, so
+any future logic added after the chip-tap call would NOT be ordered after
+generation. Found during Voice Input docs pass (2026-10-24); not fixed.
+
 ## Voice Input (Build)
 
 (Session, 2026-10-24 — `feature/voice-input`, merged to `main`)
@@ -4253,3 +4404,192 @@ branch, not local dev. Verified on iPhone Safari on both input surfaces:
 dictate/edit/send, mic-permission-denied messaging, 60-second auto-stop, and
 the allergy gate still catching a dictated allergen-containing request
 exactly as it does a typed one.
+
+---
+
+## Update vs Save-as-New (Recipe Origin Tracking)
+
+**(Relocated from CLAUDE.md, 2026-11-14 doc trim — this section moved here in
+full; the three Load-Bearing Contracts index pointers in CLAUDE.md that used to
+say "CLAUDE.md (below)" now point here.)**
+
+`RecipeDraft` carries an optional `sourceId?: string` AND an optional
+`sourceTitle?: string`. `sourceId` is set in `transferToRecipeChat` from the source
+recipe's id when a saved recipe is loaded via chat-from-recipe; `sourceTitle` is set
+alongside it, snapshotting the origin recipe's title at chat launch. Both are
+internal state only — NOT in `recipeToXML`, NOT sent to the AI.
+
+**Binding invariant: `sourceId` and `sourceTitle` always move together** — set
+together, carried together, cleared together, re-anchored together. They are written
+in exactly three places: `transferToRecipeChat` (initial set), `parseRecipeFromAIResponse`
+(carry-forward or clear — see below), and `onUpdateRecipe`'s re-anchor step (after a
+successful write). There is no path where one survives without the other; do not
+introduce one.
+
+**Anchor severs on dish drift (data-loss fix).** Every AI turn wholesale-replaces
+`title`/`description`/`ingredients`/`steps` with no field-level merge. Inside
+`parseRecipeFromAIResponse`, the newly-parsed title is compared against `sourceTitle`
+— case-insensitive, trimmed, **exact match only** (deliberately no fuzzy matching, no
+ingredient-overlap heuristic, no AI call). On a match, `sourceId`/`sourceTitle` carry
+forward unchanged. On a mismatch, both are dropped together, so the save sheet falls
+back to the standard save flow instead of offering an overwrite. This is the fix for
+a production bug where building an unrelated dish mid-chat (e.g. asking about a saved
+"Spanish Pork" recipe, having the AI build a "Broccolini" dish instead) let the user
+tap "Overwrite" and destroy the original recipe — the button named one dish, the
+write target was a different row. **Design bias, do not "improve": intentionally
+biased toward severing.** A false "new dish" (anchor lost when it was really the same
+dish) is a harmless inconvenience — the user sees "save as new" instead of "update."
+A false "evolution" (anchor kept for a genuinely different dish) is permanent data
+loss. The exact-match rule is deliberate, not lazy.
+
+At save: if `sourceId` is present, the save sheet shows a two-button choice (Update
+[name] / Save as new) instead of the category picker; absent → normal flow. The
+**Update** button label reads `sourceTitle` (the recipe that would be destroyed), not
+`currentRecipe.title` (the recipe being written) — label and write target now always
+name the same row. Tapping Update opens a confirmation modal (built on the existing
+centered-card confirm pattern used by delete/refresh) before anything is written:
+different names → "Replace X with Y? X will be permanently overwritten. This can't be
+undone."; same name → "Overwrite X? Your saved X will be permanently replaced with
+this version. This can't be undone." Confirm proceeds with the existing
+`onUpdateRecipe` write; Cancel/backdrop returns to the choice sheet, writing nothing.
+`onUpdateRecipe` overwrites in place via `updateSavedRecipe`, keeps categories, and
+re-anchors `sourceId`/`sourceTitle` to the recipe as just written. `sourceTitle` is
+kept strict DB-truth — it is intentionally NOT synced when a save-as-new sibling is
+renamed, so the confirm modal can never claim a false title match. **Save-as-new**
+inserts via `saveRecipe` and deliberately leaves `sourceId`/`sourceTitle` on the
+original base, untouched by this fix, so multiple siblings can be spun off one base in
+a single chat (swappable F&F bet). Edge case: origin deleted mid-chat → silent
+fallback to save-as-new.
+
+**`updateSavedRecipe` is a KNOWN TROUBLE FUNCTION — shared by BOTH the chat-edit
+Update path AND AddYourOwn (Write Your Own) edit. Any change to it touches both flows
+— always test both.** It produced multiple bugs, including two live production
+data-loss bugs now fixed: (a) ingredient INSERT was missing `user_id` → RLS wipe of
+ingredients on any Write-Your-Own edit; (b) a stale `isEdit` numeric-type check in
+AddYourOwn routed edits to INSERT, duplicating the recipe instead of updating.
+Current guards in `updateSavedRecipe`: `user_id` on ingredient writes; best-effort
+restore on partial insert failure (NOT ACID — Supabase client has no transaction
+control); empty-array gate (`&& length > 0`) so a delete never fires without an
+insert; post-update fetch reads category via the `recipe_categories` join (there is
+no `recipes.category` column). `onUpdateRecipe` lives inside Cook — use only Cook
+props there, never App-level setters (that scope error caused a duplicate-on-save).
+
+---
+
+## Recipe List Cache (Option 2) — RecipePicker Double-Mount Detail
+
+**(Relocated from CLAUDE.md Architecture/SSR, 2026-11-14 doc trim.)**
+
+**Recipe List cache (Option 2).** Recipe data lives in App.tsx, not the list
+component: `recipesByCategory` state (keyed by category); `ensureRecipesLoaded()`
+fetches/caches before nav and on list mount when empty; `clearRecipeCache()`
+invalidates on save/edit/delete; the list re-fetches via a useEffect dependency on
+`recipesByCategory[categoryKey]`. **`RecipePicker.tsx` also reads from this same
+cache** (passed down as props) rather than fetching independently — its category
+view genuinely double-mounts on every tap (not the Lovable dev-only double-mount
+in CLAUDE.md's Architecture/SSR section): the body ternary swaps from a single
+`ViewContent` to a transitioning pair of `ViewLayer`s and back to a fresh
+`ViewContent` once the transition ends, so the tapped category's list mounts once
+inside the transition's `ViewLayer` and again inside the post-transition
+`ViewContent`. Reading from the shared cache means the second mount reuses
+already-fetched data instead of re-fetching or flashing blank.
+
+---
+
+## Cooking Feed (Build History, superseded by Dishes & Menus v1.5)
+
+**(Relocated from CLAUDE.md Standing Cleanup, 2026-11-14 doc trim — these six
+entries are presented in their original CLAUDE.md order. The feature they
+describe shipped, then was superseded 2026-11-02 through 2026-11-13 by the
+Dishes & Menus "groupings" rework documented in `docs/features/dishes-and-menus.md`;
+this section is kept as build history, not current-state guidance.)**
+
+**Cooking Feed v1 SHIPPED to production (Oct 26, 2026), single-recipe posts;
+superseded 2026-11-02 through 2026-11-13 by the Dishes & Menus v1.5 "groupings"
+rework — multi-recipe dishes and menus are live, not future work.** Data model:
+`groupings` (`kind` = `recipe`/`dish`/`menu`, immutable) + `grouping_parts`;
+`cook_posts` now holds a frozen `grouping_snapshot` JSONB per post instead of a
+single-recipe snapshot; `save_grouping_from_post`/`add_recipe_to_library` are the
+save-from-feed RPCs; `recipes.in_library` hides a dish/menu-sourced recipe from
+the library until promoted. The old Menus feature (`Occasions`/`Menus`/
+`MenuInterior`/`RecipePicker` screens and every chat/save-flow "add to menu" step)
+was retired 2026-11-13 — `occasions`/`menus`/`menu_recipes` tables remain in the
+DB, empty, pending a later cleanup. Full detail: `docs/features/dishes-and-menus.md`.
+Open items still outstanding: migration-history tidy-up (these migrations were
+hand-applied via `supabase db query --linked`, not `supabase db push`, so the
+CLI's migration-history bookkeeping doesn't know about them), and the Home
+rethink / removing the temporary "Cook feed (preview)" Home link.
+
+**Cooking Feed — Step 1 (post a cook) complete, 2026-10-24.** "Log cook" moved to
+the card header (under rating, or under description if no rating); the Log Cook
+sheet has a "Post publicly" toggle at the top with an optional cook photo beneath
+it (private `cook-photos-private` bucket, signed URLs only). `postCook`/`unpostCook`
+write/clear the `cook_posts` row; History shows a "Posted" marker; "Remove post"
+lives in the edit sheet; delete sweeps (`deleteCookEvent`/`deleteSavedRecipe`)
+abort on storage failure instead of leaving orphans; retries can't create a
+duplicate cook.
+
+**Cooking Feed — Step 2a (read path) complete, 2026-10-25.** `get_cook_feed`/
+`get_cook_post` (migration `20261025000003_get_cook_feed_and_get_cook_post.sql`)
+are the sole read path into `cook_posts` beyond its owner-only RLS (unchanged:
+`cook_posts_select_own`/`cook_posts_insert_own`/`cook_posts_delete_own`, still no
+UPDATE policy) — both `SECURITY DEFINER`, `set search_path = public`,
+`authenticated`-only (explicit revoke from `public` and `anon`, matching
+`get_suggested_recipe`'s hardened pattern). `get_cook_feed` is newest-first,
+keyset-paginated on `(created_at, id)`, capped server-side at 50; `get_cook_post`
+returns one post's full frozen `recipe_snapshot` for tap-through. Poster name
+fallback: `display_name` → `'@' || handle` → `'A Tipsy Dinner cook'`. **Feed scope
+is GLOBAL for v1 (founder decision, 2026-10-25) — any authenticated user sees
+every posted cook; connections-scoped is a deferred, separate future project, not
+an oversight.** **No block/report mechanism exists in v1 (founder decision,
+2026-10-25)** — accepted for now; the founder removes problem posts manually via
+the Supabase dashboard.
+
+**Cooking Feed — card redesign, 2026-10-25.** `CookFeedCard` (`CookFeed.tsx`)
+dropped the compact/thumbnail layout for a single image-forward layout matching
+the top half of Recipe Card/`ExpandedRecipeOverlay`: headline, a large photo
+whenever `photo_url` exists (cook- and recipe-sourced photos now render
+identically; `photo_source` no longer branches layout), the recipe's description
+(migration `20261025000006_get_cook_feed_add_recipe_description.sql` added
+`get_cook_feed`'s `recipe_description`, extracted from the frozen
+`recipe_snapshot`'s own `description` key — same `SECURITY DEFINER`/`search_path`/
+grant settings restated, `get_cook_post` untouched), and the poster's note
+(quoted, divider-set-off from the description so it doesn't visually blend with
+it). **No inspired-by credit line on feed cards — deliberate (founder decision,
+2026-10-25): it would expose a third party's name publicly on a global-scope
+feed.** Also moot today regardless: the frozen `recipe_snapshot` shape
+(`RecipeSendSnapshot`) has no inspired-by key at all — `postCook`'s `recipes` read
+never fetches `inspired_by_name` — so there is currently no data to show even if
+the privacy decision were reversed. **Step 2b (the feed screen itself) exists
+now** — these functions are called by `CookFeedScreen`/`CookPostDetailScreen`.
+
+**RESOLVED (2026-10-25) — app-level pre-delete storage sweep for `cook_posts`.**
+`cook_posts.cook_event_id`/`recipe_id` are `ON DELETE CASCADE` (migration
+`20261025000001_cook_posts_feed_v1.sql`, applied 2026-10-25), but Postgres
+cascades never touch object storage. `deleteCookEvent` (`data.ts`) now deletes
+that event's live photo (`cook-photos-private` bucket,
+`{userId}/cook-{cookEventId}.jpg`) and its at-most-one `cook_posts` row's frozen
+photo (`recipe-photos` bucket, `{userId}/post-{postId}.jpg`) BEFORE the DB delete
+runs, and aborts (returns `false`, deletes nothing) if either removal fails;
+`deleteSavedRecipe` does the same sweep across every `cook_events` row for that
+recipe before deleting the recipe. `deleteCookEvent` also now returns `boolean`
+(was `void`) — fixed its place on the "five (was six) unchecked deletes" item in
+"Menus & Recipe-Delete Hardening" in FEATURE_SPECS.md; its one call site
+(`App.tsx`'s `handleDeleteLog`) checks it and surfaces a retry-the-delete error
+instead of optimistically updating state. Still NOT fixed: the separate,
+pre-existing gap that a recipe's own hero photo (`{userId}/{recipeId}.jpg`) is
+never swept on recipe delete (see "Recipe Photos" in FEATURE_SPECS.md) — out of
+scope for this change.
+
+**RESOLVED (2026-10-24, deployed) — account-deletion storage sweep now covers
+`cook-photos-private`.** `supabase/functions/delete-account/index.ts`'s
+`STORAGE_BUCKETS` list was extended to include `cook-photos-private` (added
+alongside `cook_posts`, migration `20261025000001_cook_posts_feed_v1.sql`) — the
+function's existing generic one-level-deep `{uid}/` sweep loop needed no other
+change. The DB rows (`cook_events.photo_url`) are already removed by
+`delete_user_account_data` (migration
+`20261025000002_delete_user_account_data_add_cook_posts.sql`, applied
+2026-10-25); this closes the matching storage-only gap. Founder approved this
+specific deploy 2026-10-24; `supabase functions deploy delete-account` has been
+run against the linked project — the live function now includes the
+`cook-photos-private` sweep.
