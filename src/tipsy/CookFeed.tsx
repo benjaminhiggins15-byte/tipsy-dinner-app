@@ -296,23 +296,23 @@ export function CookFeedScreen({
             style={{
               display: "inline-flex",
               alignItems: "center",
-              gap: 6,
-              height: 44,
-              padding: "0 16px",
-              borderRadius: 999,
+              gap: 4,
+              height: 32,
+              padding: "0 12px",
+              borderRadius: 16,
               background: "#233C00",
               border: "none",
               color: "#FEE7C0",
               fontFamily: fontSans,
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: "0.08em",
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.06em",
               textTransform: "uppercase",
               cursor: "pointer",
               flexShrink: 0,
             }}
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FEE7C0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FEE7C0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
