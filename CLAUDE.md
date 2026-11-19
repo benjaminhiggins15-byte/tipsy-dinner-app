@@ -258,6 +258,16 @@ new full-height bottom sheet or overlay should use the same `fixed` pattern from
 start. Someday cleanup: make the nav-bar clearance not hard-coded so this class of
 bug can't recur.
 
+**Bottom-nav structure & touch points.** Five tabs, in order: Home · Build ·
+Recipes · Grocery · Feed (`TAB_ORDER`, App.tsx ~716). Feed replaced Profile,
+2026-11-18; Account is no longer a tab — it's a pushed screen
+(`push({ name: "profile" })`) opened from an initials `Avatar` in Home's header.
+Changing the tab set touches ~7-8 places that are NOT derived from one another
+and must be edited in lockstep: `TAB_ORDER`, `BottomTabBar`'s own inline `tabs`
+array (icon/label), the `TabId` union, the `tabStacks` literal in three places
+(initial state, sign-out reset, dev reset-onboarding), and the non-aliased
+duplicate `TabId`-shaped union in `Home.tsx`'s `switchToTab` prop type.
+
 **Lovable double-mount.** Built in Lovable → components mount twice in dev
 (StrictMode-equivalent). All async fetches use the ignore-flag pattern:
 ```javascript
