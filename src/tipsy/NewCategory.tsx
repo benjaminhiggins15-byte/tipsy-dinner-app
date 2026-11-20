@@ -1,5 +1,5 @@
 import { useState, useEffect, type CSSProperties, type KeyboardEvent } from "react";
-import { categories, saveCustomCategory, updateCustomCategory, deleteCustomCategory, findCustomCategory, type CustomCategory } from "./data";
+import { categories, saveCustomCategory, updateCustomCategory, findCustomCategory, type CustomCategory } from "./data";
 
 const C = {
   bg: "#FAF7F2",
@@ -27,8 +27,8 @@ export default function NewCategory({ back, onSaved, editKey, onEditSaved, onDel
   const isEdit = !!editKey;
   const [name, setName] = useState("");
   const [nameErr, setNameErr] = useState(false);
+  const [saveErr, setSaveErr] = useState(false);
   const [gradientIdx, setGradientIdx] = useState(0);
-  const [showDelete, setShowDelete] = useState(false);
   const [loading, setLoading] = useState(false);
 
   // Load existing category if editing
@@ -51,12 +51,17 @@ export default function NewCategory({ back, onSaved, editKey, onEditSaved, onDel
       setNameErr(true);
       return;
     }
+    setSaveErr(false);
     setLoading(true);
     try {
       const trimmed = name.trim();
       const gradient = categories[gradientIdx].gradient;
       if (isEdit && editKey) {
-        await updateCustomCategory(editKey, trimmed, gradient);
+        const ok = await updateCustomCategory(editKey, trimmed, gradient);
+        if (!ok) {
+          setSaveErr(true);
+          return;
+        }
         onEditSaved?.(trimmed);
       } else {
         const cat = await saveCustomCategory(trimmed, gradient);
@@ -64,6 +69,7 @@ export default function NewCategory({ back, onSaved, editKey, onEditSaved, onDel
       }
     } catch (error) {
       console.error('Error saving category:', error);
+      setSaveErr(true);
     } finally {
       setLoading(false);
     }
@@ -97,32 +103,35 @@ export default function NewCategory({ back, onSaved, editKey, onEditSaved, onDel
 
         <div style={{ marginBottom: 18 }}>
           <Label>Category name</Label>
-          <NameInput value={name} onChange={(v) => { setName(v); if (v.trim()) setNameErr(false); }} onEnter={trySave} placeholder="e.g. French, BBQ, Pasta" />
+          <NameInput value={name} onChange={(v) => { setName(v); if (v.trim()) setNameErr(false); if (saveErr) setSaveErr(false); }} onEnter={trySave} placeholder="e.g. French, BBQ, Pasta" />
           {nameErr && <ValMsg>Please give your category a name.</ValMsg>}
+          {saveErr && <ValMsg>Couldn't save changes. Please try again.</ValMsg>}
         </div>
 
-        <div style={{ marginBottom: 18 }}>
-          <Label>Choose a style</Label>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
-            {categories.map((c, i) => {
-              const selected = i === gradientIdx;
-              return (
-                <button
-                  key={c.key}
-                  onClick={() => setGradientIdx(i)}
-                  aria-label={`Style ${i + 1}`}
-                  style={{
-                    width: "100%", aspectRatio: "1 / 1",
-                    borderRadius: 12, cursor: "pointer", padding: 0,
-                    background: c.gradient,
-                    border: selected ? `2px solid ${C.green}` : "2px solid transparent",
-                    boxSizing: "border-box",
-                  }}
-                />
-              );
-            })}
+        {!isEdit && (
+          <div style={{ marginBottom: 18 }}>
+            <Label>Choose a style</Label>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+              {categories.map((c, i) => {
+                const selected = i === gradientIdx;
+                return (
+                  <button
+                    key={c.key}
+                    onClick={() => setGradientIdx(i)}
+                    aria-label={`Style ${i + 1}`}
+                    style={{
+                      width: "100%", aspectRatio: "1 / 1",
+                      borderRadius: 12, cursor: "pointer", padding: 0,
+                      background: c.gradient,
+                      border: selected ? `2px solid ${C.green}` : "2px solid transparent",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
 
         <div style={{ flex: 1 }} />
 
@@ -133,79 +142,7 @@ export default function NewCategory({ back, onSaved, editKey, onEditSaved, onDel
           letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer",
           marginTop: 8,
         }}>{isEdit ? "Save changes" : "Save category"}</button>
-
-        {isEdit && (
-          <button onClick={() => setShowDelete(true)} style={{
-            width: "100%", background: "transparent", color: "#B85C5C",
-            border: "none", padding: "12px",
-            fontFamily: fontSans, fontSize: 12, fontWeight: 500,
-            letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer",
-            marginTop: 4,
-          }}>Delete category</button>
-        )}
       </div>
-
-      {isEdit && showDelete && (
-        <div
-          onClick={() => setShowDelete(false)}
-          style={{
-            position: "absolute", inset: 0, background: "rgba(35,60,0,0.6)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            zIndex: 10, padding: 24,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: C.bg, borderRadius: 16, padding: "24px 20px",
-              width: "100%", maxWidth: 280, display: "flex", flexDirection: "column",
-              gap: 8, border: `1px solid ${C.inputBorder}`,
-            }}
-          >
-            <div style={{ fontFamily: fontDisplay, fontSize: 24, color: C.green, fontWeight: 400, textAlign: "center", textTransform: "uppercase", lineHeight: 1.2 }}>
-              Delete this category?
-            </div>
-            <div style={{ fontFamily: fontSans, fontSize: 13, color: C.mutedText, textAlign: "center", marginBottom: 12 }}>
-              This will also remove all recipes saved to this category. This can't be undone.
-            </div>
-            <button
-              onClick={() => setShowDelete(false)}
-              style={{
-                width: "100%", padding: "12px", borderRadius: 10,
-                background: "transparent", border: `1px solid ${C.inputBorder}`,
-                color: C.green, fontFamily: fontSans,
-                fontSize: 13, fontWeight: 500, cursor: "pointer",
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={async () => {
-                if (editKey) {
-                  setLoading(true);
-                  try {
-                    await deleteCustomCategory(editKey);
-                    setShowDelete(false);
-                    onDeleted?.();
-                  } catch (error) {
-                    console.error('Error deleting category:', error);
-                  } finally {
-                    setLoading(false);
-                  }
-                }
-              }}
-              style={{
-                width: "100%", padding: "12px", borderRadius: 10,
-                background: "#B85C5C", border: "none",
-                color: "#FAF7F2", fontFamily: fontSans,
-                fontSize: 13, fontWeight: 500, cursor: "pointer",
-              }}
-            >
-              Delete
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

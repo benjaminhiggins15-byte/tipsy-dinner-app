@@ -2746,6 +2746,16 @@ function Recipes({
             </svg>
           </button>
           <button
+            onClick={() => push({ name: "editcategory", categoryKey })}
+            aria-label="Edit category"
+            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(35,60,0,0.5)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+            </svg>
+          </button>
+          <button
             onClick={() => setConfirmDelete(true)}
             aria-label="Delete category"
             style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
