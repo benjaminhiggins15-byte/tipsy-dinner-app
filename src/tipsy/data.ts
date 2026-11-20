@@ -1122,23 +1122,32 @@ export async function deleteCustomCategory(key: string): Promise<void> {
   }
 }
 
-export async function updateCustomCategory(key: string, name: string, gradient: string): Promise<void> {
+export async function updateCustomCategory(key: string, name: string, gradient: string): Promise<boolean> {
   const userId = await getCurrentUserId();
   if (!userId) {
     console.error('Cannot update category: no user session');
-    return;
+    return false;
   }
 
   try {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('categories')
       .update({ name })
       .eq('id', key)
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .select('id');
 
     if (error) throw error;
+
+    if (!data || data.length === 0) {
+      console.error('Update category matched 0 rows (id/user_id mismatch or already deleted):', key);
+      return false;
+    }
+
+    return true;
   } catch (error) {
     console.error('Error updating category:', error);
+    return false;
   }
 }
 
