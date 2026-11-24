@@ -3730,7 +3730,7 @@ export async function deleteCookEvent(eventId: string): Promise<boolean> {
 // photo it JUST copied, if the write that was supposed to reference it then
 // failed — never anything for a photo-copy failure to roll back, since
 // nothing durable existed yet at that point.
-export async function postCook(cookEventId: string): Promise<{ postId: string } | null> {
+export async function postCook(cookEventId: string): Promise<{ postId: string; photoFailed: boolean } | null> {
   const userId = await getCurrentUserId();
   if (!userId) {
     console.error('Cannot post cook: no user session');
@@ -3927,7 +3927,8 @@ export async function postCook(cookEventId: string): Promise<{ postId: string } 
       if (insertError) throw insertError;
     }
 
-    return { postId };
+    const photoFailed = !!(sourceBucket && sourcePath) && !photoWasCopied;
+    return { postId, photoFailed };
   } catch (error) {
     console.error('Error posting cook (the cook event itself remains saved):', error);
     if (photoWasCopied && destPath) {
@@ -5050,6 +5051,11 @@ export type LogGroupingCookInput = {
 
 export type LogGroupingCookResult = {
   postId: string;
+  // True iff a photo was supplied but didn't end up attached to what the
+  // user will actually see (the public copy when isPosted, else the private
+  // upload) — lets the caller show a non-blocking notice without changing
+  // the soft-fail behavior itself.
+  photoFailed: boolean;
 };
 
 // Dish/menu analog of postCook — but unlike the recipe-kind path (which logs
@@ -5143,7 +5149,8 @@ export async function logGroupingCook(
       console.error('Logged cook but failed to bump groupings.updated_at (list ordering may lag):', touchError);
     }
 
-    return { postId };
+    const photoFailed = !!input.photoFile && (input.isPosted ? !publicPhotoCopied : !privatePhotoUploaded);
+    return { postId, photoFailed };
   } catch (error) {
     console.error('Error logging grouping cook (nothing was saved):', error);
     if (publicPhotoCopied) {

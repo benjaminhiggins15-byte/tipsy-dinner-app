@@ -170,7 +170,8 @@ export default function LogGroupingCookSheet({
       return;
     }
     logEvent("cook_logged", { grouping_id: groupingId });
-    onLogged(isPosted ? "Posted" : "Cook logged");
+    const message = isPosted ? "Posted" : "Cook logged";
+    onLogged(result.photoFailed ? `${message}, but the photo couldn't be attached.` : message);
   }
 
   return (

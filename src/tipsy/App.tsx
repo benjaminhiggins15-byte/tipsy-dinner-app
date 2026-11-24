@@ -3871,9 +3871,10 @@ function RecipeCard({
       // a retried Save after this step previously failed (the blob survives
       // that failure; it's only cleared on success or by closeLogSheet). The
       // cook event above is already durably saved regardless of what happens
-      // here. A failure must never post: the user picked their own photo, so
-      // silently posting without it (or falling back to the recipe's photo)
-      // would show something other than what they chose.
+      // here. Mirrors logGroupingCook's soft-fail: a photo failure must never
+      // block the save or the post below — it just posts/saves photoless,
+      // surfaced via a toast after the sheet closes (photoFailed below).
+      let photoFailed = false;
       if (pendingCookPhotoBlob && savedEventId) {
         try {
           const { path, version } = await uploadCookPhoto(savedEventId, pendingCookPhotoBlob);
@@ -3883,13 +3884,8 @@ function RecipeCard({
           );
           clearPendingCookPhoto();
         } catch (err) {
-          setCookPhotoError(
-            err instanceof Error
-              ? `Cook saved, but the photo didn't upload (${err.message}). It wasn't posted.`
-              : "Cook saved, but the photo didn't upload. It wasn't posted."
-          );
-          setSavingLog(false);
-          return;
+          photoFailed = true;
+          console.error("Cook photo upload failed (cook will be saved/posted photoless):", err);
         }
       }
 
@@ -3905,6 +3901,7 @@ function RecipeCard({
           setPostError(true);
           return;
         }
+        if (result.photoFailed) photoFailed = true;
         const postedId = savedEventId;
         setCookEvents((prev) =>
           prev.map((e) => (e.id === postedId ? { ...e, postId: result.postId } : e))
@@ -3913,6 +3910,13 @@ function RecipeCard({
 
       closeLogSheet();
       onCookLogged?.(!!fromFeed);
+      if (photoFailed) {
+        const msg = logPostPublicly
+          ? "Posted, but the photo couldn't be attached."
+          : "Cook logged, but the photo couldn't be attached.";
+        setIncomingToast(msg);
+        setTimeout(() => setIncomingToast(null), 1800);
+      }
     } catch (err) {
       console.error("Failed to save cook event:", err);
     } finally {
