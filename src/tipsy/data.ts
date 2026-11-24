@@ -3712,6 +3712,14 @@ export async function deleteCookEvent(eventId: string): Promise<boolean> {
 // cook_event_id; existingPost's id (not a fresh randomUUID) becomes the
 // photo destination so the still-CHECK-constrained path stays correct.
 // grouping_snapshot/cook_event_id/cooked_on/user_id are locked by
+// TEMP TEST HOOK (remove before merging post-photo-crop-first to main) —
+// ?forcePhotoFail=1 forces every cook-photo upload/copy path below to throw,
+// so the non-blocking soft-fail toast can be verified on a preview build
+// without needing a real storage failure.
+export function shouldForcePhotoFail(): boolean {
+  return typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('forcePhotoFail') === '1';
+}
+
 // cook_posts_column_lock on UPDATE — a re-post only flips the posting-
 // lifecycle columns (is_posted/posted_at/photo_url/photo_source/score/note),
 // never rebuilds the snapshot.
@@ -3869,6 +3877,7 @@ export async function postCook(cookEventId: string): Promise<{ postId: string; p
     // itself; the post is still written below, just photoless.
     if (sourceBucket && sourcePath) {
       try {
+        if (shouldForcePhotoFail()) throw new Error('Forced photo failure (test hook)');
         const { data: photoBlob, error: downloadError } = await supabase.storage
           .from(sourceBucket)
           .download(sourcePath);
@@ -5092,6 +5101,7 @@ export async function logGroupingCook(
 
     if (input.photoFile) {
       try {
+        if (shouldForcePhotoFail()) throw new Error('Forced photo failure (test hook)');
         const { error: uploadError } = await supabase.storage
           .from('cook-photos-private')
           .upload(privatePath, input.photoFile, { contentType: 'image/jpeg', upsert: true });
