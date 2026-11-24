@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { IconCamera } from "@tabler/icons-react";
 import { logGroupingCook } from "./data";
-import { compressImageFile, UnsupportedImageError } from "./image";
+import { compressImageFile, UnsupportedImageError, type CropRect } from "./image";
 import { logEvent } from "../lib/events";
 import { FONT_SANS, FONT_SERIF_ITALIC, FOREST, CARD_BG, CARD_BORDER, MUTED_TEXT, BODY_BG } from "./DishScreen";
 import { BottomSheet, DragHandle } from "./BottomSheet";
+import { PhotoCropOverlay } from "./PhotoCropOverlay";
 
 // Dishes & Menus v1.5 step 3c — the real "LOG THIS COOK" sheet for a saved
 // dish/menu, replacing the "placeholder" slot step 3a/3b routed to.
@@ -45,16 +47,29 @@ export default function LogGroupingCookSheet({
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [photoProcessing, setPhotoProcessing] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
+  // Raw picked file awaiting the crop step — mounts PhotoCropOverlay the
+  // instant a file is picked, mirroring App.tsx's Cook History flow. Only
+  // the CROPPED result (via compressImageFile(file, cropRect)) ever becomes
+  // photoBlob/photoPreviewUrl, so the in-sheet preview always matches what posts.
+  const [cropFile, setCropFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Mirrors photoPreviewUrl for the unmount-only cleanup below — an effect
+  // with an empty dep array closes over the value from its first render, so
+  // without this ref the cleanup would always see the initial `null` instead
+  // of whatever URL is live when the sheet actually unmounts.
+  const photoPreviewUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    photoPreviewUrlRef.current = photoPreviewUrl;
+  }, [photoPreviewUrl]);
 
   useEffect(() => {
     return () => {
-      if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+      if (photoPreviewUrlRef.current) URL.revokeObjectURL(photoPreviewUrlRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function handleClose() {
@@ -66,14 +81,24 @@ export default function LogGroupingCookSheet({
     fileInputRef.current?.click();
   }
 
-  async function handlePhotoFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  function handlePhotoFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
+    if (file) setCropFile(file);
+  }
+
+  function handleCropCancel() {
+    setCropFile(null);
+  }
+
+  async function handleCropConfirm(cropRect: CropRect) {
+    const file = cropFile;
+    setCropFile(null);
     if (!file) return;
     setPhotoError(null);
     setPhotoProcessing(true);
     try {
-      const compressed = await compressImageFile(file);
+      const compressed = await compressImageFile(file, cropRect);
       if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
       setPhotoBlob(compressed);
       setPhotoPreviewUrl(URL.createObjectURL(compressed));
@@ -86,6 +111,13 @@ export default function LogGroupingCookSheet({
     } finally {
       setPhotoProcessing(false);
     }
+  }
+
+  function handleRemovePhoto() {
+    if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    setPhotoBlob(null);
+    setPhotoPreviewUrl(null);
+    setPhotoError(null);
   }
 
   // Decimal keypad: builds a string left-to-right, at most one decimal
@@ -217,31 +249,50 @@ export default function LogGroupingCookSheet({
               Photo
             </div>
             {photoPreviewUrl ? (
-              <div style={{ position: "relative", width: "100%", aspectRatio: "1 / 1", borderRadius: 18, overflow: "hidden", marginBottom: 8 }}>
+              <div style={{ position: "relative", width: "100%", aspectRatio: "4 / 3", borderRadius: 18, overflow: "hidden", marginBottom: 8 }}>
                 <img src={photoPreviewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-                <button
-                  onClick={handlePhotoClick}
-                  disabled={photoProcessing}
-                  style={{
-                    position: "absolute",
-                    bottom: 10,
-                    right: 10,
-                    padding: "6px 14px",
-                    borderRadius: 999,
-                    background: FOREST,
-                    border: "none",
-                    color: "#FAF7F2",
-                    fontFamily: FONT_SANS,
-                    fontSize: 11,
-                    fontWeight: 700,
-                    letterSpacing: "0.05em",
-                    textTransform: "uppercase",
-                    cursor: photoProcessing ? "not-allowed" : "pointer",
-                    opacity: photoProcessing ? 0.6 : 1,
-                  }}
-                >
-                  {photoProcessing ? "…" : "Change"}
-                </button>
+                <div style={{ position: "absolute", bottom: 10, right: 10, display: "flex", gap: 8 }}>
+                  <button
+                    onClick={handleRemovePhoto}
+                    disabled={photoProcessing}
+                    style={{
+                      padding: "6px 14px",
+                      borderRadius: 999,
+                      background: "rgba(35,60,0,0.5)",
+                      border: "none",
+                      color: "#FAF7F2",
+                      fontFamily: FONT_SANS,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: "0.05em",
+                      textTransform: "uppercase",
+                      cursor: photoProcessing ? "not-allowed" : "pointer",
+                      opacity: photoProcessing ? 0.6 : 1,
+                    }}
+                  >
+                    Remove
+                  </button>
+                  <button
+                    onClick={handlePhotoClick}
+                    disabled={photoProcessing}
+                    style={{
+                      padding: "6px 14px",
+                      borderRadius: 999,
+                      background: FOREST,
+                      border: "none",
+                      color: "#FAF7F2",
+                      fontFamily: FONT_SANS,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: "0.05em",
+                      textTransform: "uppercase",
+                      cursor: photoProcessing ? "not-allowed" : "pointer",
+                      opacity: photoProcessing ? 0.6 : 1,
+                    }}
+                  >
+                    {photoProcessing ? "…" : "Change photo"}
+                  </button>
+                </div>
               </div>
             ) : (
               <button
@@ -269,6 +320,25 @@ export default function LogGroupingCookSheet({
               </button>
             )}
             <input ref={fileInputRef} type="file" accept="image/*" onChange={handlePhotoFileChange} style={{ display: "none" }} />
+            {/* Portaled straight to document.body rather than rendered inline:
+                BottomSheet's own slide-up entrance animates a `transform` on
+                the sheet panel, which (per the CSS spec, and the same trap
+                CLAUDE.md documents for ScreenStage) makes that panel a
+                containing block for `position: fixed` descendants during the
+                animation — an inline overlay could render clipped to the
+                sheet instead of truly full-screen. Portaling sidesteps that
+                regardless of animation timing. The wrapper's own z-index
+                (not PhotoCropOverlay's internal 60, left untouched) is what
+                actually matters here: once portaled, this overlay is a
+                sibling of BottomSheet's own document.body portal (z-index
+                200 for this sheet), so without a higher z-index of its own it
+                would stack BEHIND the sheet instead of over it. */}
+            {cropFile && createPortal(
+              <div style={{ position: "fixed", zIndex: 500 }}>
+                <PhotoCropOverlay file={cropFile} onCancel={handleCropCancel} onConfirm={handleCropConfirm} />
+              </div>,
+              document.body
+            )}
             {photoError && (
               <div style={{ marginBottom: 8, fontFamily: FONT_SANS, fontSize: 12, color: "#B85C5C" }}>{photoError}</div>
             )}
