@@ -333,9 +333,17 @@ export default function LogGroupingCookSheet({
                 actually matters here: once portaled, this overlay is a
                 sibling of BottomSheet's own document.body portal (z-index
                 200 for this sheet), so without a higher z-index of its own it
-                would stack BEHIND the sheet instead of over it. */}
+                would stack BEHIND the sheet instead of over it. The wrapper
+                also needs its own full-viewport opaque backing: this sheet is
+                `sizing="full"` + `bottomInset={0}`, so unlike the app shell
+                (which always has a real 64px tab bar under the overlay's own
+                `bottom: 64`), this sheet's panel — including its "Log cook"
+                footer — extends all the way to the true viewport bottom, with
+                no tab bar to show through that reserved strip. Without this
+                backing, the sheet's footer button showed (and was tappable)
+                in that gap. */}
             {cropFile && createPortal(
-              <div style={{ position: "fixed", zIndex: 500 }}>
+              <div style={{ position: "fixed", inset: 0, zIndex: 500, background: "#FAF7F2" }}>
                 <PhotoCropOverlay file={cropFile} onCancel={handleCropCancel} onConfirm={handleCropConfirm} />
               </div>,
               document.body
