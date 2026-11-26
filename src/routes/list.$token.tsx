@@ -17,13 +17,17 @@ function PublicGroceryListPage() {
     return (
       <div
         style={{
-          minHeight: "100vh",
+          height: "100%",
+          overflowY: "auto",
+          WebkitOverflowScrolling: "touch",
+          overscrollBehavior: "contain",
           background: "#FAF7F2",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
           padding: "24px",
+          paddingBottom: "calc(24px + env(safe-area-inset-bottom))",
         }}
       >
         <div
@@ -108,12 +112,16 @@ function PublicGroceryListPage() {
   return (
     <div
       style={{
-        minHeight: "100vh",
+        height: "100%",
+        overflowY: "auto",
+        WebkitOverflowScrolling: "touch",
+        overscrollBehavior: "contain",
         background: "#FAF7F2",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         padding: "24px",
+        paddingBottom: "calc(24px + env(safe-area-inset-bottom))",
       }}
     >
       <div
